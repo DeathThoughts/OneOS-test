@@ -562,12 +562,13 @@ object PackageSets {
             PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR),
             PackageFile("samcam.tar", FileRole.GUEST_FIX),
             PackageFile("samcam_bar.tar", FileRole.GUEST_FIX),
+            PackageFile("facehal_payload.tar", FileRole.GUEST_FIX),
             // 0.4.70 (r25): Xiaomi's VendorRIL takes a HIDL radio (patches/hyperos_hidl_radio.py; the
             // MediaTek A phones had no SIM, waiting for Xiaomi's AIDL rild).
             PackageFile("xiaomi-opt-telephony_patched.jar", FileRole.FRAMEWORK_JAR),
         ) + (COMMON_PAYLOADS + "bt").map { PackageFile("${it}_payload.img", FileRole.APEX_PAYLOAD) },
         omitted = listOf(TETHERING),
-        approxBytes = 628_211_783L,
+        approxBytes = 668_516_423L,
         hasReturnApp = true,
     )
 

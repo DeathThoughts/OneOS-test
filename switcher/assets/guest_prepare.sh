@@ -2330,6 +2330,20 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
     # /data/local/tmp/facehal. Without it the guest keeps Samsung's HAL.
     FH_SRC=/data/local/tmp/facehal
     FH_DST="$STAGE/data/local/tmp/facehal"
+    FH_TMP=
+    if [ ! -x "$FH_SRC/bin/hw/android.hardware.biometrics.face-service.facehal" ] &&
+       [ -f "$STAGE/facehal_payload.tar" ] && [ ! -L "$STAGE/facehal_payload.tar" ] &&
+       [ -d "$STAGE/data/local/tmp" ]; then
+        FH_TMP="$STAGE/data/local/tmp/.facehal_payload"
+        rm -rf "$FH_TMP"
+        if mkdir -p "$FH_TMP" && $BB tar -xf "$STAGE/facehal_payload.tar" -C "$FH_TMP" 2>/dev/null &&
+           [ -x "$FH_TMP/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
+            FH_SRC="$FH_TMP"
+        else
+            rm -rf "$FH_TMP"
+            FH_TMP=
+        fi
+    fi
     if [ -x "$FH_SRC/bin/hw/android.hardware.biometrics.face-service.facehal" ] && [ -d "$STAGE/data/local/tmp" ]; then
         FH_NEW=0
         for f in bin/hw/android.hardware.biometrics.face-service.facehal \
@@ -2347,6 +2361,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
             echo "HyperOS face: facehal-rs payload staged at /data/local/tmp/facehal ($FH_NEW file(s); Samsung's face HAL refuses the guest's framework)"
         fi
     fi
+    [ -z "$FH_TMP" ] || rm -rf "$FH_TMP"
     # The SIM on a HIDL radio (0.4.70; patches/hyperos_hidl_radio.py): Xiaomi's VendorRIL waited for
     # its AIDL radio forever on the MediaTek A07, A16 4G and A17 ("getRadioServiceProxy wait for rild
     # ready", no SIM: 0.4.67 5357ba6a, d946ff36, c3630d06). Sets from r25 carry the jar; older ones
