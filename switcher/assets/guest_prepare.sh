@@ -2274,6 +2274,9 @@ apm_copy() {
 # after its overlay above; an image with miui-services.jar starts only with
 # both guarded jars in place.
 MIUI_FW="$GUEST_SYSTEM_EXT/framework"
+# The software A2DP marker for guest_props.sh (see apm_a2dp): cleared here, written
+# again below by whichever system's policy copy takes the vendor's Bluetooth module.
+rm -f "$STAGE/guest_bt_sw"
 if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; then
     for j in miui-services apprecovery.proinstaller miui-wifi-service miui-telephony-common; do
         if [ -f "$STAGE/${j}_patched.jar" ] && [ -f "$MIUI_FW/$j.jar" ] && [ ! -L "$MIUI_FW/$j.jar" ]; then
@@ -2456,6 +2459,23 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
     # file> picks the file, ONEOS_GUEST_APM_XML=0 leaves HyperOS's default.
     APM_X="${ONEOS_GUEST_APM_XML:-}"
     APM_A2DP=0
+    APM_SKU_X=""
+    # hyperos_apm_copy <out file>: apm_copy of the chosen file; the SKU file as it
+    # is where the plain file was chosen for the vendor's Bluetooth module and the
+    # copy could not take it.
+    hyperos_apm_copy() {
+        apm_copy "$APM_X" "$1" $APM_A2DP || return 1
+        [ -n "$APM_SKU_X" ] || return 0
+        case "$APM_NOTE" in *"vendor's Bluetooth module"*) return 0 ;; esac
+        APM_X=$APM_SKU_X
+        APM_A2DP=0
+        apm_copy "$APM_X" "$1" 0
+    }
+    # The software A2DP marker, as for the other systems on a Qualcomm phone.
+    hyperos_apm_sw() {
+        [ "$(getprop ro.soc.manufacturer)" = QTI ] || return 0
+        echo module > "$STAGE/guest_bt_sw"
+    }
     if [ "$APM_X" != 0 ] && ! "$BB" grep -rqs 'android.hardware.audio.core' /vendor/etc/vintf/; then
         if [ -z "$APM_X" ]; then
             SKU=$(getprop ro.boot.product.vendor.sku)
@@ -2479,6 +2499,24 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
                 [ -f "$f" ] && { APM_X=$f; break; }
             done
             [ "$APM_X" = /vendor/etc/audio_policy_configuration.xml ] && APM_A2DP=1
+            # The S23 family (SM8550): Qualcomm's SKU file plays A2DP on the primary
+            # module's DSP path, which never starts for a guest there (see apm_a2dp:
+            # "Rx device start failed with status -38"), so HyperOS connected earbuds
+            # and played nothing while the Pixel system played on the same phone
+            # (Galaxy S23 SM-S911B, 0.5.12: the Pixel session got the plain file with
+            # the vendor's Bluetooth module and a software A2DP session; HyperOS got
+            # sku_kalama_qssi's file as it is and kept offload on). HyperOS gets the
+            # same copy the other systems play with. Where that copy cannot take the
+            # module, the SKU file stays (APM_SKU_X). ONEOS_GUEST_APM_BT_MODULE=0 or
+            # ONEOS_GUEST_APM_A2DP=0 keeps the SKU file.
+            if [ -n "$APM_X" ] && [ "$APM_X" != /vendor/etc/audio_policy_configuration.xml ] \
+               && [ -f /vendor/etc/audio_policy_configuration.xml ] \
+               && [ "$(getprop ro.soc.manufacturer)" = QTI ] && [ "$(getprop ro.soc.model)" = SM8550 ] \
+               && [ "${ONEOS_GUEST_APM_A2DP:-1}" = 1 ] && [ "${ONEOS_GUEST_APM_BT_MODULE:-auto}" != 0 ]; then
+                APM_SKU_X=$APM_X
+                APM_X=/vendor/etc/audio_policy_configuration.xml
+                APM_A2DP=1
+            fi
         fi
         APM_D=/vendor/etc/audio
         [ -d "$ROOTFS$APM_D" ] || APM_D=/vendor/etc
@@ -2487,16 +2525,20 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
             echo "!!! WARNING: HyperOS audio policy: no vendor policy file; HyperOS keeps its default (speaker only, no Bluetooth audio)"
         elif mount | grep -q " $ROOTFS$APM_D type overlay"; then
             echo "HyperOS audio policy: overlay on $APM_D already there"
+            if $BB grep -qs "OneOS: Bluetooth A2DP through the vendor's own Bluetooth audio module" "$APM_OV/up/audio_policy_configuration_mi.xml"; then
+                hyperos_apm_sw
+            fi
         else
             mkdir -p "$APM_OV" && { mount | grep -q " $APM_OV " || $BB mount -t tmpfs -o size=2m,mode=755 tmpfs "$APM_OV"; } &&
                 $BB mount --make-private "$APM_OV" 2>/dev/null
             rm -rf "$APM_OV/up" && mkdir -p "$APM_OV/up" &&
-                apm_copy "$APM_X" "$APM_OV/up/audio_policy_configuration_mi.xml" $APM_A2DP &&
+                hyperos_apm_copy "$APM_OV/up/audio_policy_configuration_mi.xml" &&
                 chown -R 0:0 "$APM_OV/up" && chmod 755 "$APM_OV/up" && chmod 644 "$APM_OV/up/audio_policy_configuration_mi.xml"
             $BB chcon -R u:object_r:vendor_configs_file:s0 "$APM_OV/up" 2>/dev/null || true
             if [ -s "$APM_OV/up/audio_policy_configuration_mi.xml" ] &&
                $BB mount -t overlay overlay -o "ro,lowerdir=$APM_OV/up:$ROOTFS$APM_D" "$ROOTFS$APM_D"; then
                 echo "HyperOS audio policy: $APM_X as $APM_D/audio_policy_configuration_mi.xml (no AIDL audio HAL)${APM_NOTE:+; $APM_NOTE}${APM_USB:+; $APM_USB}"
+                case "$APM_NOTE" in *"vendor's Bluetooth module"*) hyperos_apm_sw ;; esac
             else
                 echo "!!! WARNING: HyperOS audio policy: the overlay on $APM_D was refused; HyperOS keeps its default (speaker only, no Bluetooth audio)"
             fi
@@ -2513,7 +2555,6 @@ fi
 # ONEOS_GUEST_APM_A2DP=0 and ONEOS_GUEST_APM_USB=0 together leave the vendor's
 # file; each alone leaves out its own outputs.
 GAPM=/vendor/etc/audio_policy_configuration.xml
-rm -f "$STAGE/guest_bt_sw"
 if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" ] \
    && { [ "${ONEOS_GUEST_APM_A2DP:-1}" = 1 ] || [ "${ONEOS_GUEST_APM_USB:-1}" = 1 ]; } \
    && [ -f "$GAPM" ] && [ -f "$ROOTFS$GAPM" ] && [ ! -L "$ROOTFS$GAPM" ] \

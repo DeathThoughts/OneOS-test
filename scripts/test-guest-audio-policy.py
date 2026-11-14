@@ -199,7 +199,7 @@ PRELUDE = '''
 BB=$R/bin/bb
 mount() { cat "$R/mounts" 2>/dev/null; }
 chown() { :; }
-getprop() { case "$1" in ro.soc.manufacturer) command echo "$SOC_PROP" ;; *) command echo "$SKU_PROP" ;; esac; }
+getprop() { case "$1" in ro.soc.manufacturer) command echo "$SOC_PROP" ;; ro.soc.model) command echo "$SOC_MODEL_PROP" ;; *) command echo "$SKU_PROP" ;; esac; }
 '''
 ADDED = ['OneOS BT A2DP Out', 'OneOS BT A2DP Headphones', 'OneOS BT A2DP Speaker']
 TYPES = ['AUDIO_DEVICE_OUT_BLUETOOTH_A2DP', 'AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES',
@@ -252,7 +252,7 @@ class Fixture:
 
     def run(self, code, env=None, awk=None):
         e = dict(os.environ, R=str(self.r), V=str(self.v), STAGE=str(self.stage), ROOTFS=str(self.rootfs),
-                 MIUI_FW=str(self.miui), SKU_PROP='', SOC_PROP='S.LSI')
+                 MIUI_FW=str(self.miui), SKU_PROP='', SOC_PROP='S.LSI', SOC_MODEL_PROP='')
         e.update(env or {})
         if awk:
             (self.r / 'awkbin').mkdir(exist_ok=True)
@@ -551,6 +551,44 @@ class HyperOS(unittest.TestCase):
         self.assertIn('sku-out', mi)
         self.assertNotIn('OneOS BT A2DP', mi)
         self.assertIn(f'href="{etc}/audio/sku_kalama/audio_policy_volumes.xml"', mi)
+
+    def test_the_s23_family_gets_the_plain_file_with_the_vendors_bluetooth_module(self):
+        """Galaxy S23 (SM8550): the SKU file's A2DP is the primary module's DSP path, which never starts for a
+        guest; the plain file with the vendor's Bluetooth module is what the other systems play with there."""
+        s23 = {'SKU_PROP': 'kalama', 'SOC_PROP': 'QTI', 'SOC_MODEL_PROP': 'SM8550'}
+        sku_line = (f'HyperOS audio policy: {{etc}}/audio/sku_kalama/audio_policy_configuration.xml as '
+                    f'{{etc}}/audio/audio_policy_configuration_mi.xml (no AIDL audio HAL)')
+        with tempfile.TemporaryDirectory() as t:
+            f = Fixture(t, hyperos=True, sku='kalama', **BT_ONLY)
+            etc = f.v / 'etc'
+            lines = f.run(COPY + HYPEROS, env=s23)
+            self.assertEqual([f'HyperOS audio policy: {etc}/audio_policy_configuration.xml as {etc}/audio/audio_policy_configuration_mi.xml '
+                              f'(no AIDL audio HAL); {BT_SAID}'], lines)
+            # The software A2DP marker guest_props.sh reads, as for the other systems.
+            self.assertEqual('module\n', (f.stage / 'guest_bt_sw').read_text())
+            mi = (f.stage / 'hyperos_apm/up/audio_policy_configuration_mi.xml').read_text()
+            self.assertEqual(f'{etc}/{BT_FILE}', list(ET.fromstring(mi).find('modules'))[-1].get('href'))
+            self.assertNotIn('sku-out', mi)
+            self.assertNotIn('OneOS BT A2DP', mi)
+        # The copy cannot take the module (no library for it; no AIDL Bluetooth audio factory), or a switch
+        # is off, or the phone is another Qualcomm one: the SKU file as it is, and no software A2DP marker.
+        for kw, env in (({'includes': {BT_FILE: BT_MODULE}}, s23), ({'bt': HIDL_BT, **BT_ONLY}, s23),
+                        (BT_ONLY, {**s23, 'ONEOS_GUEST_APM_BT_MODULE': '0'}), (BT_ONLY, {**s23, 'ONEOS_GUEST_APM_A2DP': '0'}),
+                        (BT_ONLY, {**s23, 'SOC_MODEL_PROP': 'SM8650'}), (BT_ONLY, {**s23, 'SOC_PROP': 'S.LSI'})):
+            with self.subTest(kw=sorted(kw), env=env), tempfile.TemporaryDirectory() as t:
+                f = Fixture(t, hyperos=True, sku='kalama', **kw)
+                lines = f.run(COPY + HYPEROS, env=env)
+                self.assertEqual([sku_line.format(etc=f.v / 'etc')], lines)
+                mi = (f.stage / 'hyperos_apm/up/audio_policy_configuration_mi.xml').read_text()
+                self.assertIn('sku-out', mi)
+                self.assertNotIn(BT_FILE, mi)
+                self.assertFalse((f.stage / 'guest_bt_sw').exists())
+
+    def test_the_marker_is_only_for_qualcomm(self):
+        with tempfile.TemporaryDirectory() as t:
+            f = Fixture(t, hyperos=True, **A35)
+            f.run(COPY + HYPEROS)
+            self.assertFalse((f.stage / 'guest_bt_sw').exists())
 
     def test_samsungs_own_file_is_the_last_resort(self):
         lines, mi, log, etc, guest = self.prepare(plain=None)
