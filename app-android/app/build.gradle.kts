@@ -73,7 +73,7 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     "infinityx" to (File(repoRoot, "out/overlays_infinityx_r16") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
     // HyperOS image (docs/hyperos.md), made for the Z Fold8 Ultra and Z Fold8, on every phone from 0.4.31: Xiaomi's guarded jars,
     // the signal poll and the image's payloads.
-    "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r28") to listOf("tethering_payload.img")),
+    "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r29") to listOf("tethering_payload.img")),
     // Nothing OS 5.0 (0.4.33), the Z Fold8 Ultra only: its chips need SVE/SME.
     "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r35") to listOf("tethering_payload.img")),
     // OxygenOS 16 (0.4.67, experimental), for the phones on One UI 8 (Android 16): no fold overlays, no

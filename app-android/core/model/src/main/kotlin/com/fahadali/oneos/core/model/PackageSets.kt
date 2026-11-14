@@ -531,10 +531,11 @@ object PackageSets {
     val HYPER_F8U = PackageSet(
         id = ID_HYPER_F8U,
         imageId = Images.ID_HYPEROS_LHASA,
-        sourceDir = "out/overlays_hyperos_r28",
+        sourceDir = "out/overlays_hyperos_r29",
         files = listOf(
             PackageFile("services_patched.jar", FileRole.GUARD_JAR),
             PackageFile("miui-services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("miui-framework_patched.jar", FileRole.GUARD_JAR),
             PackageFile("apprecovery.proinstaller_patched.jar", FileRole.GUARD_JAR),
             // 0.4.57 (r15): also Samsung IMS's framework members (guest_secims_members.py).
             PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
