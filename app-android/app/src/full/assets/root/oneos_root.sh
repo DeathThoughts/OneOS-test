@@ -2102,8 +2102,44 @@ bring_drop() { # <the stage's bring folder, or one folder in it>
 
 # One UI's two data folders of $pkg (a name is_package accepted), read only.
 bring_sources() {
+    if [ -n "${BRING_HOST:-}" ]; then
+        BCE="$BRING_HOST/data/$pkg"
+        BDE="$BRING_HOST/user_de/0/$pkg"
+        return 0
+    fi
     BCE="$PROC/1/root$DATA/data/$pkg"
     BDE="$PROC/1/root$DATA/user_de/0/$pkg"
+}
+
+# During a session One UI's /data/app, /data/data, /data/user_de and the rest of
+# bridges.sh's trees are under the guest's (installd and artd must reach only
+# the guest's), so neither pm nor those paths show One UI's apps: every bring
+# request from inside the guest was "not an installed user app" (Galaxy S23
+# HyperOS, 0.5.15, even with the app in One UI's packages.list). bring-add
+# therefore runs in a mount namespace of its own and reads One UI's apps through
+# a read-only bind of /data without the mounts on it (a non-recursive bind shows
+# the trees under the bridges). The namespace, and the view with it, goes when
+# this process ends; the guest and One UI never see it.
+bring_host_view() {
+    [ -z "$T" ] || return 0
+    # Always a namespace of its own, also when called from one that is not
+    # init's (making the caller's mounts private would change the caller). The
+    # exec keeps the pid, so the step lock stays this process's.
+    find_tools
+    [ -n "$BB" ] || refuse "no busybox at the root manager's paths"
+    if [ "${ONEOS_BRING_NS:-}" != "$$" ]; then
+        [ -f "$0" ] || refuse "bring-add from inside the guest needs the script's own path"
+        ONEOS_BRING_NS=$$ exec "$BB" unshare -m -- /system/bin/sh "$0" bring-add "$1"
+        refuse "could not make a mount namespace of its own"
+    fi
+    "$BB" mount --make-rprivate / 2>/dev/null || refuse "could not make a mount namespace of its own"
+    mkdir_mine "$STAGE/incoming" || die "could not make $STAGE/incoming"
+    BV="$STAGE/incoming/onui_data"
+    [ ! -L "$BV" ] || refuse "${BV#$T} is a link"
+    mkdir -p "$BV" || die "could not make ${BV#$T}"
+    "$BB" mount --bind "$DATA" "$BV" && "$BB" mount -o remount,bind,ro "$BV" || refuse "could not open One UI's data for reading"
+    [ -d "$BV/app" ] || refuse "One UI's app folder is not in the view"
+    BRING_HOST=$BV
 }
 
 # The first line of one of a brought app's mark files, plain characters only
@@ -2162,9 +2198,10 @@ bring_apk_path() { # <a name is_package accepted>
         pm path "$bp" 2>/dev/null </dev/null | sed -n 's/^package://p' | head -n 1
         return 0
     fi
-    awk -v p="$bp" '$1 == p { f = 1 } END { exit !f }' "$DATA/system/packages.list" 2>/dev/null || return 0
+    bd=${BRING_HOST:-$DATA}
+    awk -v p="$bp" '$1 == p { f = 1 } END { exit !f }' "$bd/system/packages.list" 2>/dev/null || return 0
     bn=0; bf=""
-    for b in "$DATA"/app/*/"$bp"-*/base.apk "$DATA"/app/"$bp"-*/base.apk; do
+    for b in "$bd"/app/*/"$bp"-*/base.apk "$bd"/app/"$bp"-*/base.apk; do
         [ -f "$b" ] && [ ! -L "$b" ] || continue
         bn=$((bn + 1)); bf=$b
     done
@@ -2180,7 +2217,7 @@ bring_one() { # <a name is_package accepted>
     # own apps stay on One UI, and the app never offers them).
     first=$(bring_apk_path "$pkg")
     apkdir=""
-    case "$first" in *..*) ;; "$DATA"/app/*/*.apk) apkdir=${first%/*} ;; esac
+    case "$first" in *..*) ;; "${BRING_HOST:-$DATA}"/app/*/*.apk) apkdir=${first%/*} ;; esac
     if [ -z "$apkdir" ] || [ ! -f "$first" ] || [ -L "$first" ]; then
         BRING_WHY="not an installed user app"
         say "@@INFO $pkg: $BRING_WHY, skipped"
@@ -2228,7 +2265,7 @@ bring_one() { # <a name is_package accepted>
         done
     fi
     [ "$lost" = 0 ] || say "@@INFO $pkg: $lost of its data items could not be read; it may ask to sign in"
-    printf '%s\n%s\n' "$(date +%s)" "$first" > "$NEW/stamp" || die "could not write in ${NEW#$T}"
+    printf '%s\n%s\n' "$(date +%s)" "${BRING_HOST:+$DATA}${first#${BRING_HOST:-}}" > "$NEW/stamp" || die "could not write in ${NEW#$T}"
     # The copy brought before goes only now that the new one is whole.
     if ! bring_clearout "$dst"; then
         BRING_WHY="its folder in the stage is not root's own"
@@ -2301,6 +2338,7 @@ do_bring_add() {
     catf="$STAGE/data/oneos_bring_catalog/catalog.tsv"
     [ -f "$catf" ] && [ ! -L "$catf" ] || refuse "no catalog of apps (start this system from the OneOS app)"
     cut -f1 "$catf" | grep -q -x -F "$1" || refuse "$1 is not in the catalog"
+    bring_host_view "$1"
     BRING_LIVE=1
     bring_dirs
     NEW="$STAGE/data/oneos_bring/.incoming"

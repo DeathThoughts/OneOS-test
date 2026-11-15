@@ -217,11 +217,14 @@ class FakeRoot(
 
     fun hostDe(pkg: String) = File(root, "proc/1/root${root.path}/data/user_de/0/$pkg")
 
-    /** A user app installed on One UI: its APKs under data/app (pm path answers with the first) and its two data folders. */
+    /** A user app installed on One UI: its APKs under data/app (pm path answers with the first), its line in packages.list and its two data folders. */
     fun hostApp(pkg: String, apks: List<String> = listOf("base.apk")): File {
         val dir = File(root, "data/app/~~fake/$pkg-1").apply { mkdirs() }
         for (a in apks) File(dir, a).writeText("$pkg $a\n")
         File(root, "pm_paths").appendText("$pkg ${File(dir, apks.first()).path}\n")
+        // One UI's package list: during a session bring-add reads it (pm answers for the guest then).
+        File(root, "data/system").mkdirs()
+        File(root, "data/system/packages.list").appendText("$pkg 10234 0 /data/user/0/$pkg default none 0 1 1 @null\n")
         hostCe(pkg).mkdirs()
         hostDe(pkg).mkdirs()
         return dir
