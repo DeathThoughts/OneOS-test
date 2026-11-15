@@ -309,13 +309,10 @@ object PackageSets {
             PackageFile(ODM_AI, FileRole.GUEST_FIX) +
             // 0.4.97 (r72): the image's SystemUI with wallpaper AOD without OPPO's display-panel HAL
             // (scripts/make-coloros-panoramic-aod.py; bound by guest_prepare.sh).
-            PackageFile("ColorPanoramicSystemUI.apk", FileRole.GUEST_FIX) +
-            // OneOS: the ColorOS SystemUI with the fingerprint glyph at wake and the
-            // unlock wave (switcher/patches/systemui-fingerprint-wave). The set
-            // carries the patched classes3.dex and the repacker; the phone appends
-            // it to the image's stock SystemUI instead of downloading 127 MB.
-            PackageFile("SystemUI_wave.dex", FileRole.GUEST_FIX) +
-            PackageFile("OneOSWaveRepack.dex", FileRole.GUEST_FIX),
+            // TEST BUILD: SystemUI_wave.dex and OneOSWaveRepack.dex (the fingerprint glyph and
+            // wave) are left out of the set until their November build is published; the
+            // scripts skip the wave when the files are absent.
+            PackageFile("ColorPanoramicSystemUI.apk", FileRole.GUEST_FIX),
         omitted = listOf(TETHERING, WALLPAPER_GRID_RRO),
         approxBytes = 634_332_311L + 116_537_002L + 10_193_444L,
         hasReturnApp = true,
