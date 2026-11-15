@@ -135,6 +135,19 @@ class FingerprintReadonlyTest(unittest.TestCase):
             self.assertIn(MARK, self.method(name))
             self.assertIn('return-void', self.method(name))
 
+    def test_receivers_go_through_a_low_register(self):
+        # invoke-interface takes v0-v15 only; ColorOS 17's enroll has p4 at v17.
+        done = self.run_patch()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for name, recv in (('enroll', 'p4'), ('remove', 'p4'), ('removeAll', 'p3')):
+            body = self.method(name)
+            self.assertIn(f'move-object/from16 v2, {recv}', body)
+            self.assertIn('invoke-interface {v2, v0, v1}', body)
+            self.assertNotIn(f'invoke-interface {{{recv}', body)
+        body = self.method('invalidateAuthenticatorId')
+        self.assertIn('move-object/from16 v0, p3', body)
+        self.assertIn('invoke-interface {v0}', body)
+
     def test_null_receivers_are_checked(self):
         done = self.run_patch()
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -205,9 +218,8 @@ class FingerprintReadonlyTest(unittest.TestCase):
         done = self.run_patch()
         self.assertEqual(done.returncode, 0, done.stderr)
         for name in ('enroll', 'remove', 'removeAll'):
-            self.assertIn('    .locals 2\n', self.method(name))
-        self.assertIn('    .locals 1\n', self.method('createTestSession'))
-        for name in ('resetLockout', 'invalidateAuthenticatorId', 'rename'):
+            self.assertIn('    .locals 3\n', self.method(name))
+        for name in ('createTestSession', 'resetLockout', 'invalidateAuthenticatorId', 'rename'):
             self.assertIn('    .locals 1\n', self.method(name))
 
     def test_second_run_is_a_no_op(self):

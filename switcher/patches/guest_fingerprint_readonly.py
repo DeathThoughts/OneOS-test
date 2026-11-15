@@ -74,13 +74,16 @@ METHODS = {
 # and the -1L return value.  Raising .locals is refused when the method already
 # addresses a parameter through an absolute vN register: that would silently
 # change the register mapping of existing code.
+# The receiver is moved into a low register first: invoke-interface takes v0-v15
+# only, and on ColorOS 17's FingerprintService$1 enroll's p4 is v17
+# ("Invalid register: v17" from smali; HyperOS's happened to be v15).
 GUARD_LOCALS = {
-    "enroll": 2,
-    "remove": 2,
-    "removeAll": 2,
+    "enroll": 3,
+    "remove": 3,
+    "removeAll": 3,
     "createTestSession": 1,
     "resetLockout": 0,
-    "invalidateAuthenticatorId": 0,
+    "invalidateAuthenticatorId": 1,
     "rename": 0,
 }
 
@@ -88,9 +91,10 @@ GUARDS = {
     "enroll": """\
     {mark}
     if-eqz p4, :oneos_guest_fp_enroll_null
+    move-object/from16 v2, p4
     const/4 v0, 0x2
     const/4 v1, 0x0
-    invoke-interface {{p4, v0, v1}}, {recv}->onError(II)V
+    invoke-interface {{v2, v0, v1}}, {recv}->onError(II)V
     :oneos_guest_fp_enroll_null
     const-wide/16 v0, -0x1
     return-wide v0
@@ -98,18 +102,20 @@ GUARDS = {
     "remove": """\
     {mark}
     if-eqz p4, :oneos_guest_fp_remove_null
+    move-object/from16 v2, p4
     const/4 v0, 0x2
     const/4 v1, 0x0
-    invoke-interface {{p4, v0, v1}}, {recv}->onError(II)V
+    invoke-interface {{v2, v0, v1}}, {recv}->onError(II)V
     :oneos_guest_fp_remove_null
     return-void
 """,
     "removeAll": """\
     {mark}
     if-eqz p3, :oneos_guest_fp_remove_all_null
+    move-object/from16 v2, p3
     const/4 v0, 0x2
     const/4 v1, 0x0
-    invoke-interface {{p3, v0, v1}}, {recv}->onError(II)V
+    invoke-interface {{v2, v0, v1}}, {recv}->onError(II)V
     :oneos_guest_fp_remove_all_null
     return-void
 """,
@@ -121,7 +127,8 @@ GUARDS = {
     "invalidateAuthenticatorId": """\
     {mark}
     if-eqz p3, :oneos_guest_fp_invalidate_null
-    invoke-interface {{p3}}, {invalidation}->onCompleted()V
+    move-object/from16 v0, p3
+    invoke-interface {{v0}}, {invalidation}->onCompleted()V
     :oneos_guest_fp_invalidate_null
     # The authenticator id is shared with One UI; report completion without rotating it.
     return-void
