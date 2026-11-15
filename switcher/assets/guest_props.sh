@@ -193,6 +193,88 @@ add)
         }
         END { for (j = 0; j < n; j++) print order[j] "=" value[order[j]] }
     ' > "$NEW"
+    # Quiet guest logs when Full session logs is off (ONEOS_FULL_LOGS != 1, the
+    # app's default since 0.5.15). Galaxy S23 ColorOS 17 X9U IN session
+    # cba68d07: logd at 55% of a core on average (100% at peaks) and its
+    # capture's logcat at 40%, against 30%/14% with HyperOS; of 207,000 lines
+    # in the first minutes 151,000 were I, D or V. The comment on Nothing OS
+    # below has One UI's log.tag at E: it is not set at all (Galaxy S25 Ultra
+    # getprop, 11-15: no log.tag, no persist.log.tag; Samsung's own levels are
+    # persist.log.level / persist.log.semlevel, which only Samsung's liblog
+    # reads). The guest runs its own liblog over One UI's property area (the
+    # container has no init or property area of its own, every guest prop lands
+    # in /dev/__properties__ through resetprop) and One UI's logd: with no
+    # level set, __android_log_buf_write's default is VERBOSE and every line
+    # goes out, Java's Log.println too. liblog takes the first value set of
+    # log.tag.<tag>, persist.log.tag.<tag>, log.tag, persist.log.tag (first
+    # letter V D I W E F A S), and drops a line under it in the writer, before
+    # it formats or sends it; logd checks the same again for every line it
+    # gets, event-log entries at I under their tag name. So log.tag=W for the
+    # session (memory only; persist.log.tag would land in the property store
+    # and comes after log.tag anyway): it reaches the guest and the host
+    # daemons still running alike, and from the next line on (liblog's cache
+    # follows the property serials). Not on One UI: a log.tag the guest adds is
+    # blanked by remove; One UI's own, should a phone have one, goes on the
+    # override list and is put back on the return (the remove before One UI's
+    # framework starts). The guest image's own log.tag.* and persist.log.tag.*
+    # under W (userdebug build.prop tuning) would win over the global one for
+    # their tags: left out. The tags OneOS itself reads during a session keep
+    # their level (log.tag.<tag> comes first): the boot status and AOD event
+    # readers (boot_status.sh, guest_start.sh), the audio HAL lines guest_start
+    # waits for, the return's shutdown asker (oneos_switch.sh), sound_watch.log
+    # and the diag snapshots, which are what a report has with Full logs off.
+    # A reader added there needs its tag here. RILJ (signal_polls.txt only)
+    # stays at W: 4,100 debug lines in that session. Userdebug log persistence
+    # (logcatd writing /data/misc/logd): the guest's logcatd.rc never runs,
+    # host init only knows One UI's rc files, but the image's
+    # persist.logd.logpersistd* would ask One UI's init and Settings for it:
+    # left out too. ONEOS_GUEST_LOG_INFO=1 (I, below) wins.
+    # ONEOS_GUEST_QUIET_LOGS=0 (the adb loop only) logs as before.
+    if [ "${ONEOS_FULL_LOGS:-1}" != 1 ] && [ "${ONEOS_GUEST_QUIET_LOGS:-1}" = 1 ]; then
+        if [ "${ONEOS_GUEST_LOG_INFO:-0}" = 1 ]; then
+            echo "guest_props: log level left to ONEOS_GUEST_LOG_INFO for this debug session (Full session logs off)"
+        else
+            ql=$(awk -F= '$1 ~ /^(persist\.)?log\.tag(\..*)?$/ && $2 ~ /^[VvDdIi]/ { n++ } END { print n + 0 }' "$NEW")
+            qp=$(awk -F= '$1 ~ /^(persist\.)?logd\.logpersistd(\..*)?$/ { n++ } END { print n + 0 }' "$NEW")
+            awk -F= '$1 ~ /^(persist\.)?log\.tag(\..*)?$/ && $2 ~ /^[VvDdIi]/ { next }
+                     $1 ~ /^(persist\.)?logd\.logpersistd(\..*)?$/ { next } { print }' "$NEW" > "$NEW.q" &&
+                mv -f "$NEW.q" "$NEW"
+            rm -f "$NEW.q"
+            [ "${ql:-0}" -gt 0 ] && echo "guest_props: $ql of the image's log.tag.* levels under W left out for the session"
+            [ "${qp:-0}" -gt 0 ] && echo "guest_props: the image's persist.logd.logpersistd* left out for the session (no log persistence)"
+            if [ "$(getprop init.svc.logcatd)" = running ]; then
+                echo "guest_props: One UI's own logcatd is running, left alone"
+            fi
+            k=log.tag
+            if grep -qxF "$k" "$HOST"; then
+                hv=$(getprop "$k")
+                case "$hv" in
+                    [WwEeFfAaSs]*) echo "guest_props: $k is One UI's $hv already, kept" ;;
+                    *) echo "$k=$hv" >> "$OVR" && "$RP" -n "$k" W 2>/dev/null &&
+                           echo "guest_props: $k=$hv (One UI's) overridden to W for the session" ;;
+                esac
+            else
+                sed -i '/^log\.tag=/d' "$NEW"
+                echo "$k=W" >> "$NEW"
+            fi
+            for tl in boot_progress_system_run:I boot_progress_pms_start:I boot_progress_pms_ready:I boot_progress_ams_ready:I \
+                      boot_progress_enable_screen:I am_proc_start:I am_proc_died:I power_screen_state:I \
+                      AHAL_SecModulePrimary:V AHAL_Telephony_QTI:V AHAL_StreamBluetooth:D AHAL_BluetoothAudioPort:I audio_hw_a2dp_proxy:I \
+                      OneOS:V ShutdownThread:V ShutdownActivity:V GlobalActions:V RescueParty:V \
+                      Telecom:I Telecom_INCOMING_RINGING:V Ringtone:V RingtoneManager:V VibratorManagerService:V \
+                      VibratorManagerServiceExtImpl:V VibrationThread:V VibrationScaler:V SecVibrator-HAL-AIDL-CORE:V \
+                      AHAL_StreamOut_QTI:D EffectOffloadImpl:V AHAL_EffectFactoryQti:V AHAL_DlbSpatializerEffectImpl:V \
+                      DlbDap2Process:V A2dpStateMachine:I A2dpService:I BTAudioProviderStub_2_1:I \
+                      thermal_core:V TelephonyComponentFactory:V OneOSSignalPoll:V WindowLayoutComponentImpl:V \
+                      ArtService:V OneOSComfortView:V DisplayTransformManager:V; do
+                k=log.tag.${tl%:*}
+                grep -qxF "$k" "$HOST" && continue
+                sed -i "/^$(echo "$k" | sed 's/\./\\./g')=/d" "$NEW"
+                echo "$k=${tl##*:}" >> "$NEW"
+            done
+            echo "guest_props: log level W for the session (Full session logs off)"
+        fi
+    fi
     # Window-level blur (run 31: glass UI flat in places). The Find N6 turns
     # it on in its vendor build.prop, which the GSI does not carry. The guest
     # SurfaceFlinger logged "Disabling blur effects, they are not supported."
@@ -986,10 +1068,10 @@ add)
     fi
     # Chrome draws nothing in the Nothing OS guest: its renderers never start
     # (cr_ChildProcessConn "Failed to establish the service connection" 20
-    # times a page, run 11), while WebView in other apps works. One UI's
-    # log.tag is E, which the guest shares, so ActivityManager and the zygote
-    # said nothing about why. These tags at I for the session only (log.tag.*
-    # is not persistent), Nothing OS guests only, until the cause is known.
+    # times a page, run 11), while WebView in other apps works. ActivityManager
+    # and the zygote said nothing about why (One UI sets no log.tag, see the
+    # quiet logs above). These tags at I for the session only (log.tag.* is
+    # not persistent), Nothing OS guests only, until the cause is known.
     if [ -f "$GSE/framework/nt-telephony-common.jar" ]; then
         # One UI's camera port (run 19: lens switches slow, which camera opens
         # where): the camera service's opens, closes and evictions, and the
@@ -1116,8 +1198,8 @@ add)
     fi
     # ONEOS_GUEST_LOG_INFO=1 (a debug session, off by default): every tag at I
     # for the session, so app-level logs (the camera's RecordingSession, the
-    # activity starts) reach the capture; One UI's own level is E. Restored on
-    # return like every session prop.
+    # activity starts) reach the capture. Restored on return like every
+    # session prop.
     if [ -n "$v" ] && [ "${ONEOS_GUEST_LOG_INFO:-0}" = 1 ]; then
         if grep -qxF log.tag "$HOST"; then
             echo "guest_props: log.tag is One UI's ($(getprop log.tag)), left alone"

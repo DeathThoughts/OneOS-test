@@ -199,6 +199,10 @@ case "${ONEOS_HEAT_CAP:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP=$ONEOS_HEAT_CAP
 # The heat cap's CPU levels (the CPU's own thermal zones): 0 or 1, unset meaning 1.
 case "${ONEOS_HEAT_CAP_CPU:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP_CPU=$ONEOS_HEAT_CAP_CPU (0 or 1)" ;; esac
 case "${ONEOS_FULL_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_FULL_LOGS=$ONEOS_FULL_LOGS (0 or 1)" ;; esac
+# Quiet guest logs with Full session logs off (guest_props.sh, log.tag=W): 0
+# or 1, unset meaning 1. Only the adb loop sets it: the app's session.env has
+# no such key and oneos_root.sh unsets every other ONEOS_* variable.
+case "${ONEOS_GUEST_QUIET_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_QUIET_LOGS=$ONEOS_GUEST_QUIET_LOGS (0 or 1)" ;; esac
 [ "${ONEOS_GUEST_GMS:-1}" = 1 ] && [ "${ONEOS_GUEST_HIDE_GMS:-0}" = 1 ] && [ -f "$STAGE/gmssystem_payload.img" ] &&
     refuse "ONEOS_GUEST_GMS is on (the default) with gmssystem_payload.img staged, and ONEOS_GUEST_HIDE_GMS=1 hides Google services: set one of them to 0"
 # facehal-rs in a HyperOS guest (guest_prepare.sh, guest_start.sh): 0 or 1,
@@ -1158,8 +1162,16 @@ rm -rf "$STAGE/return_keys"
 
 # OneOS: ColorOS components (the launcher among them) only log their info and
 # debug lines with this set. guest_props.sh restore-persist removes it again on
-# return (it is added after the persist snapshot).
-setprop persist.sys.assert.panic true 2>/dev/null
+# return (it is added after the persist snapshot). Only with Full session logs
+# on: OPPO's debug switch for its own logging, and with the capture off nothing
+# reads those lines (Galaxy S23 ColorOS session cba68d07: logd at 55% of a
+# core; guest_props.sh puts the guest at W then). ONEOS_GUEST_QUIET_LOGS=0
+# sets it as before.
+if [ "${ONEOS_FULL_LOGS:-1}" = 1 ] || [ "${ONEOS_GUEST_QUIET_LOGS:-1}" != 1 ]; then
+    setprop persist.sys.assert.panic true 2>/dev/null
+else
+    echo "persist.sys.assert.panic: not set (Full session logs off)"
+fi
 # An app that crashes three times is moved to OPPO's zygote_ocomp, which nothing
 # starts in the container: system_server then polled its socket for 62 s and no
 # app could start (run 28, black home). oplus_boot_hangs.py blocks it as well.

@@ -432,7 +432,8 @@ touch ICs are unknown, so every `fold.*` entry is hidden for `device.form=flip`.
 | `coloros.nav_mode_default` | Gesture navigation: `hide_navigationbar_enable=3` only if unset; never force AOSP overlays | | auto / toggle | `sw:571-581` | activator | run 28: 3-button mode with no buttons | |
 | `coloros.launcher_card_seed` | Launcher start: seed `launcher_support_card_no_padding=1` | | auto / locked | `mp:429-432` | stage | runs 23-25 onCreate hang | |
 | `coloros.log_silence` | Quieter logs: OPPO tags SILENT (PerformanceManager, ProjectManager, SchedAssist, ...) | | auto / toggle | `sw:268-278`; `ret:192-195` | stage | run 32: about 36k lines per 10 min | hides useful errors |
-| `coloros.verbose_logs` | Full ColorOS logs: `persist.sys.assert.panic=true` | | on in test builds / toggle | `sw:245-248` | stage | launcher logs only with it | |
+| `coloros.verbose_logs` | Full ColorOS logs: `persist.sys.assert.panic=true`, only with Full session logs on | | on in test builds / toggle (`ONEOS_FULL_LOGS`, `ONEOS_GUEST_QUIET_LOGS`) | `sw:245-248` | stage | launcher logs only with it | |
+| `guest.quiet_logs` | Guest at log level W with Full session logs off: `log.tag=W` for the session, the tags OneOS reads keep theirs, the image's debug tag levels and `persist.logd.logpersistd*` left out | Full session logs off | auto / toggle (`ONEOS_GUEST_QUIET_LOGS`, adb only) | `gp` (after the guest prop set) | props | S23 ColorOS cba68d07: logd 55% of a core | hides I/D/V lines from reports |
 
 ### 6.6 GUEST: LineageOS / AOSP heritage (from OneLineage)
 
