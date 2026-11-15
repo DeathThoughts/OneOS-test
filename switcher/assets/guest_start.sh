@@ -553,7 +553,8 @@ fi
 # already done. So each display is switched to another mode of its resolution
 # and back to the top one (<= 120 Hz), which makes the composer program the
 # panel, and pinned at that top rate (a 60 Hz cover at 60: "60-120" was
-# refused there, Z Flip5). Displays not listed yet are left to the keeper.
+# refused there, Z Flip5). Displays not listed yet are retried here for 60 s,
+# then left to the keeper.
 # A VRR panel lists modes whose vsync is above its peak (Z Fold8 Ultra: 240 Hz
 # vsync, 120 fps at most): such a mode counts as 120 and is pinned at
 # [120, 120], as up to 0.4.54. 0.4.55-0.4.58 skipped it ("no modes in the dump,
@@ -591,9 +592,61 @@ if [ -e /system/framework/oplus-services.jar ]; then
 elif [ "${ONEOS_GUEST_SF_PIN:-1}" = 0 ]; then
     echo "[Pivoted Root] SF render rate left to DisplayManager (ONEOS_GUEST_SF_PIN=0)"
 else
-    /system/bin/sh /data/oneos_sf_kick.sh 2>&1 | sed 's/^/[Pivoted Root] SF render rate: /'
-    dumpsys SurfaceFlinger 2>/dev/null | awk '/^Display [0-9]+$/ { d = $2 } /debugDisplayModeSetByBackdoor/ { print "[Pivoted Root] SF " $0 }
-        d != "" && /^ *displayManagerPolicy=/ { sub(/^ */, ""); print "[Pivoted Root] SF " d " " substr($0, 1, 440); d = "" }'
+    sf_policy() {
+        timeout 10 dumpsys SurfaceFlinger 2>/dev/null | awk '/^Display [0-9]+$/ { d = $2 } /debugDisplayModeSetByBackdoor/ { print "[Pivoted Root] SF " $0 }
+            d != "" && /^ *displayManagerPolicy=/ { sub(/^ */, ""); print "[Pivoted Root] SF " d " " substr($0, 1, 440); d = "" }'
+    }
+    # Positive evidence only: a kick that lists and pins a display prints
+    # "pinned at". Empty output, errors, "no modes in the dump, left alone" and
+    # timeouts all mean SurfaceFlinger was not ready: retry, never success.
+    out=$(timeout 10 /system/bin/sh /data/oneos_sf_kick.sh 2>&1)
+    printf '%s\n' "$out" | sed 's/^/[Pivoted Root] SF render rate: /'
+    case "$out" in
+        *"pinned at"*)
+            sf_policy
+            ;;
+        *)
+            # SurfaceFlinger was not ready for the kick above (or it timed out):
+            # retry it in the background until 60 s after this boot stage, so the
+            # boot goes on. One chain only; the panel keeper takes over if it
+            # gives up.
+            (
+                deadline=$(( $(date +%s) + 60 ))
+                i=0
+                while [ "$i" -lt 30 ]; do
+                    now=$(date +%s)
+                    [ "$now" -lt "$deadline" ] || break
+                    i=$((i + 1))
+                    left=$((deadline - now))
+                    [ "$left" -gt 10 ] && left=10
+                    out=$(timeout "$left" /system/bin/sh /data/oneos_sf_kick.sh 2>&1)
+                    case "$out" in
+                        *"pinned at"*)
+                            printf '%s\n' "$out" | sed 's/^/[Pivoted Root] SF render rate: /'
+                            echo "[Pivoted Root] SF render rate: display listed on retry $i/30"
+                            sf_policy
+                            exit 0
+                            ;;
+                        # Keep the output of real errors/partial results in the log;
+                        # the usual "not listed yet" line would repeat every 2 s.
+                        *"no physical displays listed yet"*) ;;
+                        '') ;;
+                        *) printf '%s\n' "$out" | sed 's/^/[Pivoted Root] SF render rate: /' ;;
+                    esac
+                    now=$(date +%s)
+                    left=$((deadline - now))
+                    [ "$left" -gt 0 ] || break
+                    if [ "$left" -gt 2 ]; then
+                        sleep 2
+                    else
+                        sleep "$left"
+                    fi
+                done
+                sf_policy
+                echo "[Pivoted Root] SF render rate: no physical displays after 60 s ($i/30 retries); left to the panel keeper"
+            ) &
+            ;;
+    esac
 fi
 
 # OneOS: screen recording from the boot animation on, when /data/oneos_record
