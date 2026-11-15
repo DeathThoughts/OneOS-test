@@ -71,7 +71,9 @@ no_symlink() { # <relative path under $STAGE/data>: refuse if any component is a
 for pair in $BRIDGES; do no_symlink "${pair#*:}"; done
 for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetooth \
          misc_ce/0 misc_de/0 system system/devicestate system/package_cache \
-         system/users/0 system/watchdog_timestamps system_de system_ce user/0 user_de/0 \
+         system/users/0 system/users/0/settings_face.xml \
+         system/users/0/face_enrolled_position_0.xml \
+         system/watchdog_timestamps system_de system_ce user/0 user_de/0 \
          vendor_de/0/fpdata \
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
@@ -1044,10 +1046,12 @@ guest_root_mountpoint() {
 # HyperOS/MIUI Settings picks the standard FaceManager only when the face
 # feature is declared (KeyguardSettingsFaceUnlockManager.isUseNewFaceApi) and
 # otherwise binds the vendor miui_face service, which no GSI image ships, so
-# enrollment would run against a service that is not there. ColorOS reads the
-# same feature. One UI declares both in its own /system/etc/permissions; the
-# guest image replaces /system, so the files go into whichever read-only top
-# layer this prepare already builds, or a private one below.
+# face unlock would ask a service that is not there. ColorOS reads the same
+# feature. The features only let the guest's framework use One UI's
+# enrollments through the phone's own HALs; the guest enrolls nothing. One UI
+# declares both in its own /system/etc/permissions; the guest image replaces
+# /system, so the files go into whichever read-only top layer this prepare
+# already builds, or a private one below.
 face_features_into() { # <overlay top layer>
     mkdir -p "$1/etc/permissions" || return 1
     printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<permissions>' '    <feature name="android.hardware.fingerprint" />' '</permissions>' \
@@ -2340,44 +2344,59 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
     # hardware auth token's challenge, which is 0 on AOSP's enroll path (Samsung's
     # own biometric service fetches one with generateChallenge first), so it
     # returns -9 and enrollment fails: Settings closes the camera page with
-    # "couldn't add face" (S25 Ultra, 2026-11-15). guest_start.sh stops
-    # sec-biometrics-face-aidl and registers facehal-rs as IFace/default instead;
-    # its payload is the phone vendor's own face matcher, staged here from
-    # /data/local/tmp/facehal. Without it the guest keeps Samsung's HAL.
-    FH_SRC=/data/local/tmp/facehal
+    # "couldn't add face" (S25 Ultra, 2026-11-15). facehal-rs, the phone vendor's
+    # own face matcher run as IFace/default in Samsung's place, enrolls and keeps
+    # a face inside the guest, and the fork's rule is that only One UI enrolls:
+    # the guest unlocks with One UI's face through Samsung's HAL (the carry of
+    # settings_face.xml further down). So it is an experiment only,
+    # ONEOS_GUEST_FACEHAL=1; off, nothing is staged and a payload an earlier
+    # prepare staged into the guest's data is removed, so guest_start.sh cannot
+    # find one.
     FH_DST="$STAGE/data/local/tmp/facehal"
-    FH_TMP=
-    if [ ! -x "$FH_SRC/bin/hw/android.hardware.biometrics.face-service.facehal" ] &&
-       [ -f "$STAGE/facehal_payload.tar" ] && [ ! -L "$STAGE/facehal_payload.tar" ] &&
-       [ -d "$STAGE/data/local/tmp" ]; then
-        FH_TMP="$STAGE/data/local/tmp/.facehal_payload"
-        rm -rf "$FH_TMP"
-        if mkdir -p "$FH_TMP" && $BB tar -xf "$STAGE/facehal_payload.tar" -C "$FH_TMP" 2>/dev/null &&
-           [ -x "$FH_TMP/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
-            FH_SRC="$FH_TMP"
+    if [ "${ONEOS_GUEST_FACEHAL:-0}" != 1 ]; then
+        if [ -e "$FH_DST" ] || [ -L "$FH_DST" ]; then
+            no_symlink local/tmp/facehal
+            rm -rf "$FH_DST"
+            echo "HyperOS face: Samsung's face HAL with One UI's enrollment; the facehal-rs payload an earlier prepare staged is removed (ONEOS_GUEST_FACEHAL=1 is the in-guest enrollment experiment)"
         else
+            echo "HyperOS face: Samsung's face HAL with One UI's enrollment, facehal-rs not staged (ONEOS_GUEST_FACEHAL=1 is the in-guest enrollment experiment)"
+        fi
+    else
+        echo "WARNING: ONEOS_GUEST_FACEHAL=1: facehal-rs enrolls a face inside the guest, against the fork's rule that only One UI enrolls"
+        FH_SRC=/data/local/tmp/facehal
+        FH_TMP=
+        if [ ! -x "$FH_SRC/bin/hw/android.hardware.biometrics.face-service.facehal" ] &&
+           [ -f "$STAGE/facehal_payload.tar" ] && [ ! -L "$STAGE/facehal_payload.tar" ] &&
+           [ -d "$STAGE/data/local/tmp" ]; then
+            FH_TMP="$STAGE/data/local/tmp/.facehal_payload"
             rm -rf "$FH_TMP"
-            FH_TMP=
+            if mkdir -p "$FH_TMP" && $BB tar -xf "$STAGE/facehal_payload.tar" -C "$FH_TMP" 2>/dev/null &&
+               [ -x "$FH_TMP/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
+                FH_SRC="$FH_TMP"
+            else
+                rm -rf "$FH_TMP"
+                FH_TMP=
+            fi
         fi
-    fi
-    if [ -x "$FH_SRC/bin/hw/android.hardware.biometrics.face-service.facehal" ] && [ -d "$STAGE/data/local/tmp" ]; then
-        FH_NEW=0
-        for f in bin/hw/android.hardware.biometrics.face-service.facehal \
-                 lib64/libfacehal_jni.so lib64/libjni_stfaceunlock_api.so \
-                 lib64/libtensorflowlite.so lib64/libtensorflowlite_gpu_delegate.so \
-                 lib64/libc++_shared.so; do
-            [ -f "$FH_SRC/$f" ] || continue
-            cmp -s "$FH_SRC/$f" "$FH_DST/$f" && continue
-            mkdir -p "$FH_DST/${f%/*}" || continue
-            cp -f "$FH_SRC/$f" "$FH_DST/$f" && chmod 755 "$FH_DST/$f" && FH_NEW=$((FH_NEW + 1))
-        done
-        if [ "$FH_NEW" -gt 0 ]; then
-            chown -R 0:0 "$FH_DST" 2>/dev/null || true
-            $BB chcon -R u:object_r:shell_data_file:s0 "$FH_DST" 2>/dev/null || true
-            echo "HyperOS face: facehal-rs payload staged at /data/local/tmp/facehal ($FH_NEW file(s); Samsung's face HAL refuses the guest's framework)"
+        if [ -x "$FH_SRC/bin/hw/android.hardware.biometrics.face-service.facehal" ] && [ -d "$STAGE/data/local/tmp" ]; then
+            FH_NEW=0
+            for f in bin/hw/android.hardware.biometrics.face-service.facehal \
+                     lib64/libfacehal_jni.so lib64/libjni_stfaceunlock_api.so \
+                     lib64/libtensorflowlite.so lib64/libtensorflowlite_gpu_delegate.so \
+                     lib64/libc++_shared.so; do
+                [ -f "$FH_SRC/$f" ] || continue
+                cmp -s "$FH_SRC/$f" "$FH_DST/$f" && continue
+                mkdir -p "$FH_DST/${f%/*}" || continue
+                cp -f "$FH_SRC/$f" "$FH_DST/$f" && chmod 755 "$FH_DST/$f" && FH_NEW=$((FH_NEW + 1))
+            done
+            if [ "$FH_NEW" -gt 0 ]; then
+                chown -R 0:0 "$FH_DST" 2>/dev/null || true
+                $BB chcon -R u:object_r:shell_data_file:s0 "$FH_DST" 2>/dev/null || true
+                echo "HyperOS face: facehal-rs payload staged at /data/local/tmp/facehal ($FH_NEW file(s); Samsung's face HAL refuses the guest's framework)"
+            fi
         fi
+        [ -z "$FH_TMP" ] || rm -rf "$FH_TMP"
     fi
-    [ -z "$FH_TMP" ] || rm -rf "$FH_TMP"
     # The SIM on a HIDL radio (0.4.70; patches/hyperos_hidl_radio.py): Xiaomi's VendorRIL waited for
     # its AIDL radio forever on the MediaTek A07, A16 4G and A17 ("getRadioServiceProxy wait for rild
     # ready", no SIM: 0.4.67 5357ba6a, d946ff36, c3630d06). Sets from r25 carry the jar; older ones
@@ -4360,11 +4379,12 @@ chown 1000:1000 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 chmod 700 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 $BB chcon u:object_r:fingerprint_vendor_data_file:s0 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 
-# The guest's fingerprint is One UI's, read-only: the templates stay in the
-# phone's TEE, and the guest framework patch refuses enrollment and removal.
-# Carry One UI's enrollment metadata across instead; no credential, gatekeeper
-# handle or SP blob is read. Face is not mirrored here: it is guest-local in
-# facehal-rs and never uses One UI's face metadata.
+# The guest's fingerprint and face are One UI's: the templates stay in the
+# phone's TEE and the guest enrolls or removes nothing of its own (the guest
+# framework patches refuse it). Carry One UI's
+# enrollment metadata across on every switch so the guest unlocks with them
+# through the phone's own HALs; no credential, gatekeeper handle or SP blob is
+# read.
 #
 # The file name is the image's choice, so both are written. AOSP's
 # FingerprintProvider reads settings_fingerprint_<sensorId>.xml (One UI writes
@@ -4399,43 +4419,22 @@ elif [ -f /data/system/users/0/settings_fingerprint.xml ] && [ ! -f "$BIO_DST/se
         $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
         bio=$((bio + 1))
 fi
-# Face is guest-local: facehal-rs keeps its templates under
-# /data/vendor_de/<user>/facedata/facehal. Never copy One UI's settings_face.xml
-# or face_enrolled_position_0.xml into the guest.
-[ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's fingerprint enrollment file into the guest (face is guest-local)"
-
-# Older builds did copy those two files into the guest, and guest_start.sh then
-# moved the guest's copies to oneos-face-host (the guest's /data, never One
-# UI's). Where facehal-rs does not run (no payload, as on the Galaxy S23) the
-# guest's FaceService talks to Samsung's face HAL, which holds One UI's face:
-# a stale copy lists One UI's face in the guest, and removing it there would
-# remove it from the phone. So a guest file byte-identical to One UI's current
-# one is an old copy and goes; a different one (a guest-local enrollment) or one
-# with no One UI counterpart stays. The old builds' oneos-face-host folder and
-# marker are copies too and go. Stage files only: One UI's are never touched.
-drop_oneui_face_copies() {
-    d=0
-    for f in settings_face.xml face_enrolled_position_0.xml; do
-        g="$BIO_DST/$f"
-        [ -f "$g" ] && [ ! -L "$g" ] || continue
-        h="/data/system/users/0/$f"
-        [ -f "$h" ] && [ ! -L "$h" ] || continue
-        if cmp -s "$h" "$g"; then
-            rm -f "$g" && d=$((d + 1))
-        fi
-    done
-    old="$BIO_DST/oneos-face-host"
-    if [ -d "$old" ] && [ ! -L "$old" ]; then
-        rm -rf "$old" && d=$((d + 1))
+# Face: Samsung's face HAL holds One UI's face (facehal-rs only with
+# ONEOS_GUEST_FACEHAL=1), so the guest's FaceService lists it from the same
+# two files One UI keeps.
+for f in settings_face.xml face_enrolled_position_0.xml; do
+    if [ -f "/data/system/users/0/$f" ]; then
+        cp -f "/data/system/users/0/$f" "$BIO_DST/$f" &&
+            chown 1000:1000 "$BIO_DST/$f" 2>/dev/null &&
+            chmod 644 "$BIO_DST/$f" 2>/dev/null &&
+            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$f" 2>/dev/null
+        bio=$((bio + 1))
+    else
+        # A print or face removed in One UI must not stay listed here.
+        rm -f "$BIO_DST/$f"
     fi
-    mk="$STAGE/data/oneos_facehal_moved"
-    if [ -f "$mk" ] && [ ! -L "$mk" ]; then
-        rm -f "$mk"
-    fi
-    [ "$d" -gt 0 ] && echo "Guest biometrics: removed $d stale copy(ies) of One UI's face metadata from the guest"
-    return 0
-}
-drop_oneui_face_copies
+done
+[ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's $bio enrollment file(s) into the guest"
 
 # OneOS: without OneLineage's LineageOS packages (Launcher3, LatinIME,
 # LineageSettings; ColorOS has none of them) and with the OneOS app in place

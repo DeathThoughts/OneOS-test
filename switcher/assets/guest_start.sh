@@ -2914,19 +2914,34 @@ sm_diag "before zygote"
 # stay in the guest.
 # Payload, /data/local/tmp/facehal: bin/hw/android.hardware.biometrics.face-service.facehal,
 # lib64/libfacehal_jni.so, and the S25U vendor image's libjni_stfaceunlock_api.so,
-# libtensorflowlite*.so and libc++_shared.so. Without it the guest keeps Samsung's
-# HAL, which refuses the guest's framework.
+# libtensorflowlite*.so and libc++_shared.so.
+# Only with ONEOS_GUEST_FACEHAL=1: facehal-rs enrolls a face inside the guest,
+# and the fork's rule is that only One UI enrolls. Off (the default), Samsung's
+# HAL stays and the guest unlocks with One UI's face, whose metadata
+# guest_prepare.sh carried into /data/system/users/0 just before this script
+# ran. A session that had facehal-rs moved that metadata aside once and left
+# the marker; the aside copy and the marker go, and the freshly carried files
+# stay where they are.
 FACEHAL_DIR=/data/local/tmp/facehal
-# The guest's FaceService lets a face be enrolled or removed only while this
-# marker says facehal-rs serves IFace (OneOSGuestLock.faceHalIsGuests,
-# patches/guest_face_pin_gate.py): never on Samsung's face HAL, which is One UI's.
-rm -f /data/system/oneos_facehal_active
-if [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
-    # No face metadata is moved: facehal-rs has its own template store under
-    # /data/vendor_de/<user>/facedata/facehal. (Older builds moved the guest's
-    # copies of One UI's files aside here; this /data is the guest's, so One
-    # UI's own files never moved. guest_prepare.sh removes those old copies.)
-    echo "[Pivoted Root] facehal-rs: stopping One UI's face HAL (host face metadata left in place)"
+if [ "${ONEOS_GUEST_FACEHAL:-0}" != 1 ]; then
+    if [ -L /data/system/users ] || [ -L /data/system/users/0 ] || [ -L /data/system/users/0/oneos-face-host ]; then
+        echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment; /data/system/users/0/oneos-face-host or a parent is a symlink, left alone"
+    elif [ -f /data/oneos_facehal_moved ] || [ -d /data/system/users/0/oneos-face-host ]; then
+        rm -rf /data/system/users/0/oneos-face-host
+        rm -f /data/oneos_facehal_moved
+        echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment; an earlier facehal-rs session's moved-aside face metadata removed"
+    else
+        echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment (facehal-rs off; ONEOS_GUEST_FACEHAL=1 is the in-guest enrollment experiment)"
+    fi
+elif [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
+    echo "[Pivoted Root] WARNING: ONEOS_GUEST_FACEHAL=1: facehal-rs enrolls a face inside the guest, against the fork's rule that only One UI enrolls"
+    if [ ! -f /data/oneos_facehal_moved ]; then
+        mkdir -p /data/system/users/0/oneos-face-host
+        mv -f /data/system/users/0/settings_face.xml /data/system/users/0/face_enrolled_position_0.xml /data/system/users/0/oneos-face-host/ 2>/dev/null
+        touch /data/oneos_facehal_moved
+        echo "[Pivoted Root] facehal-rs: One UI face metadata moved aside"
+    fi
+    echo "[Pivoted Root] facehal-rs: stopping One UI's face HAL"
     stop sec-biometrics-face-aidl 2>/dev/null || true
     sleep 1
     (
@@ -2936,14 +2951,9 @@ if [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]
     ) </dev/null >/data/facehal.log 2>&1 &
     echo $! >/data/facehal.pid
     sleep 1
-    fh_check=$(service check android.hardware.biometrics.face.IFace/default 2>&1)
-    echo "[Pivoted Root] facehal-rs: $fh_check"
-    if kill -0 "$(cat /data/facehal.pid 2>/dev/null)" 2>/dev/null; then
-        : > /data/system/oneos_facehal_active
-        echo "[Pivoted Root] facehal-rs: running; the guest's own face may be enrolled after its PIN"
-    else
-        echo "[Pivoted Root] facehal-rs: not running; face enrollment and removal stay off"
-    fi
+    echo "[Pivoted Root] facehal-rs: $(service check android.hardware.biometrics.face.IFace/default 2>&1)"
+else
+    echo "[Pivoted Root] Face: ONEOS_GUEST_FACEHAL=1 but no facehal-rs payload at $FACEHAL_DIR; Samsung's face HAL stays"
 fi
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."
 if [ -f /data/oneos_root/enabled ]; then
