@@ -196,6 +196,8 @@ fi
 case "${ONEOS_GUEST_GMS:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_GMS=$ONEOS_GUEST_GMS (0 or 1)" ;; esac
 # Cool down when hot (the heat cap below): 0 or 1, unset meaning 1.
 case "${ONEOS_HEAT_CAP:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP=$ONEOS_HEAT_CAP (0 or 1)" ;; esac
+# The heat cap's CPU levels (the CPU's own thermal zones): 0 or 1, unset meaning 1.
+case "${ONEOS_HEAT_CAP_CPU:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP_CPU=$ONEOS_HEAT_CAP_CPU (0 or 1)" ;; esac
 case "${ONEOS_FULL_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_FULL_LOGS=$ONEOS_FULL_LOGS (0 or 1)" ;; esac
 [ "${ONEOS_GUEST_GMS:-1}" = 1 ] && [ "${ONEOS_GUEST_HIDE_GMS:-0}" = 1 ] && [ -f "$STAGE/gmssystem_payload.img" ] &&
     refuse "ONEOS_GUEST_GMS is on (the default) with gmssystem_payload.img staged, and ONEOS_GUEST_HIDE_GMS=1 hides Google services: set one of them to 0"
@@ -3605,6 +3607,17 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # return_to_oneui.sh stops it as well and does the same (heat_cap.active), for
 # One UI's SSRM to set its own. ONEOS_HEAT_CAP=0 (Advanced: Cool down when hot
 # off): no cap. Out of the app cgroup, like the sampler.
+# CPU levels (S23 SM-S911B, ColorOS 17, 2026-11-15): skin sat at 44.6 C, just
+# under 45, so the cap never came on, while cpu-1-3 read 88 C, cpuss-2 79 C and
+# policy0/policy3 stayed at their top clock. The same loop also reads the
+# hottest CPU thermal zone (/sys/class/thermal, millidegrees; Qualcomm's cpu-*
+# and cpuss-*, Exynos and Tensor's BIG, MID and LITTLE, any other *cpu*; never
+# a gpu, ddr, modem, npu, battery or skin zone) and keeps a CPU level of its
+# own: 1 from 75 C, 2 from 80, 3 from 85, each ending 3 C under where it began.
+# The higher of the two levels is applied, with the same table; with no skin
+# reading the CPU level alone. The guest thermal status below stays on skin.
+# ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
+# key): skin only, as before.
 # Guest thermal status (Pixel; owner's go, 2026-11-06). Samsung's thermal HAL
 # told Pixel CRITICAL at 49.6 C skin, and Pixel's JobScheduler holds every
 # ordinary job from SEVERE on (ThermalStatusRestriction, fixed in its code):
@@ -3618,6 +3631,7 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # (only the status then); ONEOS_GUEST_THERMAL_MAP=0 leaves the HAL's.
 rm -f "$STAGE/heat_cap.active"
 HEAT_CAP=0; [ "${ONEOS_HEAT_CAP:-1}" = 1 ] && HEAT_CAP=1
+HEAT_CAP_CPU=0; [ "${ONEOS_HEAT_CAP_CPU:-1}" = 1 ] && HEAT_CAP_CPU=1
 GUEST_THERMAL_MAP=0
 [ "${ONEOS_GUEST_THERMAL_MAP:-1}" = 1 ] && grep -q '^  "image": "pixel' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_THERMAL_MAP=1
 if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
@@ -3630,6 +3644,11 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     CFL=/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit
     if [ $HEAT_CAP = 1 ]; then
         echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (2 C hysteresis)\" > \$F
+        if [ $HEAT_CAP_CPU = 1 ]; then
+            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (3 C hysteresis); the higher level applies\" >> \$F
+        else
+            echo \"# CPU thermal zones not read (ONEOS_HEAT_CAP_CPU=0): skin only\" >> \$F
+        fi
     else
         echo \"# \$(date) OneOS heat cap off (Cool down when hot): the guest thermal status only\" > \$F
     fi
@@ -3675,7 +3694,28 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         gpu_at 100
         echo \"\$(date +%T) \$1: full clock:\$c\" >> \$F
     }
+    # The hottest CPU thermal zone: ct in millidegrees, cz its type; both
+    # empty when none reads. Builtins only (read, case): it runs every 10 s
+    # over every zone (about a hundred on a Snapdragon 8 Gen 2).
+    cpu_temp() {
+        ct=''; cz=''
+        [ $HEAT_CAP_CPU = 1 ] || return 0
+        for z in /sys/class/thermal/thermal_zone*; do
+            ty=''; v=''
+            read -r ty 2>/dev/null < \$z/type || [ -n \"\$ty\" ] || continue
+            case \"\$ty\" in
+                *[Gg][Pp][Uu]*|*[Dd][Dd][Rr]*|*[Mm][Oo][Dd][Ee][Mm]*|*[Mm][Dd][Mm]*|*[Nn][Pp][Uu]*|*[Bb][Aa][Tt]*|*[Ss][Kk][Ii][Nn]*) continue ;;
+                *[Cc][Pp][Uu]*|[Bb][Ii][Gg]*|[Mm][Ii][Dd]*|[Ll][Ii][Tt][Tt][Ll][Ee]*) ;;
+                *) continue ;;
+            esac
+            read -r v 2>/dev/null < \$z/temp || [ -n \"\$v\" ] || continue
+            case \"\$v\" in ''|*[!0-9]*) continue ;; esac
+            [ \"\$v\" -gt 0 ] && [ \"\$v\" -le 150000 ] || continue
+            if [ -z \"\$ct\" ] || [ \"\$v\" -gt \"\$ct\" ]; then ct=\$v; cz=\$ty; fi
+        done
+    }
     lvl=0; first=1; tl=-1; lp=''
+    slvl=0; clvl=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -3696,18 +3736,29 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 tl=\$nt
             fi
         fi
-        if [ -n \"\$sk\" ] && [ $HEAT_CAP = 1 ]; then
-            new=\$(awk -v s=\"\$sk\" -v l=\$lvl 'BEGIN { t[1] = 45; t[2] = 47; t[3] = 50; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 2) l--; print l }')
+        ct=''; cz=''
+        [ $HEAT_CAP = 1 ] && cpu_temp
+        if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
+            new=0; why=''
+            if [ -n \"\$sk\" ]; then
+                slvl=\$(awk -v s=\"\$sk\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47; t[3] = 50; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 2) l--; print l }')
+                new=\$slvl; why=\"skin \$sk C\"
+            fi
+            if [ -n \"\$ct\" ]; then
+                clvl=\$(awk -v s=\$ct -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; print l }')
+                [ \$clvl -gt \$new ] && new=\$clvl
+                why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
+            fi
             if [ \"\$new\" = 0 ] && [ \$first = 1 ]; then
                 capped=''
                 for p in /sys/devices/system/cpu/cpufreq/policy*; do
                     [ \"\$(cat \$p/scaling_max_freq 2>/dev/null)\" = \"\$(cat \$p/cpuinfo_max_freq 2>/dev/null)\" ] || capped=1
                 done
                 gpu_capped && capped=1
-                if [ -n \"\$capped\" ]; then full \"skin \$sk C, a cap from before the switch lifted\"
-                else echo \"\$(date +%T) skin \$sk C: no cap\" >> \$F; fi
+                if [ -n \"\$capped\" ]; then full \"\$why, a cap from before the switch lifted\"
+                else echo \"\$(date +%T) \$why: no cap\" >> \$F; fi
             elif [ \"\$new\" = 0 ] && [ \$lvl != 0 ]; then
-                full \"skin \$sk C, level \$lvl to 0\"
+                full \"\$why, level \$lvl to 0\"
             elif [ \"\$new\" != 0 ] && [ \"\$new\" != \$lvl ]; then
                 case \$new in 1) pct=80 ;; 2) pct=65 ;; *) pct=50 ;; esac
                 c=''
@@ -3718,14 +3769,15 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                     c=\"\$c \${p##*/}=\$(cat \$p/scaling_max_freq 2>/dev/null)/\$hw\"
                 done
                 gpu_at \$pct
-                echo \"\$(date +%T) skin \$sk C, level \$lvl to \$new: \$pct%:\$c\" >> \$F
+                echo \"\$(date +%T) \$why, level \$lvl to \$new: \$pct%:\$c\" >> \$F
             fi
             lvl=\$new; first=0
         fi
         sleep 10
     done
 " </dev/null >/dev/null 2>&1 &
-    [ $HEAT_CAP = 1 ] && echo "Heat cap: on (from 45 C skin; every 10 s to $STAGE/heat_cap.log)"
+    [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 1 ] && echo "Heat cap: on (from 45 C skin or 75 C on the CPU; every 10 s to $STAGE/heat_cap.log)"
+    [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 0 ] && echo "Heat cap: on (from 45 C skin, CPU zones off by ONEOS_HEAT_CAP_CPU=0; every 10 s to $STAGE/heat_cap.log)"
     [ $HEAT_CAP = 1 ] || echo "Heat cap: off (ONEOS_HEAT_CAP=0, Cool down when hot off in Advanced)"
     [ $GUEST_THERMAL_MAP = 1 ] && echo "Guest thermal status: from the skin temperature, the HAL status from 56 C ($STAGE/heat_cap.log)"
 else

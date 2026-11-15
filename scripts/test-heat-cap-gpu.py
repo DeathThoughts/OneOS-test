@@ -18,7 +18,7 @@ RETURN = (ROOT / 'switcher/assets/return_to_oneui.sh').read_text()
 FOLD8 = ROOT / 'switcher/assets/fold8_coloros.sh'
 
 START = '    $BB sh -c "\n    : oneos_heat_cap\n'
-END = '\n" </dev/null >/dev/null 2>&1 &\n    [ $HEAT_CAP = 1 ] && echo "Heat cap: on'
+END = '\n" </dev/null >/dev/null 2>&1 &\n    [ $HEAT_CAP = 1 ] && '
 
 
 def heat_cap_block():
