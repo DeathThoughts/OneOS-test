@@ -305,6 +305,10 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_biometric_clea
 # absent HIDL 2.1 adapter and the guest never opens a sensor
 # (patches/guest_force_aidl_fingerprint.py).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_force_aidl_fingerprint.py" "$WORK/services")"
+# Fingerprints stay One UI's: the guest may authenticate, never enrol, remove,
+# rename, invalidate or clear the shared sensor's lockout
+# (patches/guest_fingerprint_readonly.py).
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_fingerprint_readonly.py" "$WORK/services")"
 # The phone's gatekeeper (screen lock), FRP partition and apexd stay One UI's;
 # guest apps get app ids from 15000 (no keystore namespace shared with One UI's
 # apps) and the guest makes no users or profiles (their per-user keys share

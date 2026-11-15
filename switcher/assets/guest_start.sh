@@ -2816,13 +2816,11 @@ sm_diag "before zygote"
 # HAL, which refuses the guest's framework.
 FACEHAL_DIR=/data/local/tmp/facehal
 if [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
-    if [ ! -f /data/oneos_facehal_moved ]; then
-        mkdir -p /data/system/users/0/oneos-face-host
-        mv -f /data/system/users/0/settings_face.xml /data/system/users/0/face_enrolled_position_0.xml /data/system/users/0/oneos-face-host/ 2>/dev/null
-        touch /data/oneos_facehal_moved
-        echo "[Pivoted Root] facehal-rs: One UI face metadata moved aside"
-    fi
-    echo "[Pivoted Root] facehal-rs: stopping One UI's face HAL"
+    # One UI's face metadata is not touched: facehal-rs has its own template
+    # store under /data/vendor_de/<user>/facedata/facehal. Older builds moved
+    # the two host files aside; return_to_oneui.sh restores them before One
+    # UI's face HAL starts again.
+    echo "[Pivoted Root] facehal-rs: stopping One UI's face HAL (host face metadata left in place)"
     stop sec-biometrics-face-aidl 2>/dev/null || true
     sleep 1
     (

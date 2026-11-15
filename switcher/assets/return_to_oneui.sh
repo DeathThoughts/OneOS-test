@@ -73,6 +73,56 @@ svc_pid() {
     o=$(timeout 5 dumpsys --pid "$1" 2>/dev/null | head -n 1)
     case "$o" in ''|*[!0-9]*) ;; *) echo "$o" ;; esac
 }
+# Older builds moved One UI's face metadata into
+# /data/system/users/0/oneos-face-host before starting facehal-rs. Face is
+# guest-local now, so restore those files on every real return, before One UI's
+# face HAL can start. Never overwrite a file One UI already has. The marker is
+# removed only when every entry was moved or was already present.
+restore_oneos_face_metadata() {
+    d=/data/system/users/0/oneos-face-host
+    if [ -L "$d" ]; then
+        echo "Face metadata restore: $d is a symlink; not restored"
+        return 1
+    fi
+    if [ ! -d "$d" ]; then
+        [ -f /data/oneos_facehal_moved ] && rm -f /data/oneos_facehal_moved
+        return 0
+    fi
+    failed=0
+    for f in settings_face.xml face_enrolled_position_0.xml; do
+        src=$d/$f
+        dst=/data/system/users/0/$f
+        [ -e "$src" ] || [ -L "$src" ] || continue
+        if [ -L "$src" ]; then
+            echo "Face metadata restore: $src is a symlink; not moved"
+            failed=1
+            continue
+        fi
+        if [ ! -f "$src" ]; then
+            echo "Face metadata restore: $src is not a regular file; not moved"
+            failed=1
+            continue
+        fi
+        if [ -e "$dst" ] || [ -L "$dst" ]; then
+            if [ -L "$dst" ]; then
+                echo "Face metadata restore: $dst is a symlink; not overwritten"
+                failed=1
+            else
+                echo "Face metadata restore: $dst already exists; kept (moved copy left in $d)"
+            fi
+            continue
+        fi
+        if mv "$src" "$dst"; then
+            echo "Face metadata restore: $f -> $dst"
+        else
+            echo "Face metadata restore: could not move $src"
+            failed=1
+        fi
+    done
+    [ "$failed" = 0 ] || return 1
+    rm -f /data/oneos_facehal_moved
+    return 0
+}
 # servicemanager names the guest must never have taken from One UI. One UI's
 # vold cannot be restarted (init.rc: reboot_on_failure), keystore2 is critical.
 HOST_NAMES="vold android.system.vold.IVold/default android.system.keystore2.IKeystoreService/default installd android.service.gatekeeper.IGateKeeperService"
@@ -104,6 +154,10 @@ if [ "$1" = baseline ]; then
     echo "In-place baseline: $(grep -c '^mount ' "$BASE/apex") One UI APEX mounts on $(grep -c '^dev ' "$BASE/apex") devices, vold pid $(awk '$1 == "vold" {print $2}' "$BASE/svcpid"), SELinux $(cat "$BASE/selinux")"
     exit 0
 fi
+# Host face metadata moved by an older build must be back before One UI's face
+# HAL starts, including on the reboot return. Failure leaves the marker and the
+# files for the next return; it never overwrites One UI's current file.
+restore_oneos_face_metadata || echo "Face metadata restore: incomplete; see $S/oneos.log and retry on the next return"
 # The return must finish even if the adb session that started it goes away.
 trap '' HUP PIPE
 # The session runs Permissive (oneos_switch.sh [1/6]). Run 46 found SELinux

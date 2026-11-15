@@ -71,7 +71,8 @@ no_symlink() { # <relative path under $STAGE/data>: refuse if any component is a
 for pair in $BRIDGES; do no_symlink "${pair#*:}"; done
 for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetooth \
          misc_ce/0 misc_de/0 system system/devicestate system/package_cache \
-         system/watchdog_timestamps system_de system_ce user/0 user_de/0 \
+         system/users/0 system/watchdog_timestamps system_de system_ce user/0 user_de/0 \
+         vendor_de/0/fpdata \
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge; do
     no_symlink "$s"
@@ -4224,11 +4225,11 @@ chown 1000:1000 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 chmod 700 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 $BB chcon u:object_r:fingerprint_vendor_data_file:s0 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 
-# ColorOS can only use the biometrics the phone's TEE already holds. Enrolling
-# inside the guest needs a HardwareAuthToken, and the guest has no gatekeeper
-# to mint one (its PIN is verified locally), so ColorOS's "Add" does nothing.
-# Carry One UI's enrollment metadata across instead: the templates never leave
-# the TEE, and no credential, gatekeeper handle or SP blob is read.
+# The guest's fingerprint is One UI's, read-only: the templates stay in the
+# phone's TEE, and the guest framework patch refuses enrollment and removal.
+# Carry One UI's enrollment metadata across instead; no credential, gatekeeper
+# handle or SP blob is read. Face is not mirrored here: it is guest-local in
+# facehal-rs and never uses One UI's face metadata.
 #
 # The file name is the image's choice, so both are written. AOSP's
 # FingerprintProvider reads settings_fingerprint_<sensorId>.xml (One UI writes
@@ -4263,19 +4264,12 @@ elif [ -f /data/system/users/0/settings_fingerprint.xml ] && [ ! -f "$BIO_DST/se
         $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
         bio=$((bio + 1))
 fi
-for f in settings_face.xml face_enrolled_position_0.xml; do
-    if [ -f "/data/system/users/0/$f" ]; then
-        cp -f "/data/system/users/0/$f" "$BIO_DST/$f" &&
-            chown 1000:1000 "$BIO_DST/$f" 2>/dev/null &&
-            chmod 644 "$BIO_DST/$f" 2>/dev/null &&
-            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$f" 2>/dev/null
-        bio=$((bio + 1))
-    else
-        # A print or face removed in One UI must not stay listed here.
-        rm -f "$BIO_DST/$f"
-    fi
-done
-[ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's $bio enrollment file(s) into the guest"
+# Face is guest-local: facehal-rs keeps its templates under
+# /data/vendor_de/<user>/facedata/facehal. Never copy One UI's settings_face.xml
+# or face_enrolled_position_0.xml into the guest. Files copied by older builds
+# are left for the guest's own face settings; they are not host data and the
+# face HAL does not read them.
+[ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's fingerprint enrollment file into the guest (face is guest-local)"
 
 # OneOS: without OneLineage's LineageOS packages (Launcher3, LatinIME,
 # LineageSettings; ColorOS has none of them) and with the OneOS app in place
