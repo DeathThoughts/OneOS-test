@@ -214,11 +214,16 @@ def _skip_header(body, local_line):
 
 
 def _find_permission(body, first_instruction):
-    """Insert after the first *_enforcePermission call when one is present."""
-    for index in range(first_instruction, len(body)):
-        line = body[index]
-        if "enforcePermission(" in line and "->" in line:
-            return index + 1
+    """Insert after the *_enforcePermission call when it is the first instruction.
+
+    @EnforcePermission stubs open with that call.  A permission check found
+    further down sits inside the method's own logic (a branch, a helper), and
+    inserting there would leave the code before it running: the guard goes at
+    the first instruction instead.
+    """
+    line = body[first_instruction]
+    if "_enforcePermission()V" in line and line.strip().startswith("invoke-"):
+        return first_instruction + 1
     return first_instruction
 
 

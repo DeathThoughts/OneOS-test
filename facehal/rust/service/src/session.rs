@@ -95,13 +95,21 @@ impl ChallengeCache {
         );
     }
 
-    fn contains(&self, user_id: i32, challenge: i64) -> bool {
+    /// Consumes the challenge: a token carrying it starts one enrollment, never a second one.
+    /// Checking and removing under the same lock keeps two concurrent calls from both passing.
+    fn take(&self, user_id: i32, challenge: i64) -> bool {
         let now = Instant::now();
         let mut entries = self.entries.lock().unwrap();
         entries.retain(|_, entry| entry.expires_at > now);
-        entries
+        if entries
             .get(&challenge)
             .is_some_and(|entry| entry.user_id == user_id)
+        {
+            entries.remove(&challenge);
+            true
+        } else {
+            false
+        }
     }
 
     fn remove(&self, user_id: i32, challenge: i64) {
@@ -305,15 +313,24 @@ impl FaceSession {
                 Feature::REQUIRE_ATTENTION | Feature::REQUIRE_DIVERSE_POSES
             )
         });
-        let challenge_valid = self.challenge_cache.contains(self.user_id, hat.challenge);
+        // OneOS: enrollment needs the guest's lock credential just confirmed. The guest lock
+        // (OneOSGuestLock.hat) answers verifyGatekeeperPasswordHandle with a token that carries
+        // the challenge generateChallenge handed out and the time of the confirmation; anything
+        // else (no token, a stale one, an unknown or reused challenge) is refused here.
         let hat_valid = credential_hat_is_structurally_valid(hat);
-        if !features_supported || !challenge_valid || !hat_valid {
+        let challenge_valid = hat_valid && self.challenge_cache.take(self.user_id, hat.challenge);
+        if !hat_valid || !challenge_valid {
             eprintln!(
-                "FaceHAL enroll: accepting ColorOS compatibility metadata \
-                 features_supported={features_supported} challenge_valid={challenge_valid} \
-                 hat_valid={hat_valid} mac_len={}",
+                "FaceHAL enroll: refused without a fresh guest-lock token \
+                 challenge_valid={challenge_valid} hat_valid={hat_valid} mac_len={}",
                 hat.mac.len(),
             );
+            self.callback.onError(Error::UNABLE_TO_PROCESS, 0)?;
+            return Ok(CancellationState::default().binder());
+        }
+        if !features_supported {
+            // Not a security check: ColorOS asks for features this HAL ignores.
+            eprintln!("FaceHAL enroll: ignoring unsupported features {features:?}");
         }
         let Some(algorithm) = self.algorithm() else {
             return self.unavailable_operation();

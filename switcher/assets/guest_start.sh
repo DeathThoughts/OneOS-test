@@ -2815,11 +2815,15 @@ sm_diag "before zygote"
 # libtensorflowlite*.so and libc++_shared.so. Without it the guest keeps Samsung's
 # HAL, which refuses the guest's framework.
 FACEHAL_DIR=/data/local/tmp/facehal
+# The guest's FaceService lets a face be enrolled or removed only while this
+# marker says facehal-rs serves IFace (OneOSGuestLock.faceHalIsGuests,
+# patches/guest_face_pin_gate.py): never on Samsung's face HAL, which is One UI's.
+rm -f /data/system/oneos_facehal_active
 if [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
-    # One UI's face metadata is not touched: facehal-rs has its own template
-    # store under /data/vendor_de/<user>/facedata/facehal. Older builds moved
-    # the two host files aside; return_to_oneui.sh restores them before One
-    # UI's face HAL starts again.
+    # No face metadata is moved: facehal-rs has its own template store under
+    # /data/vendor_de/<user>/facedata/facehal. (Older builds moved the guest's
+    # copies of One UI's files aside here; this /data is the guest's, so One
+    # UI's own files never moved. guest_prepare.sh removes those old copies.)
     echo "[Pivoted Root] facehal-rs: stopping One UI's face HAL (host face metadata left in place)"
     stop sec-biometrics-face-aidl 2>/dev/null || true
     sleep 1
@@ -2830,7 +2834,14 @@ if [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]
     ) </dev/null >/data/facehal.log 2>&1 &
     echo $! >/data/facehal.pid
     sleep 1
-    echo "[Pivoted Root] facehal-rs: $(service check android.hardware.biometrics.face.IFace/default 2>&1)"
+    fh_check=$(service check android.hardware.biometrics.face.IFace/default 2>&1)
+    echo "[Pivoted Root] facehal-rs: $fh_check"
+    if kill -0 "$(cat /data/facehal.pid 2>/dev/null)" 2>/dev/null; then
+        : > /data/system/oneos_facehal_active
+        echo "[Pivoted Root] facehal-rs: running; the guest's own face may be enrolled after its PIN"
+    else
+        echo "[Pivoted Root] facehal-rs: not running; face enrollment and removal stay off"
+    fi
 fi
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."
 if [ -f /data/oneos_root/enabled ]; then

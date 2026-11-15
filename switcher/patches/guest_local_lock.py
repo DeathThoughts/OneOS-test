@@ -230,9 +230,10 @@ def type_hook(result, spare):
 
 GK_HOOK = f"""\
     # OneOS: the handle a matched guest credential hands out has no gatekeeper password of the
-    # phone behind it; answer it with the token the enrollment only carries along, and leave
-    # every other handle to the framework (patches/guest_local_lock.py).
-    invoke-static {{p1, p2, p5}}, {HELPER}->hat(JI)[B
+    # phone behind it; answer it with a token carrying the caller's challenge, issued only right
+    # after the guest credential matched (the guest's face HAL checks both), and leave every
+    # other handle to the framework (patches/guest_local_lock.py).
+    invoke-static {{p1, p2, p3, p4, p5}}, {HELPER}->hat(JJI)[B
 
     move-result-object v0
 
@@ -556,6 +557,9 @@ def patch_lss(lines, rel, pkg_text):
         raise Skip(f"{rel}: requireStrongAuth is private")
     if s_locals < 1 or v_locals < 1:
         raise Skip(f"{rel}: no free register at the entry of the set or verify method")
+    # GK_HOOK passes p1..p5 to a plain invoke-static, whose registers must all be v0..v15.
+    if max(g_locals, 2) + 5 > 15:
+        raise Skip(f"{rel}: verifyGatekeeperPasswordHandle has too many locals for the token hook")
     tail = added_methods(invoke_kind(lines, inv_i), invoke_kind(lines, lis_i), "invoke-virtual")
 
     # 1. The set hook goes in front of the gatekeeper guard (v0 is free at the entry).

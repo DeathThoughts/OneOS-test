@@ -151,6 +151,20 @@ class FingerprintReadonlyTest(unittest.TestCase):
         self.assertLess(body.index('enforcePermission'), body.index(MARK))
         self.assertLess(body.index('enforcePermission'), body.index('onError(II)V'))
 
+    def test_permission_check_further_down_is_not_the_insertion_point(self):
+        text = self.text().replace(
+            "    invoke-static {p1}, Lcom/android/server/biometrics/sensors/fingerprint/FingerprintService;->enroll_enforcePermission()V\n",
+            "    const/4 v0, 0x0\n"
+            "    invoke-static {p1}, Lcom/android/server/biometrics/sensors/fingerprint/FingerprintService;->enroll_enforcePermission()V\n",
+            1,
+        )
+        self.file.write_text(text)
+        done = self.run_patch()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        body = self.method('enroll')
+        self.assertNotIn('enforcePermission', body)
+        self.assertLess(body.index(MARK), body.index('return-wide'))
+
     def test_annotation_is_not_split(self):
         done = self.run_patch()
         self.assertEqual(done.returncode, 0, done.stderr)

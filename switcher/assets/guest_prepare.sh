@@ -4266,10 +4266,41 @@ elif [ -f /data/system/users/0/settings_fingerprint.xml ] && [ ! -f "$BIO_DST/se
 fi
 # Face is guest-local: facehal-rs keeps its templates under
 # /data/vendor_de/<user>/facedata/facehal. Never copy One UI's settings_face.xml
-# or face_enrolled_position_0.xml into the guest. Files copied by older builds
-# are left for the guest's own face settings; they are not host data and the
-# face HAL does not read them.
+# or face_enrolled_position_0.xml into the guest.
 [ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's fingerprint enrollment file into the guest (face is guest-local)"
+
+# Older builds did copy those two files into the guest, and guest_start.sh then
+# moved the guest's copies to oneos-face-host (the guest's /data, never One
+# UI's). Where facehal-rs does not run (no payload, as on the Galaxy S23) the
+# guest's FaceService talks to Samsung's face HAL, which holds One UI's face:
+# a stale copy lists One UI's face in the guest, and removing it there would
+# remove it from the phone. So a guest file byte-identical to One UI's current
+# one is an old copy and goes; a different one (a guest-local enrollment) or one
+# with no One UI counterpart stays. The old builds' oneos-face-host folder and
+# marker are copies too and go. Stage files only: One UI's are never touched.
+drop_oneui_face_copies() {
+    d=0
+    for f in settings_face.xml face_enrolled_position_0.xml; do
+        g="$BIO_DST/$f"
+        [ -f "$g" ] && [ ! -L "$g" ] || continue
+        h="/data/system/users/0/$f"
+        [ -f "$h" ] && [ ! -L "$h" ] || continue
+        if cmp -s "$h" "$g"; then
+            rm -f "$g" && d=$((d + 1))
+        fi
+    done
+    old="$BIO_DST/oneos-face-host"
+    if [ -d "$old" ] && [ ! -L "$old" ]; then
+        rm -rf "$old" && d=$((d + 1))
+    fi
+    mk="$STAGE/data/oneos_facehal_moved"
+    if [ -f "$mk" ] && [ ! -L "$mk" ]; then
+        rm -f "$mk"
+    fi
+    [ "$d" -gt 0 ] && echo "Guest biometrics: removed $d stale copy(ies) of One UI's face metadata from the guest"
+    return 0
+}
+drop_oneui_face_copies
 
 # OneOS: without OneLineage's LineageOS packages (Launcher3, LatinIME,
 # LineageSettings; ColorOS has none of them) and with the OneOS app in place
