@@ -3078,6 +3078,24 @@ while true; do
                                fi
                            fi ;;
                     esac
+                    # HyperOS's dynamic island centres on SystemUI's own dimen/cut_out_center_y
+                    # (DynamicIslandController answers the island plugin's \"action_back_request_cutout_y\"
+                    # with it; DynamicIslandBaseContentView puts the island's middle there), never on
+                    # the display cutout: the image's Xiaomi value left it 20 px below the S23's camera
+                    # (owner, 11-15, HyperOS; changing the cutout moved nothing, this overlay did, live).
+                    # The middle of this phone's lens (hole= in host_statusbar, from One UI's cutout,
+                    # oneos_switch.sh host_holes), in the guest's pixels. No lens read: the image's
+                    # value stays. ONEOS_GUEST_ISLAND_Y=0 leaves it and turns the overlay off.
+                    if [ $GUEST_MIUI = 1 ] && [ \"${ONEOS_GUEST_ISLAND_Y:-1}\" = 1 ]; then
+                        IY=\$(sed -n 's/^hole=//p' $STAGE/host_statusbar | head -n 1 | awk -F'[,:]' -v k=\"\$SBK\" 'NF == 4 && \$4 > \$2 { f = 1; if (split(k, a, \" \") == 2 && a[2] > 0) f = a[1] / a[2]; printf \"%d\", (\$2 + \$4) / 2 * f + 0.5 }')
+                        case \"\$IY\" in
+                            ''|*[!0-9]*) ;;
+                            *) r=\$(gdim OneOSIslandY com.android.systemui com.android.systemui:dimen/cut_out_center_y=\$IY)
+                               case \"\$r\" in registered*) OVS=\"\$OVS OneOSIslandY\" ;; *) DIMS=\"\$DIMS island centre \$IY px: \$r;\" ;; esac ;;
+                        esac
+                    elif [ $GUEST_MIUI = 1 ]; then
+                        gxo disable --user 0 com.android.shell:OneOSIslandY
+                    fi
                 fi
                 ON=''
                 for o in \$OVS; do gxo enable --user 0 com.android.shell:\$o && ON=\"\$ON \$o\"; done
@@ -3090,7 +3108,7 @@ while true; do
                     case \$o in
                         OneOSCornerRadius) [ -n \"\$CRAD\" ] && continue
                             gxo disable --user 0 com.android.shell:\$o && OFF=\"\$OFF \$o\" ;;
-                        OneOSCutout|OneOSCutoutRect|OneOSStatusBarHeight|OneOSCornerPadding|OneOSNtStatusBar)
+                        OneOSCutout|OneOSCutoutRect|OneOSStatusBarHeight|OneOSCornerPadding|OneOSNtStatusBar|OneOSIslandY)
                             gxo disable --user 0 com.android.shell:\$o && OFF=\"\$OFF \$o\" ;;
                     esac
                 done
