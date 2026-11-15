@@ -2150,13 +2150,35 @@ bring_aside() { # <a folder in the bring folder>; 1 when it is not root's own
 # applied. Returns 0 when the copy is in place, 1 when the app was skipped (the
 # reason is in BRING_WHY and said as an @@INFO line). The caller made
 # $STAGE/data/oneos_bring (bring_dirs) and set NEW.
+# One UI's APK of a user app. pm answers for whichever framework runs: during a
+# session (bring-add) that is the guest's, which does not have the app yet, so
+# every request from the guest was "not an installed user app" (Galaxy S23
+# HyperOS on 0.5.15, an app One UI has). With a session up, One UI's own
+# /data/app is read instead: the package named in One UI's packages.list and
+# exactly one folder of it holding a base.apk.
+bring_apk_path() { # <a name is_package accepted>
+    bp=$1
+    if [ "$BRING_LIVE" != 1 ]; then
+        pm path "$bp" 2>/dev/null </dev/null | sed -n 's/^package://p' | head -n 1
+        return 0
+    fi
+    awk -v p="$bp" '$1 == p { f = 1 } END { exit !f }' "$DATA/system/packages.list" 2>/dev/null || return 0
+    bn=0; bf=""
+    for b in "$DATA"/app/*/"$bp"-*/base.apk "$DATA"/app/"$bp"-*/base.apk; do
+        [ -f "$b" ] && [ ! -L "$b" ] || continue
+        bn=$((bn + 1)); bf=$b
+    done
+    [ "$bn" = 1 ] && echo "$bf"
+    return 0
+}
+
 bring_one() { # <a name is_package accepted>
     pkg=$1
     BRING_WHY=""
     dst="$STAGE/data/oneos_bring/$pkg"
     # Its APKs: the folder pm names under /data/app (a user app; One UI's
     # own apps stay on One UI, and the app never offers them).
-    first=$(pm path "$pkg" 2>/dev/null </dev/null | sed -n 's/^package://p' | head -n 1)
+    first=$(bring_apk_path "$pkg")
     apkdir=""
     case "$first" in *..*) ;; "$DATA"/app/*/*.apk) apkdir=${first%/*} ;; esac
     if [ -z "$apkdir" ] || [ ! -f "$first" ] || [ -L "$first" ]; then
