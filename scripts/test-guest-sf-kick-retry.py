@@ -22,8 +22,10 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 START_SH = (ROOT / 'switcher/assets/guest_start.sh').read_text()
 
-START = ('if [ -e /system/framework/oplus-services.jar ]; then\n'
-         '    :\nelif [ "${ONEOS_GUEST_SF_PIN:-1}" = 0 ]; then')
+# The ColorOS branch above it only says the panel keeper has it (its text changes
+# with the keeper); the pinned guests' retry starts at the next branch.
+HEAD = 'if [ -e /system/framework/oplus-services.jar ]; then\n    :\n'
+START = 'elif [ "${ONEOS_GUEST_SF_PIN:-1}" = 0 ]; then'
 END = '\n# OneOS: screen recording from the boot animation on'
 
 
@@ -31,7 +33,7 @@ def between(text, start, end):
     return start + text.split(start, 1)[1].split(end, 1)[0]
 
 
-BLOCK = between(START_SH, START, END)
+BLOCK = HEAD + between(START_SH, START, END)
 
 PRELUDE = r'''
 sleep() { :; }
