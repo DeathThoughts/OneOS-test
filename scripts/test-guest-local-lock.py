@@ -618,7 +618,6 @@ public final class GuestLockDriver {
             case "waits": waits(); break;
             case "restarts": restarts(); break;
             case "damaged": damaged(); break;
-            case "face": face(); break;
             default: throw new AssertionError("no scenario " + a[0]);
         }
         System.out.println("PASS " + a[0]);
@@ -735,33 +734,6 @@ public final class GuestLockDriver {
         // wait on disk even when it is the right one.
         eq(0, check(PIN), "a right fifth try matches");
         yes(!has(TRIES), "and forgets the tries");
-    }
-
-    // The guest's own face (patches/guest_face_pin_gate.py): facehal-rs and a fresh guest PIN.
-    static void face() throws Exception {
-        File marker = new File(dir, OneOSGuestLock.FACE_HAL_MARKER);
-        yes(!OneOSGuestLock.faceWriteAllowed(0, E), "no lock: no face write");
-        eq(1, set(3, PIN, null), "set a PIN");
-        restart();
-        yes(!OneOSGuestLock.faceWriteAllowed(0, E), "nothing matched since boot: no face write");
-        eq(0, check(PIN), "the PIN matches");
-
-        yes(!OneOSGuestLock.faceWriteAllowed(0, E + 1000), "Samsung's face HAL (no marker): never");
-        yes(marker.createNewFile(), "facehal-rs runs");
-        yes(OneOSGuestLock.faceHalIsGuests(), "the marker is seen");
-        yes(OneOSGuestLock.faceWriteAllowed(0, E + 1000), "facehal-rs and a fresh PIN: allowed");
-        yes(!OneOSGuestLock.faceWriteAllowed(10, E + 1000), "another user: never");
-        yes(OneOSGuestLock.faceWriteAllowed(0, E + OneOSGuestLock.FACE_WINDOW_MS), "the window's last ms");
-        yes(!OneOSGuestLock.faceWriteAllowed(0, E + OneOSGuestLock.FACE_WINDOW_MS + 1),
-                "after the window: the PIN again");
-        yes(!OneOSGuestLock.faceWriteAllowed(0, E - 1), "a clock before the match: never");
-        eq(0, OneOSGuestLock.verify(PIN, E + 600000, W), "the PIN again, later");
-        yes(OneOSGuestLock.faceWriteAllowed(0, E + 600000 + 1000), "a new window from the new match");
-
-        eq(1, set(-1, null, PIN), "remove the lock");
-        yes(!OneOSGuestLock.faceWriteAllowed(0, E + 600000 + 1000), "no lock: never");
-        yes(marker.delete(), "marker gone");
-        yes(!OneOSGuestLock.faceHalIsGuests(), "no facehal-rs");
     }
 
     static void restarts() throws Exception {
@@ -890,9 +862,6 @@ class HelperTest(unittest.TestCase):
     def test_a_damaged_record_is_no_lock(self):
         self.scenario('damaged')
 
-    def test_face_window(self):
-        self.scenario('face')
-
 
 class SourceTest(unittest.TestCase):
     def test_the_smali_belongs_to_the_java_source(self):
@@ -919,7 +888,7 @@ class SourceTest(unittest.TestCase):
         code = re.sub(r'(?m)//.*$', '', code)
         self.assertEqual(re.findall(r'"(/[^"]*)"', code), ['/data/system'])
         self.assertEqual(sorted(set(re.findall(r'"(oneos[^"]*)"', code))),
-                         ['oneos_facehal_active', 'oneos_guest_lock', 'oneos_guest_lock.tries'])
+                         ['oneos_guest_lock', 'oneos_guest_lock.tries'])
         self.assertEqual(sorted(set(re.findall(r'^import ([a-z]+(?:\.[a-z]+)*)\.', code, re.M))),
                          ['java.io', 'java.security', 'java.util', 'javax.crypto', 'javax.crypto.spec'])
         for word in ('Runtime', 'ProcessBuilder', 'java.net', 'Class.forName', 'System.load'):

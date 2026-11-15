@@ -74,20 +74,6 @@ public final class OneOSGuestLock {
     private static int sFailures;
     /** Elapsed-realtime ms until which no guess is looked at; 0 when no wait is running. */
     private static long sLockedUntil;
-    /** Elapsed-realtime ms of the last credential that matched; 0 when none since boot. */
-    private static volatile long sVerifiedAt;
-
-    /**
-     * How long a matched credential lets the guest's own face be enrolled or removed: the time
-     * Settings takes from "confirm your PIN" to the enrollment or the remove button.
-     */
-    static final long FACE_WINDOW_MS = 5L * 60L * 1000L;
-    /**
-     * Written in this folder by guest_start.sh only while facehal-rs, the guest's own face HAL,
-     * runs. Without it the guest's FaceService talks to Samsung's face HAL, which holds One UI's
-     * face.
-     */
-    static final String FACE_HAL_MARKER = "oneos_facehal_active";
 
     private OneOSGuestLock() {
     }
@@ -102,7 +88,6 @@ public final class OneOSGuestLock {
         sTriesLoaded = false;
         sFailures = 0;
         sLockedUntil = 0;
-        sVerifiedAt = 0;
     }
 
     /**
@@ -124,38 +109,6 @@ public final class OneOSGuestLock {
         } catch (Throwable t) {
             return nativeType;
         }
-    }
-
-    /**
-     * Whether the guest's own face may be enrolled or removed now (FaceService, patches/
-     * guest_face_pin_gate.py): user 0, facehal-rs serving IFace (never Samsung's face HAL, which is
-     * One UI's), and the guest lock's credential matched within FACE_WINDOW_MS.
-     *
-     * @param now SystemClock.elapsedRealtime()
-     */
-    public static boolean faceWriteAllowed(int userId, long now) {
-        try {
-            return userId == 0 && faceHalIsGuests() && recentlyVerified(now);
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    /** facehal-rs, not Samsung's face HAL, serves IFace in this session (guest_start.sh). */
-    public static boolean faceHalIsGuests() {
-        try {
-            return new File(sDir, FACE_HAL_MARKER).isFile();
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    static synchronized boolean recentlyVerified(long now) {
-        if (!sLoaded) {
-            loadRecord();
-        }
-        long at = sVerifiedAt;
-        return sType != TYPE_NONE && at != 0 && now >= at && now - at <= FACE_WINDOW_MS;
     }
 
     /** The wait that follows the given number of failures in a row, in ms. */
@@ -209,7 +162,6 @@ public final class OneOSGuestLock {
             }
             sFailures = 0;
             sLockedUntil = 0;
-            sVerifiedAt = elapsed > 0 ? elapsed : 1;
             new File(sDir, TRIES).delete();
             return MATCH;
         } catch (Throwable t) {
@@ -289,7 +241,6 @@ public final class OneOSGuestLock {
         sHash = null;
         sFailures = 0;
         sLockedUntil = 0;
-        sVerifiedAt = 0;
         sLoaded = true;
         return true;
     }
