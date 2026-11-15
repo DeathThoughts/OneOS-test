@@ -8,9 +8,9 @@ guest's own in front of that guard: a PIN, pattern or password whose record live
 the phone's gatekeeper, weaver or keystore.
 
 Here:
-- the patcher on a small smali tree with the shapes of the ColorOS 17 framework: the seven changes,
+- the patcher on a small smali tree with the shapes of the ColorOS 17 framework: the six changes,
   the guard in both of its forms (as guest_no_gatekeeper.py writes it and as a decoded built jar
-  shows it), a framework of another shape left untouched, a second run, a half-patched tree;
+  shows it), a framework of another shape left untouched, a second run, a half-patched tree, a tree with the earlier enrollment token;
 - the helper class on the JVM through a small driver: set, check, change, remove, the waits after
   wrong tries and what survives a restart, damaged files, the record format;
 - the checked-in smali belongs to the checked-in Java source, and make-overlays.sh runs the
@@ -428,7 +428,7 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(text.count('\n.method '), text.count('\n.end method'))
         helper = SMALI.read_text()
         calls = set(re.findall(re.escape(HELPER) + r'->([A-Za-z]+\([^)]*\)\S+)', text))
-        self.assertEqual({c.split('(')[0] for c in calls}, {'change', 'verify', 'credentialType', 'hat'})
+        self.assertEqual({c.split('(')[0] for c in calls}, {'change', 'verify', 'credentialType'})
         for call in calls:
             self.assertRegex(helper, r'(?m)^\.method public static (declared-synchronized )?'
                              + re.escape(call) + '$')
@@ -439,30 +439,54 @@ class PatcherTest(unittest.TestCase):
                          + added.count(f'invoke-direct {{p0, v4, p2}}, {LSS}->notifyLockSettingsStateListeners(ZI)V'), 2)
         self.assertGreaterEqual(added.count('.catch Ljava/lang/Throwable;'), 3)
         for needs in ('->credIncorrect(', '->fromTimeout(', '->requireStrongAuth(II)V',
-                      '->reportSuccessfulStrongAuthUnlock(I)V', '->onCredentialVerified()V',
-                      '->setGatekeeperPasswordHandle(J)'):
+                      '->reportSuccessfulStrongAuthUnlock(I)V', '->onCredentialVerified()V'):
             self.assertIn(needs, added)
-        # The token answer is in the framework's own handle method, not in the added ones.
-        self.assertIn('->setGatekeeperHAT([B)', text)
-        self.assertIn('->build()' + VCR, text)
+        # A match is the plain OK: no gatekeeper-password handle and no token, so guest Settings
+        # cannot start a biometric enrollment (fingerprint and face are One UI's only).
+        self.assertIn(f'sget-object v7, {VCR}->OK:{VCR}', added)
+        for never in ('setGatekeeperPasswordHandle', 'setGatekeeperHAT', '0x4f4e454f53', '$Builder;'):
+            self.assertNotIn(never, text)
 
-    def test_the_handle_of_a_matched_credential_gets_a_token(self):
+    def test_the_handle_method_is_left_to_the_framework(self):
         self.patched()
-        got = body(self.read(LSS_FILE), ' verifyGatekeeperPasswordHandle(')
-        self.assertEqual(got[0], 'invoke-static {p1, p2, p3, p4, p5}, ' + HELPER + '->hat(JJI)[B')
-        self.assertEqual(got[1], 'move-result-object v0')
-        self.assertEqual(got[2], 'if-eqz v0, :oneos_gl_gk_native')
-        self.assertTrue(any('checkReadPermission()V' in i for i in got),
-                        'every other handle keeps the framework path')
+        self.assertEqual(body(self.read(LSS_FILE), ' verifyGatekeeperPasswordHandle('),
+                         body(lss_text(), ' verifyGatekeeperPasswordHandle('))
 
-    def test_a_handle_method_with_no_spare_register_gets_one(self):
-        make_tree(self.root, lss=lss_text().replace(
-            'verifyGatekeeperPasswordHandle(JJI)' + VCR + '\n    .locals 3',
-            'verifyGatekeeperPasswordHandle(JJI)' + VCR + '\n    .locals 1'))
-        done = patch(self.root)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        head = self.read(LSS_FILE).split('.method public verifyGatekeeperPasswordHandle', 1)[1]
-        self.assertEqual(head.split('\n', 3)[1].strip(), '.locals 2')
+    def test_a_framework_without_the_handle_method_still_gets_the_lock(self):
+        self.patched(lss=lss_text().replace(' verifyGatekeeperPasswordHandle(', ' verifyHandle('))
+        self.assertIn('oneosGuestLockVerify', self.read(LSS_FILE))
+
+    def test_a_tree_with_the_earlier_enrollment_token_is_an_error(self):
+        old_verify = f'''    invoke-static {{p1, p2, p5}}, {HELPER}->hat(JI)[B
+
+    move-result-object v0
+'''
+        old_helper = SMALI.read_text().replace('.method public static credentialType(II)I',
+                                               '.method public static hat(JI)[B\n    .locals 0\n\n'
+                                               '    const/4 v0, 0x0\n\n    return-object v0\n'
+                                               '.end method\n\n'
+                                               '.method public static credentialType(II)I')
+        for name, edit in {
+            'its handle in the verify answer': lambda: (self.root / LSS_FILE).write_text(
+                self.read(LSS_FILE).replace(f'sget-object v7, {VCR}->OK:{VCR}',
+                                            'const-wide v0, 0x4f4e454f53L')),
+            'its token in the handle method': lambda: (self.root / LSS_FILE).write_text(
+                self.read(LSS_FILE).replace(
+                    f'    invoke-direct {{p0}}, {LSS}->checkReadPermission()V\n',
+                    old_verify + f'    invoke-direct {{p0}}, {LSS}->checkReadPermission()V\n')),
+            'its helper': lambda: (self.root / HELPER_FILE).write_text(old_helper),
+        }.items():
+            with self.subTest(name):
+                shutil.rmtree(self.root)
+                self.root.mkdir()
+                self.patched()
+                edit()
+                before = snapshot(self.root)
+                done = patch(self.root)
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn('earlier guest_local_lock.py', done.stderr)
+                self.assertEqual(done.stdout, '')
+                self.assertEqual(snapshot(self.root), before)
 
     def test_public_helpers_of_the_class_are_called_virtually(self):
         self.patched(lss=lss_text(helpers='public'))
@@ -478,8 +502,6 @@ class PatcherTest(unittest.TestCase):
             'no strong-auth field': dict(lss=lss_text().replace('.field private final mStrongAuth:',
                                                                 '.field private final mAuth:')),
             'no FRP check': dict(lss=lss_text().replace(' enforceFrpNotActive()V', ' frpCheck()V')),
-            'no handle method': dict(lss=lss_text().replace(' verifyGatekeeperPasswordHandle(',
-                                                           ' verifyHandle(')),
             'static verify': dict(lss=lss_text().replace('.method private doVerifyCredential(',
                                                          '.method private static doVerifyCredential(')),
             'no timeout response': dict(lss=lss_text().replace('->fromTimeout(', '->fromError(')),
@@ -585,7 +607,6 @@ public final class GuestLockDriver {
     static int type() { return OneOSGuestLock.credentialType(0, -1); }
     static long check(byte[] c) { return OneOSGuestLock.verify(c, E, W); }
     static int set(int type, byte[] c, byte[] saved) { return OneOSGuestLock.change(type, c, saved, E, W); }
-    static byte[] hat(long h, int u) { return OneOSGuestLock.hat(h, 77L, u); }
 
     public static void main(String[] a) throws Exception {
         dir = new File(a[1]);
@@ -609,7 +630,6 @@ public final class GuestLockDriver {
         eq(-1, check(PIN), "no lock: a check is not handled");
         eq(-1, set(-1, null, null), "no lock: a removal is not handled");
         yes(!has(RECORD) && !has(TRIES), "nothing written without a lock");
-        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "no lock: the guest handle gets no token");
         eq(0, set(3, b("123"), null), "three digits are refused");
         eq(0, set(2, PIN, null), "an unknown type is refused");
         eq(0, set(0, PIN, null), "type 0 is refused");
@@ -620,11 +640,6 @@ public final class GuestLockDriver {
         eq(3, type(), "the type is PIN");
         eq(-1, OneOSGuestLock.credentialType(10, -1), "other users keep the native type");
         eq(0, check(PIN), "the PIN matches");
-        byte[] token = hat(OneOSGuestLock.HANDLE, 0);
-        yes(token != null && token.length == OneOSGuestLock.HAT_LENGTH,
-                "a set lock answers its handle with a token");
-        yes(hat(OneOSGuestLock.HANDLE, 10) == null, "another user: no token");
-        yes(hat(OneOSGuestLock.HANDLE + 1, 0) == null, "another handle: no token");
         eq(1, check(OTHER), "a wrong PIN, no wait yet");
         eq(1, check(null), "null is wrong");
         eq(1, check(new byte[0]), "empty is wrong");
@@ -653,7 +668,6 @@ public final class GuestLockDriver {
 
         eq(1, set(-1, null, b("0124")), "removed with the pattern");
         eq(-1, type(), "no lock again");
-        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "removed: no token");
         eq(-1, check(PASS), "a check is not handled again");
         yes(!has(RECORD) && !has(TRIES) && !has(RECORD + ".tmp"), "no files left");
         restart();
@@ -723,30 +737,14 @@ public final class GuestLockDriver {
         yes(!has(TRIES), "and forgets the tries");
     }
 
-    // The guest's own face (patches/guest_face_pin_gate.py) and the token facehal-rs checks.
+    // The guest's own face (patches/guest_face_pin_gate.py): facehal-rs and a fresh guest PIN.
     static void face() throws Exception {
         File marker = new File(dir, OneOSGuestLock.FACE_HAL_MARKER);
         yes(!OneOSGuestLock.faceWriteAllowed(0, E), "no lock: no face write");
         eq(1, set(3, PIN, null), "set a PIN");
         restart();
-        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "nothing matched since boot: no token");
         yes(!OneOSGuestLock.faceWriteAllowed(0, E), "nothing matched since boot: no face write");
         eq(0, check(PIN), "the PIN matches");
-
-        byte[] t = OneOSGuestLock.hat(OneOSGuestLock.HANDLE, 0x0102030405060708L, 0);
-        yes(t != null && t.length == 69, "a token, 69 bytes");
-        eq(0, t[0], "version 0");
-        eq(0x08, t[1], "challenge little-endian: low byte first");
-        eq(0x01, t[8], "challenge little-endian: high byte last");
-        for (int i = 9; i < 25; i++) eq(0, t[i], "user id 0 and authenticator id 0, byte " + i);
-        eq(0, t[25], "authenticator type big-endian, high byte");
-        eq(1, t[28], "authenticator type PASSWORD, low byte last");
-        // E = 100000 ms = 0x186a0, big-endian in bytes 29..36.
-        for (int i = 29; i < 34; i++) eq(0, t[i], "timestamp high bytes, byte " + i);
-        eq(0x01, t[34] & 0xff, "timestamp");
-        eq(0x86, t[35] & 0xff, "timestamp");
-        eq(0xa0, t[36] & 0xff, "timestamp low byte last");
-        for (int i = 37; i < 69; i++) eq(0, t[i], "MAC, byte " + i);
 
         yes(!OneOSGuestLock.faceWriteAllowed(0, E + 1000), "Samsung's face HAL (no marker): never");
         yes(marker.createNewFile(), "facehal-rs runs");
@@ -762,7 +760,6 @@ public final class GuestLockDriver {
 
         eq(1, set(-1, null, PIN), "remove the lock");
         yes(!OneOSGuestLock.faceWriteAllowed(0, E + 600000 + 1000), "no lock: never");
-        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "no lock: no token");
         yes(marker.delete(), "marker gone");
         yes(!OneOSGuestLock.faceHalIsGuests(), "no facehal-rs");
     }
@@ -893,7 +890,7 @@ class HelperTest(unittest.TestCase):
     def test_a_damaged_record_is_no_lock(self):
         self.scenario('damaged')
 
-    def test_face_window_and_token(self):
+    def test_face_window(self):
         self.scenario('face')
 
 
@@ -909,6 +906,9 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(text.count('\n.class ') + text.startswith('.class '), 1)
         self.assertTrue(text.startswith('.class public final ' + HELPER + '\n'))
         for word in ('invoke-custom', 'invoke-polymorphic', 'const-method-handle', 'Landroid/'):
+            self.assertNotIn(word, text)
+        # No enrollment token: the guest enrolls no fingerprint or face of its own.
+        for word in (' hat(', 'HANDLE:J', 'HAT_LENGTH', '0x4f4e454f53'):
             self.assertNotIn(word, text)
         # Nothing of the phone's lock, keys or the service manager.
         for word in ('gatekeeper', 'keystore', 'KeyStore', 'weaver', 'ServiceManager', 'Binder'):

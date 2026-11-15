@@ -127,56 +127,6 @@ public final class OneOSGuestLock {
     }
 
     /**
-     * The gatekeeper-password handle the guest lock answers a matched credential with. A value no
-     * temporary gatekeeper password of the phone can have: the guest never stores one.
-     */
-    public static final long HANDLE = 0x4f4e454f53L;
-    /** Length of a gatekeeper hardware auth token (hw_auth_token_t). */
-    static final int HAT_LENGTH = 69;
-    /** HardwareAuthenticatorType.PASSWORD: the token says a lock credential was confirmed. */
-    static final int AUTHENTICATOR_PASSWORD = 1;
-
-    /**
-     * What ILockSettings.verifyGatekeeperPasswordHandle answers for the handle above: a hardware
-     * auth token in hw_auth_token_t layout (version 0; challenge, user id and authenticator id
-     * little-endian; authenticator type and timestamp big-endian, the timestamp in
-     * elapsed-realtime ms; a 32-byte MAC, zero: nothing in the guest holds a key the phone's TEE
-     * would accept, and keystore refuses it). It carries the caller's challenge, so the guest's own
-     * face HAL (facehal-rs) can tie an enrollment to the generateChallenge it handed out, and the
-     * time the guest credential last matched, which facehal-rs refuses once it is minutes old.
-     *
-     * @return null when the handle is not the guest's, no guest lock is set or no credential
-     *         matched since boot: the framework answers that call as it would
-     */
-    public static byte[] hat(long handle, long challenge, int userId) {
-        if (userId != 0 || handle != HANDLE) {
-            return null;
-        }
-        try {
-            long at;
-            synchronized (OneOSGuestLock.class) {
-                if (!sLoaded) {
-                    loadRecord();
-                }
-                if (sType == TYPE_NONE || sVerifiedAt == 0) {
-                    return null;
-                }
-                at = sVerifiedAt;
-            }
-            byte[] token = new byte[HAT_LENGTH];
-            token[0] = 0;
-            putLe(token, 1, challenge);
-            putLe(token, 9, userId);
-            putLe(token, 17, 0L);
-            putBe(token, 25, AUTHENTICATOR_PASSWORD, 4);
-            putBe(token, 29, at, 8);
-            return token;
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    /**
      * Whether the guest's own face may be enrolled or removed now (FaceService, patches/
      * guest_face_pin_gate.py): user 0, facehal-rs serving IFace (never Samsung's face HAL, which is
      * One UI's), and the guest lock's credential matched within FACE_WINDOW_MS.
@@ -206,18 +156,6 @@ public final class OneOSGuestLock {
         }
         long at = sVerifiedAt;
         return sType != TYPE_NONE && at != 0 && now >= at && now - at <= FACE_WINDOW_MS;
-    }
-
-    private static void putLe(byte[] out, int at, long value) {
-        for (int i = 0; i < 8; i++) {
-            out[at + i] = (byte) (value >>> (8 * i));
-        }
-    }
-
-    private static void putBe(byte[] out, int at, long value, int bytes) {
-        for (int i = 0; i < bytes; i++) {
-            out[at + i] = (byte) (value >>> (8 * (bytes - 1 - i)));
-        }
     }
 
     /** The wait that follows the given number of failures in a row, in ms. */
