@@ -847,8 +847,20 @@ add)
     # value only satisfies the check. Memory only, deleted by remove.
     if [ -e "$ROOTFS/system/system_ext/framework/miui-services.jar" ] || [ -e "$ROOTFS/system_ext/framework/miui-services.jar" ]; then
         k=persist.vendor.sys.fp.vendor
-        if grep -qxF "$k" "$HOST"; then
-            echo "guest_props: $k is One UI's ($(getprop "$k")), left alone"
+        hv=$(getprop "$k")
+        if grep -qxF "$k" "$HOST" && [ -n "$hv" ] && [ "$hv" != none ]; then
+            echo "guest_props: $k is One UI's ($hv), left alone"
+        elif grep -qxF "$k" "$HOST"; then
+            # One UI defines the name with no value (a session's leftover:
+            # Galaxy S23 HyperOS 11-15, "is One UI's (), left alone", and every
+            # fingerprint call then failed isHardwareDetected). Memory only, put
+            # back on the return like the other overrides.
+            if "$RP" -n "$k" goodix 2>/dev/null; then
+                echo "$k=$hv" >> "$OVR"
+                echo "guest_props: $k='$hv' overridden to goodix for the session (HyperOS shows fingerprint only with a vendor named)"
+            else
+                echo "!!! guest_props: $k is empty and could not be set; HyperOS will show no fingerprint"
+            fi
         else
             sed -i '/^persist\.vendor\.sys\.fp\.vendor=/d' "$NEW"
             echo "$k=goodix" >> "$NEW"
