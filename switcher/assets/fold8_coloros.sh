@@ -340,6 +340,7 @@ done < "$MANIFEST"
 echo 'verified overlays: complete'
     ;;
 performance-supported) perf_supported ;;
+gpu-top) gpu_max ;;
 performance-snapshot) perf_snapshot host ;;
 performance-live)
     perf_supported || exit 0

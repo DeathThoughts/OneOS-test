@@ -3541,11 +3541,36 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     F=$STAGE/heat_cap.log
     CFL=/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit
     if [ $HEAT_CAP = 1 ]; then
-        echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy at 80, 65, 50% of its top clock (2 C hysteresis)\" > \$F
+        echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (2 C hysteresis)\" > \$F
     else
         echo \"# \$(date) OneOS heat cap off (Cool down when hot): the guest thermal status only\" > \$F
     fi
     [ $GUEST_THERMAL_MAP = 1 ] && echo \"# guest thermal status from skin: NONE, LIGHT 47, MODERATE 50, SEVERE 53, the HAL status from 56 C (1 C hysteresis)\" >> \$F
+    # The GPU's ceiling vote (Samsung's gpu_max_clock, in MHz) outlives One UI's
+    # SSRM the same way the CPU's does: a whole S23 session at 220 of 719 MHz
+    # (HyperOS 0.5.13), so every app animation dropped frames in every guest.
+    # Its steps: Qualcomm's kgsl table (Hz), else Samsung's own (gpu_max_clock's unit).
+    GMC=/sys/kernel/gpu/gpu_max_clock
+    GT=''
+    if [ -r /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies ]; then
+        GT=\$(awk '{for(i=1;i<=NF;i++)if(\$i~/^[0-9]+\$/)printf \"%d \", int(\$i/1000000)}' /sys/class/kgsl/kgsl-3d0/gpu_available_frequencies 2>/dev/null)
+    elif [ -r /sys/kernel/gpu/gpu_freq_table ]; then
+        GT=\$(awk '{for(i=1;i<=NF;i++)if(\$i~/^[0-9]+\$/)printf \"%d \", \$i}' /sys/kernel/gpu/gpu_freq_table 2>/dev/null)
+    fi
+    GTOP=\$(echo \$GT | awk '{for(i=1;i<=NF;i++)if(\$i>m)m=\$i}END{print m+0}')
+    gpu_at() {
+        [ -w \$GMC ] && [ \"\$GTOP\" -gt 0 ] 2>/dev/null || return 0
+        # One UI's power saving was on: its GPU vote is the user's choice, not a stale one.
+        [ \"\$1\" != 100 ] || [ \"$HOST_LOW_POWER\" = 0 ] || return 0
+        [ -f $STAGE/gpu_max_clock.before ] || cat \$GMC > $STAGE/gpu_max_clock.before 2>/dev/null
+        t=\$(echo \$GT | awk -v max=\$((GTOP * \$1 / 100)) '{for(i=1;i<=NF;i++)if(\$i<=max&&\$i>m)m=\$i}END{print m+0}')
+        [ \"\$t\" -gt 0 ] || t=\$(echo \$GT | awk '{for(i=1;i<=NF;i++)if(!m||\$i<m)m=\$i}END{print m+0}')
+        echo \$t > \$GMC 2>/dev/null
+        c=\"\$c gpu=\$(cat \$GMC 2>/dev/null)/\$GTOP\"
+    }
+    gpu_capped() {
+        [ -r \$GMC ] && [ \"\$GTOP\" -gt 0 ] 2>/dev/null && [ \"\$(cat \$GMC 2>/dev/null)\" != \"\$GTOP\" ]
+    }
     full() {
         c=''
         if [ \"$HOST_LOW_POWER\" = 0 ] && [ -w \$CFL ] && [ \"\$(cat \$CFL 2>/dev/null)\" != -1 ]; then
@@ -3559,6 +3584,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             echo \$hw > \$p/scaling_max_freq 2>/dev/null
             c=\"\$c \${p##*/}=\$(cat \$p/scaling_max_freq 2>/dev/null)/\$hw\"
         done
+        gpu_at 100
         echo \"\$(date +%T) \$1: full clock:\$c\" >> \$F
     }
     lvl=0; first=1; tl=-1; lp=''
@@ -3589,6 +3615,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 for p in /sys/devices/system/cpu/cpufreq/policy*; do
                     [ \"\$(cat \$p/scaling_max_freq 2>/dev/null)\" = \"\$(cat \$p/cpuinfo_max_freq 2>/dev/null)\" ] || capped=1
                 done
+                gpu_capped && capped=1
                 if [ -n \"\$capped\" ]; then full \"skin \$sk C, a cap from before the switch lifted\"
                 else echo \"\$(date +%T) skin \$sk C: no cap\" >> \$F; fi
             elif [ \"\$new\" = 0 ] && [ \$lvl != 0 ]; then
@@ -3602,6 +3629,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                     echo \$((hw / 100 * pct)) > \$p/scaling_max_freq 2>/dev/null
                     c=\"\$c \${p##*/}=\$(cat \$p/scaling_max_freq 2>/dev/null)/\$hw\"
                 done
+                gpu_at \$pct
                 echo \"\$(date +%T) skin \$sk C, level \$lvl to \$new: \$pct%:\$c\" >> \$F
             fi
             lvl=\$new; first=0

@@ -293,8 +293,19 @@ if [ -f $S/heat_cap.active ]; then
         echo "$hw" > "$p/scaling_max_freq" 2>/dev/null
         hc="$hc ${p##*/}=$(cat "$p/scaling_max_freq" 2>/dev/null)/$hw"
     done
+    # The GPU's ceiling, if the heat cap touched it: its top step, for One UI's
+    # SSRM to vote afresh (One UI's last vote is the stale one it lifted).
+    GMC=/sys/kernel/gpu/gpu_max_clock
+    if [ -f $S/gpu_max_clock.before ] && [ -w $GMC ]; then
+        gtop=$(STAGE="$S" /system/bin/sh "$S/fold8_coloros.sh" gpu-top 2>/dev/null)
+        case "$gtop" in ''|0|*[!0-9]*) ;; *)
+            echo "$gtop" > $GMC 2>/dev/null
+            hc="$hc gpu=$(cat $GMC 2>/dev/null)/$gtop (One UI's was $(cat $S/gpu_max_clock.before))" ;;
+        esac
+        rm -f $S/gpu_max_clock.before
+    fi
     rm -f $S/heat_cap.active
-    echo "Heat cap: stopped, CPU policies at full clock:$hc"
+    echo "Heat cap: stopped, CPU policies and GPU at full clock:$hc"
 fi
 
 # Every process still in the container's mount namespace (recorded by
