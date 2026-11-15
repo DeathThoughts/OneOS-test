@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="environment_boot">Iniciar %1$s</string>
+    <string name="environment_root">Root</string>
+    <string name="environment_storage">Espaço de armazenamento</string>
+    <string name="environment_battery">Bateria</string>
+    <string name="environment_lock">Bloqueio de tela</string>
+    <string name="environment_guest_root">Acesso root no guest</string>
+    <string name="environment_guest_root_status">Ativado pela ponte de root do guest que o OneOS já tem</string>
+    <string name="environment_no_root">Root não detectado</string>
+    <string name="environment_lock_off">Desativado</string>
+    <string name="environment_lock_on">Ativado</string>
+    <string name="environment_unknown">Não verificado</string>
+    <string name="environment_free">%1$s livres</string>
+    <string name="environment_active">%1$s ativo</string>
+    <string name="environment_apps">Apps</string>
+    <string name="environment_bring_summary">Leve apps da One UI junto, com os dados e logins deles</string>
+    <string name="environment_report">Relatar problema à equipe do OneOS</string>
+    <string name="environment_checking">Verificando o celular e o sistema preparado…</string>
+    <string name="environment_busy_logs">Salvando os logs da última sessão (dados pessoais removidos). Iniciar e Atualizar começam quando isso terminar, normalmente em poucos minutos.</string>
+    <string name="environment_busy_other">O OneOS está terminando outra tarefa. Iniciar e Atualizar começam quando ela acabar.</string>
+    <string name="environment_preview">Modo de prévia · ambiente e inicialização simulados</string>
+    <string name="switch_blocked_now">Algo mudou desde a última verificação. Veja na página do sistema o que está impedindo.</string>
+    <string name="boot_cannot_cancel">Não dá para cancelar agora</string>
+    <string name="boot_cannot_cancel_line">A troca já passou do ponto em que pode parar. Ela termina em instantes.</string>
+    <string name="environment_boot_cancelled">Inicialização cancelada</string>
+    <string name="environment_boot_cancelling">Cancelando…</string>
+    <string name="environment_update">Atualizar %1$s</string>
+    <string name="environment_restage_title">%1$s precisa ser configurado de novo</string>
+    <string name="environment_restage_summary">A configuração anterior não terminou. Atualize a configuração antes de iniciar.</string>
+    <string name="logs_skip">Pular o salvamento dos logs</string>
+    <string name="logs_skip_summary">Para de salvar os logs da última sessão, para você poder trocar ou atualizar agora. Nada é enviado. Você ainda pode salvá-los em Última sessão até a próxima troca.</string>
+    <string name="logs_keep">Continuar salvando</string>
+    <string name="logs_stopping">Parando o salvamento dos logs…</string>
+    <string name="environment_busy_logs_stopping">Parando o salvamento dos logs. Iniciar e Atualizar ficam prontos em instantes.</string>
+</resources>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setup_mock_title">Configurar %1$s</string>
+    <string name="setup_installing">Instalando</string>
+    <string name="setup_preview_badge">Prévia · configuração simulada</string>
+    <string name="setup_check_phone">Verificar o celular</string>
+    <string name="setup_check_files">Verificar o download</string>
+    <string name="setup_image">Instalar o sistema</string>
+    <string name="setup_files_patches">Instalar as correções do OneOS</string>
+    <string name="setup_download_files">Baixar as correções do OneOS</string>
+    <string name="setup_table">Preparar as instalações de apps</string>
+    <string name="setup_session">Salvar as configurações da troca</string>
+    <string name="setup_cleanup">Arrumar</string>
+    <string name="setup_download_question">Você já baixou o arquivo?</string>
+    <string name="setup_preview_setting">Modo de prévia</string>
+    <string name="setup_preview_setting_summary">Simula as telas de configuração e inicialização. No card de um sistema, toque em Configurar e depois em Sim para pular a escolha do arquivo. Nenhum arquivo é alterado e nenhum sistema inicia.</string>
+    <string name="setup_download_yes">Sim</string>
+    <string name="setup_download_no">Não</string>
+    <string name="setup_preview_cancelled_title">Prévia cancelada</string>
+    <string name="setup_update_title">Atualizar %1$s</string>
+    <string name="setup_updating">Atualizando</string>
+    <string name="setup_check_update">Verificar a atualização no celular</string>
+    <string name="setup_verify_existing_image">Verificar o sistema que já está no celular</string>
+    <string name="setup_notification_title">Configurando %1$s</string>
+    <string name="setup_notification_channel">Configurando um sistema</string>
+    <string name="setup_stop_setup">Parar configuração</string>
+    <string name="setup_stop_title">Parar de configurar %1$s?</string>
+    <string name="setup_keep_going">Continuar</string>
+    <string name="setup_wait_check">Verificando o celular primeiro. Toque em Configurar de novo daqui a pouco.</string>
+    <string name="setup_no_profile">O OneOS não tem um sistema para este celular, então não dá para configurar um.</string>
+</resources>

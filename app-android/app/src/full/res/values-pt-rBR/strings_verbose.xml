@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="verbose_boot_title">Inicialização detalhada</string>
+    <string name="verbose_boot_summary">Mostra em tempo real os eventos de processos e serviços do sistema ao entrar no guest e ao voltar para a One UI.</string>
+    <string name="splash_launching_into">Entrando em %1$s</string>
+</resources>

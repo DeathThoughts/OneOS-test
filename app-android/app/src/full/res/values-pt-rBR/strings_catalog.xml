@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="catalog_settings">Configurações</string>
+    <string name="catalog_set_up">Configurar</string>
+    <string name="catalog_boot">Iniciar</string>
+    <string name="catalog_more">Opções do sistema</string>
+    <string name="catalog_details">Detalhes do sistema</string>
+    <string name="catalog_optimised">Otimizado</string>
+    <string name="catalog_experimental">Experimental</string>
+    <string name="catalog_unsupported">Sem suporte</string>
+    <string name="catalog_unsupported_message">O OneOS ainda não oferece %1$s para o seu %2$s. Os outros sistemas marcados como Otimizado ou Experimental funcionam nele.</string>
+    <string name="catalog_not_available">Indisponível</string>
+    <string name="catalog_this_phone">celular</string>
+    <string name="settings_load_gsi">Carregar GSI personalizada</string>
+    <string name="settings_storage">Gerenciar armazenamento do OneOS</string>
+    <string name="settings_repair">Reparar patches do OneOS</string>
+    <string name="settings_help">Ajuda e sobre</string>
+    <string name="settings_onboarding">Antes de começar</string>
+    <string name="settings_debug">Depuração</string>
+    <string name="settings_thermal">Ativar o gerenciador térmico do OneOS</string>
+    <string name="settings_experimental">Experimental</string>
+    <string name="settings_camera">Ativar correção da câmera</string>
+    <string name="settings_allow_lock">Permitir trocar com bloqueio de tela</string>
+    <string name="catalog_open_checks">Abrir verificações antes de iniciar %1$s</string>
+    <string name="catalog_update">Atualizar</string>
+    <string name="catalog_switch">Trocar</string>
+</resources>

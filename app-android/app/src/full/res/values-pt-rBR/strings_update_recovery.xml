@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="retry_update">Tentar atualizar de novo</string>
+    <string name="update_interrupted_title">Terminar de atualizar %1$s</string>
+    <string name="update_interrupted_summary">A atualização não terminou. Seus apps e dados foram mantidos. Tente de novo para verificar a imagem do sistema existente e terminar de atualizar os arquivos do OneOS.</string>
+</resources>

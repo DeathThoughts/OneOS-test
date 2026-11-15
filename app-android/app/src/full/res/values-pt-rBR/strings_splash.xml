@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="splash_starting">Iniciando %1$s</string>
+    <string name="splash_test_run">Teste: verificando %1$s</string>
+    <string name="splash_shutdown">Desligando a One UI</string>
+    <string name="splash_test_status">Teste: verificando o sistema</string>
+</resources>

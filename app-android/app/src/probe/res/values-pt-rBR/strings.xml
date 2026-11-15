@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OneOS Probe</string>
+    <string name="before_link_summary">O que os testes leem, o root e o que é compartilhado</string>
+    <string name="before_probe_reads_title">O OneOS Probe só lê</string>
+    <string name="before_probe_reads_summary">Ele roda testes somente leitura como root e junta o que encontra num zip para a equipe do OneOS. Nada no celular muda: o root não grava nenhum arquivo nem altera configuração ou propriedade, e nada é flasheado ou trocado.</string>
+    <string name="before_probe_root_title">É preciso ter root</string>
+    <string name="before_probe_root_summary">Os testes rodam como root (KernelSU, Magisk ou APatch). Permita o OneOS Probe quando o gerenciador de root pedir; no KernelSU ou APatch, permita-o antes na lista de superusuário.</string>
+    <string name="before_probe_privacy_title">Os dados pessoais são removidos antes</string>
+    <string name="before_probe_privacy_summary">Antes que qualquer coisa possa ser compartilhada, o OneOS Probe remove IMEI e MEID, números de série e IDs do aparelho, endereços MAC, números de SIM e de telefone, e-mails, nomes de Wi-Fi e de contas e localizações. Você pode abrir cada arquivo antes de compartilhar.</string>
+    <string name="before_probe_share_title">Você decide o que é compartilhado</string>
+    <string name="before_probe_share_summary">Os resultados ficam no app até você compartilhar ou salvar o zip. O OneOS Probe não tem permissão de internet.</string>
+    <string name="before_probe_switch_title">A troca fica no app OneOS</string>
+    <string name="before_probe_switch_summary">Este app não consegue preparar nem trocar para outro sistema. Os resultados dizem à equipe do OneOS se o app OneOS funciona neste celular.</string>
+    <string name="before_ack">Entendo que os testes precisam de root e só leem</string>
+    <string name="home_subtitle">Testes somente leitura para a equipe do OneOS</string>
+    <string name="home_about_title">Sobre o OneOS Probe</string>
+    <string name="report_warning_next">O app OneOS verifica tudo de novo antes de preparar ou trocar qualquer coisa.</string>
+    <string name="report_readonly_summary">Estas informações vêm das APIs do Android e das propriedades do sistema. O OneOS Probe não gravou nada nem rodou nada como root, exceto su -c id se você tocou em Verificar root.</string>
+    <string name="check_root_running">Aguardando o root… permita o OneOS Probe se o gerenciador de root pedir.</string>
+    <string name="check_root_dialog_message">O OneOS Probe vai rodar \"su -c id\" uma vez. Ele só mostra com qual usuário roda e não altera nada.\n\nO Magisk pode pedir para você permitir o OneOS Probe. No KernelSU ou APatch, permita o OneOS Probe antes na lista de superusuário.</string>
+    <string name="tests_checking_root">Verificando o root… permita o OneOS Probe se o gerenciador de root pedir.</string>
+    <string name="tests_readonly_summary">Todo comando só lê. O root não grava nenhum arquivo, não altera propriedade nem configuração e não inicia nem para nada. Os resultados vão para o OneOS Probe por um pipe e ficam no armazenamento dele até você compartilhar. Toque num teste abaixo para ver o comando exato.</string>
+    <string name="tests_privacy_summary">Antes que qualquer coisa possa ser compartilhada, o OneOS Probe remove IMEI e MEID, números de série e IDs do aparelho, endereços MAC, números de SIM (ICCID, IMSI), números de telefone, e-mails, nomes de Wi-Fi, nomes de contas e localizações. Nenhum log, mensagem, contato, foto ou arquivo é lido. Você pode abrir cada arquivo antes de compartilhar.</string>
+    <string name="tests_dialog_message">O OneOS Probe vai rodar \"su -c id\" e depois os comandos somente leitura listados nesta tela. Nada no celular é alterado. Os resultados ficam no OneOS Probe até você compartilhar, e os dados pessoais são removidos antes disso.\n\nO Magisk pode pedir para você permitir o OneOS Probe. No KernelSU ou APatch, permita o OneOS Probe antes na lista de superusuário.</string>
+    <string name="findings_delete_summary">Remove o zip e a pasta de resultados do armazenamento do OneOS Probe.</string>
+    <string name="about_title">Sobre o OneOS Probe</string>
+    <string name="about_version_scope_summary">O OneOS Probe é a parte somente leitura do OneOS como um app à parte, para compartilhar resultados: ele verifica este celular, roda os testes como root, remove dados pessoais e monta um zip de resultados que você pode compartilhar. Ele não prepara nem troca nada; isso é o app OneOS. Ele é instalado ao lado do OneOS e precisa da própria permissão de root.</string>
+    <string name="about_safety_summary">Todo comando root está na lista em Rodar testes (toque num teste para vê-lo) e só lê; o app confere a lista com as regras de somente leitura antes de cada execução. O root não grava nenhum arquivo, não altera nada e não inicia nem para nada. Nada sai do celular a menos que você compartilhe.</string>
+</resources>
