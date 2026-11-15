@@ -1,11 +1,10 @@
-# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)
+# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)
 # guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)
 # framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py)
 # telephony-common_patched.jar: the SMS service centre as an international number (patches/guest_smsc_international.py); SEND_SMS error 66 (sent, no result payload) counted as sent (patches/guest_sms_invalid_response.py)
 # libcamera_client_patched.so, libcameracompatbilityinfo_patched.so: the native camera client with One UI's codes (patches/pixel_camera_native.py)
 # oplus-framework_patched.jar: outgoing calls over IMS where the carrier asks for VoLTE provisioning (patches/oplus_ims_provision.py; Samsung's IMS answers 0), 0.5.05
-# services_patched.jar (DeathThoughts s23-sets-1): the 0.5.13 build (5e361d3a) plus patches/guest_force_aidl_fingerprint.py and patches/guest_fingerprint_readonly.py (scripts/patch-built-jar.sh)
-e5d8fcdb4f1cd045474ce893f8c7e467ae42a49e241ecb745c85677410b2e854  services_patched.jar
+de4f9d9ed6efc492e43272e9d848de73f06b0393a682499b1dea8ac98ce9adf9  services_patched.jar
 9fcaf57457d45a27226ad2bbb5753a7963ab1f2093cf832bfc79660194eaadf9  oplus-services_patched.jar
 9db563d25f5afd9a205e726da2e525933f6c86b1e5ca40fa0dfdc82350e01722  vold_patched
 e0c49883974c10f5601950c0f54c3da29658dda1ce17c08c5af1364bbd31bdd8  service.incremental_patched.so
