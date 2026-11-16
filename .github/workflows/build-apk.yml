@@ -192,6 +192,12 @@ jobs:
           javac -d "$classes" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java" scripts/GuestStartPatchTest.java
           java -cp "$classes" GuestStartPatchTest
 
+      - name: Verify restart Home acknowledgement
+        run: |
+          sh -n switcher/assets/oneos_switch.sh
+          sh -n switcher/assets/guest_prepare.sh
+          python3 scripts/test-restart-home.py
+
       - name: Verify guest media mount safety
         run: python3 scripts/test-guest-media-share.py
 
