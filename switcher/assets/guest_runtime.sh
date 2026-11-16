@@ -96,6 +96,11 @@ control)
                 [ ! -f "$m/webroot/index.html" ] || caps="$caps,webui"
                 removed=0; [ ! -f "$m/remove" ] || removed=1
                 echo "@@RESULT module-info ${m##*/} $enabled $base $kind ${verhex:--} ${namehex:--} ${deschex:--} ${authorhex:--} ${codehex:--} ${updatehex:--} $caps $removed"
+                reason="$m/.oneos-disabled-reason"
+                if [ "$enabled" = 0 ] && [ -f "$reason" ] && [ ! -L "$reason" ]; then
+                    reasonhex=$(head -c 512 "$reason" | tr -d '\r\n' | od -An -v -tx1 | tr -d ' \n')
+                    [ -z "$reasonhex" ] || echo "@@RESULT module-disabled-reason $base ${m##*/} $reasonhex"
+                fi
             done
         done
         ;;
@@ -241,6 +246,7 @@ control)
                 [ "$id" = "$(cat "$A/oneos/framework")" ] || { echo 'Select this framework on the pre-boot page first' >&2; exit 1; }
             fi
             if [ "$4" = on ]; then rm -f "$m/disable"; else : > "$m/disable"; fi
+            rm -f "$m/.oneos-disabled-reason"
             found=1
         done
         [ "$found" = 1 ] || exit 1
