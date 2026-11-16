@@ -78,11 +78,11 @@
     <string name="root_permissions">Permissões de root</string>
     <string name="root_permissions_summary">Gerencie o acesso root dos apps neste sistema</string>
     <string name="manage_modules">Gerenciar módulos do convidado</string>
-    <string name="manage_modules_summary">As importações e alterações serão aplicadas na próxima inicialização do sistema convidado</string>
+    <string name="manage_modules_summary">Importe ou altere módulos.\nAs mudanças valem no próximo reinício.</string>
     <string name="restart_action">Reiniciar sistema convidado</string>
-    <string name="restart_action_summary">Reinicie o sistema convidado para aplicar as alterações pendentes nos módulos</string>
+    <string name="restart_action_summary">Reinicie o sistema convidado.\nIsso aplica as alterações nos módulos.</string>
     <string name="restart_confirm_title">Reiniciar o sistema convidado?</string>
-    <string name="restart_confirm_message">Os apps do sistema convidado serão fechados e as alterações pendentes nos módulos serão aplicadas. A One UI continuará parada durante o reinício. Se a recuperação falhar, o OneOS voltará para a One UI.</string>
+    <string name="restart_confirm_message">Os apps do sistema convidado serão fechados. As alterações pendentes nos módulos serão aplicadas.\n\nA One UI continuará parada durante o reinício. Se a recuperação falhar, o OneOS voltará para a One UI.</string>
     <string name="framework_status">Status do framework</string>
     <string name="framework_active">%1$s · Ativo</string>
     <string name="framework_inactive">%1$s · Inativo</string>
