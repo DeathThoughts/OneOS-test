@@ -307,6 +307,39 @@ if [ -f $S/heat_cap.active ]; then
     rm -f $S/heat_cap.active
     echo "Heat cap: stopped, CPU policies and GPU at full clock:$hc"
 fi
+rm -f $S/heat_cap.level
+# The guest boost (oneos_switch.sh; S23 SM-S911B, ColorOS 17, no boost in the
+# guest without One UI's HyPer service): stopped like the heat cap, and every
+# scaling_min_freq and kernel input-boost value it changed put back from
+# boost.before (this boot's only, the listed nodes only), for One UI's own
+# boosts to start from its values. Its touch reader's getevent (boost.gpid) is
+# stopped too: left behind, it would hold the touchscreen open after the
+# return until the next touch (guest_start.sh: the IC stays fully on while
+# something holds it). Only that one pid, after a look at its command line.
+pkill -9 -f "oneos_guest_boost" 2>/dev/null || true
+if [ -f $S/boost.active ]; then
+    gp=$(cat $S/boost.gpid 2>/dev/null)
+    case "$gp" in ''|*[!0-9]*) ;; *)
+        case "$(tr '\0' ' ' < /proc/$gp/cmdline 2>/dev/null)" in *getevent\ -c\ 1\ -q\ /dev/input/*) kill "$gp" 2>/dev/null ;; esac ;;
+    esac
+    gb=""
+    if [ -f $S/boost.before ] && [ "$(sed -n '1s/^boot //p' $S/boost.before)" = "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" ]; then
+        while read -r k n v; do
+            [ "$k" = node ] || continue
+            case "$n" in
+                /sys/devices/system/cpu/cpufreq/policy*/scaling_min_freq|/proc/sys/walt/input_boost/input_boost_freq|/proc/sys/walt/input_boost/input_boost_ms) ;;
+                /sys/module/cpu_boost/parameters/input_boost_freq|/sys/module/cpu_boost/parameters/input_boost_ms) ;;
+                *) continue ;;
+            esac
+            case "$v" in ''|*[!0-9:\ ]*) continue ;; esac
+            echo "$v" > "$n" 2>/dev/null
+            case "$n" in */scaling_min_freq) l=${n%/*}; l=${l##*/} ;; *) l=${n##*/} ;; esac
+            gb="$gb $l=$(echo $(cat "$n" 2>/dev/null))"
+        done < $S/boost.before
+    fi
+    rm -f $S/boost.before $S/boost.active $S/boost.state $S/boost.count $S/boost.gpid
+    echo "Guest boost: stopped, values put back:${gb:- none saved}"
+fi
 
 # Every process still in the container's mount namespace (recorded by
 # oneos_switch.sh). The host's own namespace is never touched.
