@@ -24,16 +24,39 @@ class GuestManagerUpdateTest(unittest.TestCase):
         self.localtmp.mkdir()
         self.folder = self.adb / 'oneos/manager-update'
         self.script = self.root / 'runtime.sh'
+        tools = self.root / 'bin'
+        tools.mkdir()
+        for name, command in {
+            'busybox': '''#!/bin/sh
+[ "$1" = timeout ] && [ "$2" = -s ] && [ "$3" = KILL ] || exit 2
+bound=$4
+shift 4
+case "$1:$bound" in pm:45|am:5) ;; *) exit 2 ;; esac
+exec "$@"
+''',
+            'pm': f'''#!/bin/sh
+printf '%s\\n' "$*" > '{self.root}/pm.args'
+if [ -f '{self.root}/pm.timeout' ]; then exit 137; fi
+if [ -f '{self.root}/pm.fail' ]; then
+    echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]'
+    exit 1
+fi
+echo Success
+''',
+            'am': f'''#!/bin/sh
+printf '%s\\n' "$*" > '{self.root}/am.args'
+''',
+        }.items():
+            path = tools / name
+            path.write_text(command)
+            path.chmod(0o700)
         text = SOURCE.replace('A=/data/adb', f'A={self.adb}')
         text = text.replace('/data/user/0/com.fahadali.oneos.guest/files/oneos-update/OneOSGuest.apk', str(self.input))
         text = text.replace('/data/local/tmp/oneos-manager-install.', str(self.localtmp / 'install.'))
+        text = text.replace('/data/oneos_bin/busybox', str(tools / 'busybox'))
         self.script.write_text(text)
         self.shell = f'''
-pm() {{
-    printf '%s\\n' "$*" > '{self.root}/pm.args'
-    if [ -f '{self.root}/pm.fail' ]; then echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]'; return 1; fi
-    echo Success
-}}
+export PATH='{tools}':"$PATH"
 restorecon() {{ :; }}
 . '{self.script}'
 '''
@@ -89,8 +112,24 @@ restorecon() {{ :; }}
         (self.folder / 'pending/OneOSGuest.apk').write_bytes(b'corrupted')
         self.assertNotEqual(0, self.run_control('apply').returncode)
         self.assertFalse((self.root / 'pm.args').exists())
+        self.assertIn('failed its checksum', self.run_control('status').stdout)
+        self.assertIn('com.fahadali.oneos.guest/.GuestUpdatesActivity',
+                      (self.root / 'am.args').read_text())
         self.assertEqual(0, self.run_control('cancel').returncode)
         self.assertEqual('idle', self.run_control('status').stdout.strip())
+
+    def test_timed_out_installer_leaves_update_pending_and_reopens_ui(self):
+        self.assertEqual(0, self.stage().returncode)
+        (self.root / 'pm.timeout').touch()
+        self.assertNotEqual(0, self.run_control('apply').returncode)
+        self.assertIn('pending 156\nThe guest update installer timed out.',
+                      self.run_control('status').stdout)
+        self.assertIn('com.fahadali.oneos.guest/.GuestUpdatesActivity',
+                      (self.root / 'am.args').read_text())
+        self.assertFalse((self.folder / 'lock').exists())
+        self.assertEqual([], list(self.localtmp.iterdir()))
+        (self.root / 'pm.timeout').unlink()
+        self.assertEqual(0, self.run_control('apply').returncode)
 
 
 if __name__ == '__main__':

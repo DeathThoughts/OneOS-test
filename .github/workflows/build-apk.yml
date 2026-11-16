@@ -203,7 +203,9 @@ jobs:
           badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk" | head -n 1)
           vname=$(printf '%s\n' "$badging" | sed -n "s/.* versionName='\([^']*\)'.*/\1/p")
           vcode=$(printf '%s\n' "$badging" | sed -n "s/.* versionCode='\([^']*\)'.*/\1/p")
-          signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" 2>/dev/null | grep -m1 'certificate SHA-256 digest' | sed 's/.*: //' | tr 'A-F' 'a-f' || true)
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          certs=$("$apksigner" verify --print-certs "$apk")
+          signer=$(printf '%s\n' "$certs" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' | tr 'A-F' 'a-f')
           [ -n "$signer" ] || { echo "::error::APK signature could not be verified"; exit 1; }
           {
             echo "### OneOS $VARIANT APK"
@@ -229,15 +231,18 @@ jobs:
             echo "::error::$name is signed by ${signer:-<no signer>}, not the DEBUG_KEYSTORE_B64 key $ONEOS_DEBUG_KEYSTORE_SHA256"
             exit 1
           fi
-
-      - name: Prepare guest update metadata
-        env:
-          VARIANT: ${{ matrix.variant }}
-        run: |
-          set -eu
-          cp "app-android/guest/build/outputs/apk/$VARIANT/guest-$VARIANT.apk" "dist/OneOSGuest-$VARIANT.apk"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "dist/OneOSGuest-$VARIANT.apk"
-          python3 scripts/write-update-manifests.py --variant "$VARIANT" --run-id "${{ github.run_id }}"
+          guest="OneOSGuest-$VARIANT.apk"
+          cp "app-android/guest/build/outputs/apk/$VARIANT/guest-$VARIANT.apk" "dist/$guest"
+          guest_certs=$("$apksigner" verify --print-certs "dist/$guest")
+          guest_signer=$(printf '%s\n' "$guest_certs" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' | tr 'A-F' 'a-f')
+          [ -n "$guest_signer" ] && [ "$guest_signer" = "$signer" ] ||
+            { echo "::error::$guest signer differs from the host APK signer"; exit 1; }
+          (cd dist && sha256sum "$guest" > "$guest.sha256")
+          # A one-off debug key is useful for CI artifacts only. Withhold the
+          # manifests so the publishing jobs cannot promote those APKs.
+          if [ "$VARIANT" = release ] || [ -n "${ONEOS_DEBUG_KEYSTORE_SHA256:-}" ]; then
+            python3 scripts/write-update-manifests.py --variant "$VARIANT" --run-id "${{ github.run_id }}"
+          fi
 
       - uses: actions/upload-artifact@v6
         with:
@@ -271,8 +276,11 @@ jobs:
           set -eu
           tag="oneos-build-$BUILD_ID"
           for variant in debug release; do
-            test -s "dist/OneOS-$variant.apk"
-            (cd dist && sha256sum -c "OneOS-$variant.apk.sha256")
+            if [ ! -s "dist/update-$variant.json" ] || [ ! -s "dist/guest-update-$variant.json" ]; then
+              echo "::error::Missing verified $variant update metadata. Check the APK signing secrets."
+              exit 1
+            fi
+            (cd dist && sha256sum -c "OneOS-$variant.apk.sha256" && sha256sum -c "OneOSGuest-$variant.apk.sha256")
           done
           gh release create "$tag" --target "$RELEASE_SHA" --title "OneOS build $BUILD_ID" \
             --notes 'Release is for normal use (30% battery or charging, below 42 °C). Debug is for testing (5% battery or charging, below 50 °C).' \
@@ -297,6 +305,10 @@ jobs:
           DEBUG_SHA: ${{ github.sha }}
         run: |
           set -eu
+          if [ ! -s dist/update-debug.json ] || [ ! -s dist/guest-update-debug.json ]; then
+            echo "::notice::Debug APKs are available as workflow artifacts. Configure DEBUG_KEYSTORE_B64 to publish updates."
+            exit 0
+          fi
           (cd dist && sha256sum -c OneOS-debug.apk.sha256 && sha256sum -c OneOSGuest-debug.apk.sha256)
           tag="oneos-build-$BUILD_ID"
           if ! gh release view "$tag" >/dev/null 2>&1; then

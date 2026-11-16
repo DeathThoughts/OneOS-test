@@ -16,7 +16,7 @@
     <string name="guest_updates_restart_detail">Fecha os apps deste sistema e instala a atualização baixada.</string>
     <string name="guest_updates_cancel">Descartar atualização</string>
     <string name="guest_updates_download">Baixar atualização</string>
-    <string name="guest_updates_retry">Verificar atualização pendente</string>
+    <string name="guest_updates_retry">Verificar novamente</string>
     <string name="guest_updates_open">Verificar atualizações do app</string>
     <string name="guest_updates_entry">Baixe aqui e instale ao reiniciar este sistema.</string>
     <string name="guest_updates_root">Ative o root no OneOS antes de iniciar este sistema para instalar atualizações aqui.</string>

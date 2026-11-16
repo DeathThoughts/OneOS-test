@@ -155,28 +155,41 @@ control)
             ;;
         manager-update-apply)
             [ -d "$d/pending" ] || exit 0
+            bb=/data/oneos_bin/busybox
+            update_failed() {
+                printf '%s\n' "$1" > "$d/error"
+                "$bb" timeout -s KILL 5 am start -f 0x04000000 \
+                    -n com.fahadali.oneos.guest/.GuestUpdatesActivity >/dev/null 2>&1 || true
+                exit 1
+            }
             apk="$d/pending/OneOSGuest.apk"
             if [ -L "$apk" ] || [ ! -f "$apk" ] ||
                [ "$(sha256sum "$apk" | cut -d' ' -f1)" != "$(cat "$d/pending/sha256")" ]; then
-                echo 'The queued guest update failed its checksum.' > "$d/error"
-                exit 1
+                update_failed 'The queued guest update failed its checksum.'
             fi
             # Copy into the guest's package-install staging directory for SELinux.
             # The stage itself stays root-owned until pm finishes reading it.
-            install_dir=$(mktemp -d /data/local/tmp/oneos-manager-install.XXXXXX)
+            install_dir=$(mktemp -d /data/local/tmp/oneos-manager-install.XXXXXX) ||
+                update_failed 'Could not prepare the guest update installer.'
             temp=$install_dir
-            chmod 755 "$install_dir"
-            cp "$apk" "$install_dir/OneOSGuest.apk"
-            chmod 644 "$install_dir/OneOSGuest.apk"
+            if ! chmod 755 "$install_dir" || ! cp "$apk" "$install_dir/OneOSGuest.apk" ||
+               ! chmod 644 "$install_dir/OneOSGuest.apk"; then
+                update_failed 'Could not copy the queued guest update for installation.'
+            fi
             restorecon -RF "$install_dir" 2>/dev/null || true
-            if pm install -r --user 0 --pkg com.fahadali.oneos.guest "$install_dir/OneOSGuest.apk" > "$d/result" 2>&1 &&
+            # Keep the driver alive to release its lock and reopen the update UI
+            # if PackageManager stalls, before the host watcher's 60 s limit.
+            install_result=0
+            "$bb" timeout -s KILL 45 pm install -r --user 0 --pkg com.fahadali.oneos.guest \
+                "$install_dir/OneOSGuest.apk" > "$d/result" 2>&1 || install_result=$?
+            if [ "$install_result" = 0 ] &&
                grep -q '^Success' "$d/result"; then
                 rm -rf "$d/pending"
                 rm -f "$d/error"
             else
-                head -c 1024 "$d/result" > "$d/error"
-                am start -n com.fahadali.oneos.guest/.GuestUpdatesActivity >/dev/null 2>&1 || true
-                exit 1
+                detail=$(head -c 1024 "$d/result")
+                case "$install_result" in 124|137) detail='The guest update installer timed out. Retry or discard the update.' ;; esac
+                update_failed "${detail:-The guest update installer did not finish. Retry or discard the update.}"
             fi
             ;;
         esac

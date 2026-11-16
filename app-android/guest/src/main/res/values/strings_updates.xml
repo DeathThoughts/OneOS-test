@@ -16,7 +16,7 @@
     <string name="guest_updates_restart_detail">Closes guest apps and installs the queued update.</string>
     <string name="guest_updates_cancel">Discard queued update</string>
     <string name="guest_updates_download">Download update</string>
-    <string name="guest_updates_retry">Check queued update</string>
+    <string name="guest_updates_retry">Check again</string>
     <string name="guest_updates_open">Check guest app updates</string>
     <string name="guest_updates_entry">Download here and install on the next guest restart.</string>
     <string name="guest_updates_root">Enable guest root in OneOS before starting this guest to install updates here.</string>
