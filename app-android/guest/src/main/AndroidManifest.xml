@@ -63,5 +63,16 @@
             android:authorities="com.sec.knox.provider2"
             android:enabled="false"
             android:exported="true" />
+        <!-- Enabled for the known LineageOS Sound Settings dashboard by the guest activator. -->
+        <provider
+            android:name=".DolbySoundSettingsProvider"
+            android:authorities="com.fahadali.oneos.guest.dolby"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+            <meta-data android:name="com.android.settings.profile" android:value="primary_profile_only" />
+        </provider>
     </application>
 </manifest>

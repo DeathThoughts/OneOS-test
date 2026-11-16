@@ -2211,6 +2211,8 @@ GUEST_FOLD_FORM=0; [ "${ONEOS_GUEST_FORM:-fold}" = fold ] && GUEST_FOLD_FORM=1
 # An OxygenOS image (its stable display size resource, see "stable display size"
 # in the UI activator).
 GUEST_OXYGEN=0; grep -q '^  "image": "oxygenos' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_OXYGEN=1
+# LineageOS 24's native Sound dashboard loads SettingsLib switch providers.
+GUEST_DOLBY_SETTINGS=0; grep -q '^  "image": "lineage24-infiniti"' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_DOLBY_SETTINGS=1
 # Start UI Activator daemon. One pass per boot of the guest: after a soft
 # reboot of it (guest_softreboot.sh bumps tmp/softreboot.gen, 0.4.39) the
 # same steps run again for the new boot; it ends with the session.
@@ -2646,10 +2648,18 @@ while true; do
             # On by default since 0.4.65 (F8U InfinityX run: Dolby on the music
             # output, sound much better); ONEOS_GUEST_DOLBY=0: off. Phones
             # whose effect HAL has no Dolby: it gives up after a minute, logged.
+            dolby_provider=com.fahadali.oneos.guest/com.fahadali.oneos.guest.DolbySoundSettingsProvider
             if [ \"${ONEOS_GUEST_DOLBY:-1}\" = 1 ] && [ -f $STAGE/OneOSEdmStub.dex ] && [ ! -L $STAGE/OneOSEdmStub.dex ]; then
-                ($BB nohup $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSSoundFx \$PID > $STAGE/sound_fx.log 2>&1 </dev/null &)
+                ($BB nohup $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex ONEOS_DOLBY_SOUND_SETTINGS=$GUEST_DOLBY_SETTINGS /system/bin/app_process /system/bin OneOSSoundFx \$PID > $STAGE/sound_fx.log 2>&1 </dev/null &)
+                if [ $GUEST_DOLBY_SETTINGS = 1 ]; then
+                    $BB timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm enable \$dolby_provider ||
+                        echo \"[UI Activator] could not enable the Dolby Sound settings provider\"
+                fi
                 sleep 3
                 echo \"[UI Activator] sound fx: \$(head -n 3 $STAGE/sound_fx.log 2>/dev/null | tr '\n' ' ' || true)\"
+            elif [ $GUEST_DOLBY_SETTINGS = 1 ]; then
+                $BB timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm default-state \$dolby_provider ||
+                    echo \"[UI Activator] could not reset the Dolby Sound settings provider\"
             fi
             # Screen watch (0.5.15), Nothing OS only: it writes no power_screen_state events after boot, so the
             # double-tap keeper never knew its AOD from awake (a double tap on the AOD did nothing, A36). This
@@ -3789,7 +3799,8 @@ fi
 # $STAGE/diag_series.txt: time, the guest's thermal status and skin
 # temperature (its thermal service on the shared HAL), each cpufreq policy's
 # scaling_max_freq/cpuinfo_max_freq, WindowManager's mBlurEnabled,
-# disable_window_blurs, battery level and status. Read only, each guest call
+# disable_window_blurs, battery level and status, and the current Adreno clock
+# and Samsung GPU ceiling when readable. Read only, each guest call
 # with a timeout; until the guest's system_server runs only the kernel's
 # values. It stops once return_to_oneui.sh has started (data/oneos_rec_stop,
 # its first step; its pkill of system_server matches this command line too)
@@ -3819,7 +3830,7 @@ $BB sh -c "
     echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core), then forks/s and ctxt/s since the line before (/proc/stat processes, ctxt)\" > \$T
     pc_prev=''
     bn=0; bp=''; bl=''; dw=''
-    echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs (both read every 5 min), battery %,status\" > \$F
+    echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs (both read every 5 min), battery %,status, GPU clock Hz and Samsung GPU ceiling MHz\" > \$F
     while true; do
         [ -f $STAGE/data/oneos_rec_stop ] && { echo \"# \$(date +%T) the return started: sampler stopped\" >> \$F; exit 0; }
         [ -s $STAGE/guest_mntns ] || { echo \"# \$(date +%T) no guest namespace record: sampler stopped\" >> \$F; exit 0; }
@@ -3845,7 +3856,14 @@ $BB sh -c "
         done
         bc=\$(cat /sys/class/power_supply/battery/capacity 2>/dev/null)
         bs=\$(cat /sys/class/power_supply/battery/status 2>/dev/null | tr ' ' _)
-        echo \"\$(date +%T) thermal=\${st:--} skin=\${sk:--}\$c blur=\${bl:--} disable_window_blurs=\${dw:--} battery=\${bc:-?}%,\${bs:-?}\" >> \$F
+        gpu_hz=''; gpu_cap_mhz=''
+        if [ -r /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq ]; then
+            read -r gpu_hz 2>/dev/null < /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq || gpu_hz=''
+        fi
+        if [ -r /sys/kernel/gpu/gpu_max_clock ]; then
+            read -r gpu_cap_mhz 2>/dev/null < /sys/kernel/gpu/gpu_max_clock || gpu_cap_mhz=''
+        fi
+        echo \"\$(date +%T) thermal=\${st:--} skin=\${sk:--}\$c blur=\${bl:--} disable_window_blurs=\${dw:--} battery=\${bc:-?}%,\${bs:-?} gpu_hz=\${gpu_hz:--} gpu_cap_mhz=\${gpu_cap_mhz:--}\" >> \$F
         TOP=\$(timeout 10 top -b -n 1 -d 1 -m 6 -s 1 -o %CPU,PID,NAME 2>/dev/null)
         # pc: \"<uptime> <processes> <ctxt>,<rates>\", the first part kept for the next pass
         # (a comma, not a pipe: mksh did not strip up to a bare pipe in the test).

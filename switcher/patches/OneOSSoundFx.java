@@ -1,12 +1,15 @@
 import android.os.Looper;
 import android.os.SystemClock;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
 import java.io.File;
+import java.io.FileDescriptor;
 import java.lang.reflect.Constructor;
 import java.util.UUID;
 
 /**
- * Samsung's speaker tuning for the guest (experiment, 0.4.58; started by the
- * UI activator only while /data/local/tmp/oneos/guest_dolby.on exists).
+ * Samsung's speaker tuning for the guest, started by the guest UI activator.
  *
  * One UI's audioserver runs Samsung's processing on what it plays: Dolby DAX3
  * with Samsung's speaker endpoint tuning ("ProfileParamCache(There is specific
@@ -34,6 +37,8 @@ import java.util.UUID;
 public final class OneOSSoundFx {
  private static final String DOLBY_TYPE = "46d279d9-9be7-453d-9d7c-ef937f675587";
  private static final String TYPE_NULL = "ec7178ec-e5e1-4432-a3f4-4657e6795210";
+ private static final String PREFERENCE =
+     "/data/user/0/com.fahadali.oneos.guest/files/oneos_dolby_enabled";
 
  public static void main(String[] args) throws Exception {
   final int guest = Integer.parseInt(args[0]);
@@ -42,13 +47,16 @@ public final class OneOSSoundFx {
   Class<?> c = Class.forName("android.media.audiofx.AudioEffect");
   Constructor<?> k = c.getDeclaredConstructor(UUID.class, UUID.class, int.class, int.class);
   k.setAccessible(true);
-  Object fx = null;
-  // The guest's audioserver registers late (guest_start.sh): try for a minute.
-  for (int i = 0; fx == null && i < 30 && alive(guest); i++) {
-   fx = create(c, k, type, i == 0 || i == 29 ? "try " + (i + 1) : null);
-   if (fx == null) Thread.sleep(2000);
+  // Only guest images with a verified native Sound switch supply this flag.
+  final boolean settings = "1".equals(System.getenv("ONEOS_DOLBY_SOUND_SETTINGS"));
+  boolean enabled = enabled(settings);
+  Object fx = enabled ? createWithRetry(c, k, type, guest, settings) : null;
+  if (!enabled) {
+   log("Dolby Atmos is off in Sound settings");
+  } else if (fx == null) {
+   log("no effect of type " + type + " on the output mix" + (settings ? "" : "; exiting"));
+   if (!settings) return;
   }
-  if (fx == null) { log("no effect of type " + type + " on the output mix; exiting"); return; }
   // 0.5.11: music already playing when it was made counts as a start too (it was made at boot,
   // on whatever output ran then; S25 Ultra LineageOS 89eaa265, "speakers sound muffled": the
   // effect sat on the idle deep-buffer output for 10 minutes, 0 re-attachments).
@@ -56,6 +64,24 @@ public final class OneOSSoundFx {
   int moves = 0;
   while (alive(guest)) {
    Thread.sleep(2000);
+   if (!alive(guest)) break;
+   boolean desired = enabled(settings);
+   if (desired != enabled) {
+    enabled = desired;
+    if (enabled) {
+     log("Dolby Atmos turned on in Sound settings");
+     fx = createWithRetry(c, k, type, guest, settings);
+     was = fx != null && musicActive();
+    } else {
+     release(c, fx);
+     fx = null;
+     was = false;
+     log("Dolby Atmos turned off in Sound settings");
+    }
+    continue;
+   }
+   if (!enabled) continue;
+
    boolean now = musicActive();
    if (now && !was) {
     // Music started: create it again, so it is on the output music plays on. Not at
@@ -63,17 +89,58 @@ public final class OneOSSoundFx {
     // created 2 s in, with the music's output running, it is on that output.
     Thread.sleep(2000);
     if (!alive(guest)) break;
-    try { c.getMethod("release").invoke(fx); } catch (Throwable t) { }
-    fx = null;
-    Object f = create(c, k, type, moves < 5 ? "music started" : null);
-    if (f != null) fx = f;
-    else { Thread.sleep(1000); fx = create(c, k, type, "music started (again)"); }
+    if (!enabled(settings)) continue;
+    release(c, fx);
+    fx = create(c, k, type, moves < 5 ? "music started" : null);
+    if (fx == null) {
+     Thread.sleep(1000);
+     if (alive(guest) && enabled(settings)) {
+      fx = create(c, k, type, "music started (again)");
+     }
+    }
     moves++;
    }
    was = now;
   }
-  if (fx != null) c.getMethod("release").invoke(fx);
+  release(c, fx);
   log("guest system_server " + guest + " gone; released (" + moves + " re-attachments)");
+ }
+
+ private static boolean enabled(boolean settings) {
+  if (!settings) return true;
+  FileDescriptor fd = null;
+  try {
+   // The APK owns this file. Do not follow a final symlink or wait on a FIFO.
+   fd = Os.open(PREFERENCE, OsConstants.O_RDONLY | OsConstants.O_CLOEXEC
+       | OsConstants.O_NOFOLLOW | OsConstants.O_NONBLOCK, 0);
+   if (!OsConstants.S_ISREG(Os.fstat(fd).st_mode)) return true;
+   byte[] value = new byte[2];
+   return Os.read(fd, value, 0, value.length) != 1 || value[0] != '0';
+  } catch (Exception e) {
+   return true;
+  } finally {
+   if (fd != null) {
+    try { Os.close(fd); } catch (ErrnoException e) { }
+   }
+  }
+ }
+
+ private static Object createWithRetry(Class<?> c, Constructor<?> k, UUID type, int guest,
+     boolean settings) throws InterruptedException {
+  // The guest's audioserver registers late (guest_start.sh): try for a minute.
+  for (int i = 0; i < 30 && alive(guest) && enabled(settings); i++) {
+   Object fx = create(c, k, type, i == 0 || i == 29 ? "try " + (i + 1) : null);
+   if (fx != null) return fx;
+   Thread.sleep(2000);
+  }
+  return null;
+ }
+
+ private static void release(Class<?> c, Object fx) {
+  if (fx == null) return;
+  try { c.getMethod("release").invoke(fx); } catch (ReflectiveOperationException e) {
+   log("could not release Dolby effect: " + e);
+  }
  }
 
  /** The effect on the output mix, enabled; null when it cannot be created. why: log it (null: quiet). */
