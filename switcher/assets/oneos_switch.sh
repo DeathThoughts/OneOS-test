@@ -3864,7 +3864,9 @@ fi
 #   ABS_MT_POSITION_X, abs bit 53, or a name with "touch"): on a touch every
 #   policy's scaling_min_freq goes to the step nearest half its top clock
 #   (never above its scaling_max_freq: the heat cap wins) until a second with
-#   no touch; one getevent -c 1 and one sleep a second while touching;
+#   no touch; one getevent -c 1 and one sleep a second while touching; the
+#   reader is stopped while every backlight is 0 and started again when one
+#   comes on (review by the mlcraze5 fork, 2026-11-16);
 # - with either, the backlight going on raises scaling_min_freq to the step
 #   nearest 70% for 2 s (read every second).
 # No boost while the heat cap holds a level over 0 ($STAGE/heat_cap.level);
@@ -3983,8 +3985,11 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
     # boost.state: 0 none, 1 touch, 2 screen-on. The reader writes the count
     # before the state, and the loop below reads the state first, so a boost
     # it sees always comes with its touch counted.
+    # Counts from boost.count, so a reader started again after the screen was
+    # off carries on from them (the summary and the main loop's touch check
+    # compare against earlier values).
     reader() {
-        n=0; k=0; t=0; e=0
+        n=0; k=0; t=0; e=0; read -r n k t 2>/dev/null < \$CN
         while [ ! -f $STAGE/data/oneos_rec_stop ]; do
             getevent -c 1 -q /dev/input/\$DEV >/dev/null 2>&1 &
             echo \$! > \$GP
@@ -4023,8 +4028,13 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
         echo \"# \$(date +%T) stopped (\$1): every value put back\" >> \$F
         exit 0
     }
+    # \$1 a pid, \$2 a pattern its command line (after a space) must match: only then killed.
+    kill_if() {
+        num \"\$1\" || return 1
+        case \" \$(tr '\0' ' ' < /proc/\$1/cmdline 2>/dev/null)\" in \$2) kill \$1 2>/dev/null ;; *) return 1 ;; esac
+    }
     echo 0 > \$ST; echo '0 0 0' > \$CN
-    RP=''
+    RP=''; paused=0
     if [ -n \"\$DEV\" ]; then reader & RP=\$!; fi
     bl=1; son=0; lt=0; tick=0; sn=0; sk=0; wh=0; wst=1; pn=0; pk=0; psn=0; psk=0; pwh=0
     while true; do
@@ -4047,6 +4057,26 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
             if [ \$h = 1 ]; then sk=\$((sk + 1)); else echo 2 > \$ST; boost_to 70; son=2; sn=\$((sn + 1)); fi
         fi
         bl=\$on
+        # The touch reader pauses while every backlight is 0 (review by the
+        # mlcraze5 fork, 2026-11-16): a getevent held open on the touchscreen
+        # with the screen off can keep its IC busy (guest_start.sh: the IC
+        # stays fully on while something holds it), costs battery and can get
+        # in the way of double-tap-to-wake. The reader first, so it starts no
+        # other getevent, then its getevent, each after a look at its command
+        # line; started again when a backlight comes on. A reader that had
+        # stopped by itself (getevent failing) is not started again.
+        if [ -n \"\$DEV\" ]; then
+            if [ \$on = 0 ] && [ -n \"\$RP\" ]; then
+                kill_if \$RP '*oneos_guest_boost*' && paused=1
+                gp=''; read -r gp 2>/dev/null < \$GP
+                kill_if \"\$gp\" '*[ /]getevent -c 1 -q /dev/input/event[0-9]*'
+                rm -f \$GP; RP=''
+                [ \$paused = 1 ] && echo \"\$(date +%T) screen off: the touch reader paused\" >> \$F
+            elif [ \$on = 1 ] && [ \$paused = 1 ]; then
+                reader & RP=\$!; paused=0
+                echo \"\$(date +%T) screen on: the touch reader started again\" >> \$F
+            fi
+        fi
         if [ -n \"\$M\" ]; then
             if [ \$h = 1 ]; then
                 [ \$wst = 1 ] && { echo \"\$WOFF\" > \$WF 2>/dev/null; wst=0; echo \"\$(date +%T) the heat cap holds a level: the kernel's input boost off\" >> \$F; }

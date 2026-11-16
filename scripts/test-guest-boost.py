@@ -117,20 +117,42 @@ class GuestBoostTest(unittest.TestCase):
         """rounds: shell text per main-loop second; `touch_now` is a touch."""
         for n, text in enumerate(rounds, 1):
             (self.r / f'round{n}').write_text(text + '\n')
+        # the loop reads a pid's command line in the real /proc before it kills it
         loop = fake_root(self.render(heat_cap), self.r)
+        loop = loop.replace(f'{self.r}/proc/$1/cmdline', '/proc/$1/cmdline')
         r = self.r
         snap = ' '.join(f'$(cat {self.cpufreq(p)}/scaling_min_freq)' for p in POLICIES)
+        # getevent is a program on PATH, so its command line is what the loop checks
+        bindir = r / 'bin'
+        bindir.mkdir(exist_ok=True)
+        (bindir / 'getevent').write_text(f'''#!/bin/sh
+: > {r}/ready
+while [ ! -f {r}/touch ]; do
+    [ -f {self.stage}/data/oneos_rec_stop ] && exit 1
+    sleep 0.01
+done
+rm -f {r}/ready
+rm -f {r}/touch
+echo "$*" >> {r}/getevent_args
+''')
+        (bindir / 'getevent').chmod(0o755)
         stubs = f'''
 MAIN=$$
-getevent() {{
-    : > {r}/ready
-    while [ ! -f {r}/touch ]; do
-        [ -f {self.stage}/data/oneos_rec_stop ] && return 1
-        command sleep 0.01
+PATH={bindir}:$PATH
+wait_ready() {{
+    while [ ! -f {r}/ready ]; do command sleep 0.01; done
+}}
+# live getevents on the touchscreen, and whether pid $1 (a reader) still runs
+check() {{
+    c=0
+    for p in /proc/[0-9]*; do
+        case " $(tr '\\0' ' ' < $p/cmdline 2>/dev/null)" in *[\\ /]getevent\\ -c\\ 1\\ -q\\ /dev/input/event3*) c=$((c + 1)) ;; esac
     done
-    rm -f {r}/ready
-    rm -f {r}/touch
-    echo "$*" >> {r}/getevent_args
+    rl=0
+    if [ -n "$1" ] && [ -d /proc/$1 ]; then
+        case "$(cut -d' ' -f3 /proc/$1/stat 2>/dev/null)" in Z|'') ;; *) rl=1 ;; esac
+    fi
+    echo "getevent=$c reader=$rl" >> {r}/checks
 }}
 touch_now() {{
     while [ ! -f {r}/ready ]; do command sleep 0.01; done
@@ -200,6 +222,28 @@ sleep() {{
         self.assertEqual(self.line(MIN0), snaps[3], 'back after a second with no touch')
         self.assertEqual('-c 1 -q /dev/input/event3', (self.r / 'getevent_args').read_text().split('\n')[0])
         self.assertIn('touch boosts 1, touches skipped for heat 0', log)
+
+    def test_screen_off_pauses_the_touch_reader(self):
+        # review by the mlcraze5 fork, 2026-11-16: no getevent on the
+        # touchscreen while every backlight is 0
+        bl = self.r / 'sys/class/backlight/panel0-backlight/brightness'
+        rounds = [f'wait_ready; OLD=$RP; check $OLD; echo 0 > {bl}',
+                  f'check $OLD; rm -f {self.r}/ready; echo 150 > {bl}',
+                  'wait_ready; check $RP',
+                  '', 'touch_now', '', '']
+        snaps, log = self.run_loop(rounds)
+        checks = (self.r / 'checks').read_text().splitlines()
+        self.assertEqual(['getevent=1 reader=1', 'getevent=0 reader=0', 'getevent=1 reader=1'], checks)
+        self.assertIn('screen off: the touch reader paused', log)
+        self.assertIn('screen on: the touch reader started again', log)
+        # the reader works again, and its count carries on
+        self.assertEqual(['T ' + self.line(T50)], [l for l in snaps if l.startswith('T ')])
+        self.assertIn('touch boosts 1, touches skipped for heat 0', log)
+
+    def test_screen_off_kills_only_a_getevent(self):
+        # a boost.gpid that names some other process is left alone
+        self.assertIn("kill_if \\\"\\$gp\\\" '*[ /]getevent -c 1 -q /dev/input/event[0-9]*'", SWITCH)
+        self.assertIn("kill_if \\$RP '*oneos_guest_boost*' && paused=1", SWITCH)
 
     def test_continuous_touching_keeps_it_raised(self):
         snaps, log = self.run_loop(['touch_now', 'touch_now', 'touch_now', '', ''])
