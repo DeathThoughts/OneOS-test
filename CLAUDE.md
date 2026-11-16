@@ -36,7 +36,9 @@ Standing rules from the fork's owner. They apply to every session.
 
 ## Repository
 
-- Work lands in this fork, never in vdcoolok/OneOS or its upstream.
+- Work lands in DeathThoughts/OneOS-test, branch s23-fixes-0515, through pull
+  requests (from the mlcraze5 fork too). Never push straight to
+  s23-fixes-0515 from the fork; never push to vdcoolok/OneOS or its upstream.
 - Follow the repository's own style: comments say why and name the phone or
   report the fix came from; one logical change per commit.
 
