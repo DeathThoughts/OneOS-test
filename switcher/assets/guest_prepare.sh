@@ -5967,8 +5967,11 @@ idle=0
 while true; do
     sleep 10
     case "$(getprop sys.boot_completed)" in 1) ;; *) continue ;; esac
-    netout=$(/system/bin/sh /data/local/tmp/net_fix.sh 2>/dev/null)
-    [ -n "$netout" ] && echo "$(date) $netout" >> /data/app_storage.log
+    # No net_fix.sh here: oneos_switch.sh's net_watch runs it from the host
+    # every 10 s for the whole session, before the guest boots until the
+    # return, on the same network namespace. A second copy here was about 30
+    # forks a round and could race it on table 4242 (coloros native audit
+    # 2026-11-16, S25 Ultra).
     cur=$(md5sum /data/system/packages.list 2>/dev/null | cut -d' ' -f1)
     # ensure_app_storage.sh stats every package's dirs (coloros native audit
     # 2026-11-16, S25 Ultra: ~2,440 stat calls every 10 s with nothing
