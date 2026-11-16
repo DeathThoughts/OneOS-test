@@ -13,7 +13,6 @@ import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.core.root.OutcomeKind
 import com.fahadali.oneos.session.LogJob
 import com.fahadali.oneos.session.OldStagesJob
-import com.fahadali.oneos.session.OneUiMedia
 import com.fahadali.oneos.session.RemoveJob
 import com.fahadali.oneos.session.SessionPrefs
 import com.fahadali.oneos.session.StageCheck
@@ -27,7 +26,7 @@ import dev.oneuiproject.oneui.R as OuiIcons
  *   from what is known already: no root call here).
  * - Sessions: Last session (how it went), Session logs (when collected),
  *   Restore One UI's settings (only when Last session offers it; the same
- *   confirm), One UI photos (root's marker folder, read as root on open).
+ *   confirm).
  * - Help: Before you start, About OneOS.
  * - For the OneOS team: one entry for the technical screens ([TeamActivity]).
  */
@@ -51,9 +50,6 @@ class AdvancedFragment : CardsFragment() {
         subs += OldStagesJob.observe { redraw() }
         subs += StageCheck.observe { redraw() }
         subs += RemoveJob.observe { redraw() }
-        // One UI photos (build 156): root's marker folder is the only record, so it is read each time.
-        subs += OneUiMedia.observe { redraw() }
-        OneUiMedia.refresh(requireContext())
     }
 
     override fun onResume() {
@@ -99,12 +95,6 @@ class AdvancedFragment : CardsFragment() {
         }
         CardRows.toggle(sessions, getString(R.string.usage_count_title), getString(R.string.usage_count_summary), SessionPrefs.usageCount(ctx)) { on ->
             SessionPrefs.setUsageCount(ctx, on)
-        }
-        // One UI photos (build 156; the owner made its marker by hand from a root shell): root on/off, read at the
-        // next guest boot. Off until root says on; held while a call runs; root's reason when it changed nothing.
-        val media = OneUiMedia.state
-        CardRows.toggle(sessions, getString(R.string.oneui_media_title), mediaSummary(media), media.media?.on == true, enabled = !media.busy) { on ->
-            OneUiMedia.set(ctx, on)
         }
         val logs = LogJob.state
         val zip = LogJob.latestZip(ctx)
@@ -170,20 +160,6 @@ class AdvancedFragment : CardsFragment() {
             .setPositiveButton(R.string.remove_confirm_run) { _, _ -> RemoveJob.start(ctx) }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
-    }
-
-    /** The switch's text, then what root said when it read or changed nothing, or what is at the marker's path. */
-    private fun mediaSummary(st: OneUiMedia.State): String {
-        val base = getString(R.string.oneui_media_summary)
-        val problem = st.problem
-        val why = st.media?.why
-        val note = when {
-            st.busy -> getString(R.string.oneui_media_asking)
-            problem != null -> getString(if (st.problemOnRead) R.string.oneui_media_unread else R.string.oneui_media_problem, problem)
-            why != null -> getString(R.string.oneui_media_not_marker, why)
-            else -> return base
-        }
-        return "$base\n\n$note"
     }
 
     /** Free space, and the old copies when they were read (the Free up space screen reads them as root). */
