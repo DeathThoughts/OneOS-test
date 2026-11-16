@@ -10,9 +10,13 @@ A CPU level goes up only on three readings running at or above its threshold
 (review by the mlcraze5 fork, 2026-11-16; three since the S25 Ultra's session
 bceaef29fb128e94, where two-reading spikes of 94-106 C capped at 50%), so most
 cases read three times. A reading held back logs a "held" line; run_loop
-leaves those out unless asked for them.
+leaves those out unless asked for them. Samsung's AP sensor (mName=AP) is
+logged beside skin and the CPU and nothing else (S25 Ultra, sessions
+bceaef29fb128e94, c2d30e95cde9775b, 2c804690b9171656): a round may give it as
+a third value.
 """
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -55,20 +59,22 @@ class HeatCapCpuTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def round_script(self, skin, zones):
-        lines = [f"printf '%s' '{'' if skin is None else skin}' > {self.stage}/skin"]
+    def round_script(self, skin, zones, ap=None):
+        lines = [f"printf '%s' '{'' if skin is None else skin}' > {self.stage}/skin",
+                 f"printf '%s' '{'' if ap is None else ap}' > {self.stage}/ap"]
         for i, ty in enumerate(ZONES):
             lines.append(f"echo {zones.get(ty, 40000)} > {self.r}/sys/class/thermal/thermal_zone{i}/temp")
         return '\n'.join(lines) + '\n'
 
-    def run_loop(self, rounds, cpu='1', held=False):
-        """rounds: (skin C or None, {zone type: millidegrees}) per 10 s round."""
-        for n, (skin, zones) in enumerate(rounds, 1):
-            (self.r / f'round{n}').write_text(self.round_script(skin, zones))
+    def run_loop(self, rounds, cpu='1', held=False, apu=None, thermal_map='0'):
+        """rounds: (skin C or None, {zone type: millidegrees}[, AP C]) per 10 s round.
+        apu: an APU temperature listed before AP every round, which must not be read as AP."""
+        for n, rnd in enumerate(rounds, 1):
+            (self.r / f'round{n}').write_text(self.round_script(*rnd))
         render = subprocess.run(
             ['sh', '-c', 'printf "%s" "' + heat_cap_block() + '"'],
             env={**os.environ, 'BB': 'busybox', 'STAGE': str(self.stage), 'HEAT_CAP': '1',
-                 'HEAT_CAP_CPU': cpu, 'GUEST_THERMAL_MAP': '0', 'HOST_LOW_POWER': '0'},
+                 'HEAT_CAP_CPU': cpu, 'GUEST_THERMAL_MAP': thermal_map, 'HOST_LOW_POWER': '0'},
             capture_output=True, text=True)
         self.assertEqual(0, render.returncode, render.stderr)
         loop = render.stdout.replace('/sys/', str(self.r) + '/sys/')
@@ -77,11 +83,15 @@ pidof() {{ echo 1234; }}
 timeout() {{
     s=$(cat {self.stage}/skin 2>/dev/null)
     echo 'Current temperatures from HAL:'
+    a=$(cat {self.stage}/ap 2>/dev/null)
+    {'' if apu is None else f'echo "	Temperature{{{{mValue={apu}, mType=0, mName=APU, mStatus=0}}}}"'}
     [ -n "$s" ] && echo "	Temperature{{mValue=$s, mType=3, mName=SKIN, mStatus=0}}"
+    [ -n "$a" ] && echo "	Temperature{{mValue=$a, mType=0, mName=AP, mStatus=0}}"
     echo 'Current cooling devices from HAL:'
 }}
 n=1
 sleep() {{
+    echo "$(cat {self.stage}/heat_cap.level) $(cat {self.r}/sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq | tr '\\n' ' ')" >> {self.stage}/trace
     n=$((n + 1))
     if [ -f {self.r}/round$n ]; then . {self.r}/round$n; else : > {self.stage}/data/oneos_rec_stop; fi
 }}
@@ -91,6 +101,14 @@ sleep() {{
         self.assertEqual(0, done.returncode, done.stderr)
         return [l for l in (self.stage / 'heat_cap.log').read_text().splitlines()
                 if not l.startswith('#') and (held or ' held: ' not in l)]
+
+    def fresh(self):
+        self.tearDown()
+        self.setUp()
+
+    def trace(self):
+        """heat_cap.level and every policy's scaling_max_freq after each round."""
+        return (self.stage / 'trace').read_text().splitlines()
 
     def freq(self, name='policy0'):
         return (self.r / 'sys/devices/system/cpu/cpufreq' / name / 'scaling_max_freq').read_text().strip()
@@ -211,6 +229,66 @@ sleep() {{
     def test_bad_readings_are_ignored(self):
         log = self.run_loop([(40.0, {'cpu-1-3': 'abc', 'cpuss-2': 200000, 'cpu-0-0': -5000, 'BIG': 70000})])
         self.assertEqual('skin 40.0 C, cpu 70.0 C (BIG): no cap', log[0].split(' ', 1)[1])
+
+    def test_ap_is_logged_beside_skin_and_cpu(self):
+        log = self.run_loop([(44.7, {'cpu-1-3': 60000}, 49.6)] + [(44.7, {'cpu-1-3': 104300}, 49.6)] * 3)
+        self.assertEqual('skin 44.7 C, ap 49.6 C, cpu 60.0 C (cpu-1-3): no cap', log[0].split(' ', 1)[1])
+        self.assertIn('skin 44.7 C, ap 49.6 C, cpu 104.3 C (cpu-1-3), level 0 to 3: 50%', log[1])
+        self.assertIn('stopped: full clock', log[2])
+
+    def test_ap_in_the_held_line(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 70200}, 48.0), (40.0, {'cpu-1-3': 74800}, 49.1),
+                             (40.0, {'cpu-1-3': 104300}, 51.2)], held=True)
+        rest = [l.split(' ', 1)[1] for l in log]
+        self.assertEqual('cpu 104.3 C (cpu-1-3), ap 51.2 C held: needs three readings over 85 C (before: 74.8, 70.2)',
+                         rest[1])
+
+    def test_ap_leaving_a_level(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 86000}, 52.0)] * 3 + [(40.0, {'cpu-1-3': 60000}, 48.5)])
+        self.assertIn('skin 40.0 C, ap 48.5 C, cpu 60.0 C (cpu-1-3), level 3 to 0: full clock', log[2])
+
+    def test_ap_with_no_skin(self):
+        log = self.run_loop([(None, {'cpuss-2': 81000}, 50.3)] * 3)
+        self.assertIn('ap 50.3 C, cpu 81.0 C (cpuss-2), level 0 to 2: 65%', log[1])
+        self.assertNotIn('skin', log[1])
+
+    def test_no_ap_reading_leaves_it_out(self):
+        log = self.run_loop([(44.7, {'cpu-1-3': 60000})] + [(44.7, {'cpu-1-3': 104300})] * 3, held=True)
+        self.assertTrue(log)
+        for l in log:
+            self.assertNotRegex(l, r'\bap [0-9]')
+        self.assertIn('skin 44.7 C, cpu 104.3 C (cpu-1-3), level 0 to 3: 50%', log[3])
+
+    def test_apu_is_not_ap(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 60000})], apu=77.7)
+        self.assertEqual('skin 40.0 C, cpu 60.0 C (cpu-1-3): no cap', log[0].split(' ', 1)[1])
+        self.fresh()
+        log = self.run_loop([(40.0, {'cpu-1-3': 60000}, 49.6)], apu=77.7)
+        self.assertEqual('skin 40.0 C, ap 49.6 C, cpu 60.0 C (cpu-1-3): no cap', log[0].split(' ', 1)[1])
+
+    def test_ap_in_the_guest_thermal_status_line(self):
+        log = self.run_loop([(47.5, {}, 51.0)], thermal_map='1')
+        self.assertTrue(any(l.split(' ', 1)[1].startswith('skin 47.5 C, ap 51.0 C: guest thermal status 1 ')
+                            for l in log), log)
+
+    def test_ap_changes_no_level(self):
+        # The same skin and CPU rounds with AP readings (cool, hot, missing) and without:
+        # the same levels, clocks and log lines once the ap part is taken out.
+        rounds = [(40.0, {'cpu-1-3': 60000}), (44.7, {'cpu-1-3': 104300}), (46.0, {'cpu-1-3': 98000}),
+                  (47.5, {'cpu-1-3': 91900}), (50.5, {'cpu-1-3': 86000}), (44.0, {'cpu-1-3': 81000}),
+                  (None, {'cpu-1-3': 74800}), (40.0, {'cpu-1-3': 60000})]
+        aps = [30.0, 99.0, 49.6, None, 120.5, 53.1, 48.0, 75.0]
+
+        without = self.run_loop(rounds, held=True)
+        trace_without = self.trace()
+        self.fresh()
+        with_ap = self.run_loop([r + (a,) for r, a in zip(rounds, aps)], held=True)
+        self.assertEqual(len(rounds), len(trace_without))
+        self.assertEqual(trace_without, self.trace())
+        self.assertTrue(any(l.startswith('3 ') for l in trace_without), trace_without)
+        self.assertNotEqual(without, with_ap, 'the AP readings were logged')
+        strip = lambda ls: [re.sub(r'ap [0-9.]+ C, |, ap [0-9.]+ C', '', l.split(' ', 1)[1]) for l in ls]
+        self.assertEqual(strip(without), strip(with_ap))
 
     def test_the_header_names_the_cpu_thresholds(self):
         self.run_loop([(40.0, {})])

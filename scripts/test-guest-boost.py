@@ -38,6 +38,8 @@ POLICIES = {
 MIN0 = {'policy0': 300000, 'policy3': 499200, 'policy7': 595200}
 T50 = {'policy0': 960000, 'policy3': 1420800, 'policy7': 1708800}
 T70 = {'policy0': 1401600, 'policy3': 1996800, 'policy7': 2457600}
+# scaling_max_freq at heat cap levels 1, 2, 3 (cpuinfo_max_freq / 100 * 80, 65, 50)
+CAP = {lv: {p: top // 100 * pct for p, (_, top, _) in POLICIES.items()} for lv, pct in ((1, 80), (2, 65), (3, 50))}
 
 DEVICES = '''I: Bus=0019 Vendor=0001 Product=0001 Version=0100
 N: Name="gpio_keys"
@@ -173,6 +175,12 @@ sleep() {{
         snaps = (self.r / 'snap').read_text().splitlines() if (self.r / 'snap').exists() else []
         return snaps, (self.stage / 'boost.log').read_text()
 
+    def level(self, lv):
+        """Shell text: the heat cap's order, scaling_max_freq first, then the level."""
+        maxes = CAP[lv] if lv else {p: top for p, (_, top, _) in POLICIES.items()}
+        w = '; '.join(f'echo {maxes[p]} > {self.cpufreq(p)}/scaling_max_freq' for p in POLICIES)
+        return f'{w}; echo {lv} > {self.stage}/heat_cap.level'
+
     @staticmethod
     def line(t):
         return ' '.join(str(t[p]) for p in POLICIES)
@@ -199,19 +207,68 @@ sleep() {{
         self.assertFalse((self.stage / 'boost.before').exists())
         self.assertIn('stopped (the return started): every value put back', log)
 
-    def test_walt_held_off_while_hot(self):
+    WON = '960000 960000 960000 1420800 1420800 1420800 1420800 0'
+
+    def test_walt_held_off_at_level_3(self):
         d = self.walt()
-        lv = self.stage / 'heat_cap.level'
-        lv.write_text('0\n')
+        (self.stage / 'heat_cap.level').write_text('0\n')
         seen = self.r / 'seen'
-        rounds = [f'echo 2 > {lv}',
-                  f'cat {d}/input_boost_freq >> {seen}; echo 0 > {lv}',
+        rounds = [self.level(3),
+                  f'cat {d}/input_boost_freq >> {seen}; {self.level(0)}',
                   f'cat {d}/input_boost_freq >> {seen}']
         _, log = self.run_loop(rounds)
         got = [' '.join(l.split()) for l in seen.read_text().splitlines()]
-        self.assertEqual(['0 0 0 0 0 0 0 0', '960000 960000 960000 1420800 1420800 1420800 1420800 0'], got)
-        self.assertIn("the heat cap holds a level: the kernel's input boost off", log)
+        self.assertEqual(['0 0 0 0 0 0 0 0', self.WON], got)
+        self.assertIn("the heat cap holds level 3: the kernel's input boost off", log)
+        self.assertIn("the heat cap level is 0: the kernel's input boost on again", log)
         self.assertIn('held off 1 s for heat', log)
+
+    def test_walt_on_at_levels_1_and_2_under_the_cap(self):
+        # S25 Ultra bceaef29fb128e94: the boost was off at levels 1-3, 2.3 of 3.7 min
+        d = self.walt()
+        (self.stage / 'heat_cap.level').write_text('0\n')
+        seen = self.r / 'seen'
+        rounds = [self.level(1),
+                  f'cat {d}/input_boost_freq >> {seen}; {self.level(2)}',
+                  f'cat {d}/input_boost_freq >> {seen}']
+        _, log = self.run_loop(rounds)
+        got = [' '.join(l.split()) for l in seen.read_text().splitlines()]
+        self.assertEqual([self.WON, self.WON], got)
+        self.assertNotIn("input boost off", log)
+        self.assertIn('held off 0 s for heat', log)
+        # every frequency written is under that level's scaling_max_freq
+        for lv in (1, 2):
+            for cpu, f in enumerate(self.WON.split()):
+                pol = next(p for p, (cpus, _, _) in POLICIES.items() if str(cpu) in cpus.split())
+                self.assertLessEqual(int(f), CAP[lv][pol])
+
+    def test_walt_3_to_2_resumes(self):
+        d = self.walt()
+        (self.stage / 'heat_cap.level').write_text('0\n')
+        seen = self.r / 'seen'
+        rounds = [self.level(3),
+                  f'cat {d}/input_boost_freq >> {seen}; {self.level(2)}',
+                  f'cat {d}/input_boost_freq >> {seen}']
+        _, log = self.run_loop(rounds)
+        got = [' '.join(l.split()) for l in seen.read_text().splitlines()]
+        self.assertEqual(['0 0 0 0 0 0 0 0', self.WON], got)
+        self.assertIn("the heat cap level is 2: the kernel's input boost on again", log)
+
+    def test_walt_off_when_scaling_max_freq_is_under_its_frequency(self):
+        # a level whose cap is under an input_boost_freq: off, so nothing written is over it
+        d = self.walt()
+        (self.stage / 'heat_cap.level').write_text('0\n')
+        seen = self.r / 'seen'
+        p3 = self.cpufreq('policy3') / 'scaling_max_freq'
+        rounds = [f'{self.level(2)}; echo 1000000 > {p3}; echo 2 > {self.stage}/heat_cap.level',
+                  f'cat {d}/input_boost_freq >> {seen}; {self.level(1)}',
+                  f'cat {d}/input_boost_freq >> {seen}']
+        _, log = self.run_loop(rounds)
+        got = [' '.join(l.split()) for l in seen.read_text().splitlines()]
+        self.assertEqual(['0 0 0 0 0 0 0 0', self.WON], got)
+        self.assertIn("the heat cap holds level 2, a scaling_max_freq under its input_boost_freq: "
+                      "the kernel's input boost off", log)
+        self.assertIn("the heat cap level is 1: the kernel's input boost on again", log)
 
     def test_touch_raises_to_the_50_step_and_restores(self):
         snaps, log = self.run_loop(['touch_now', '', ''])
@@ -263,11 +320,48 @@ sleep() {{
         self.assertNotIn('> \\$1/scaling_max_freq', block(SWITCH, START, END))
         self.assertNotIn('/scaling_max_freq 2>/dev/null\n', block(SWITCH, START, END).replace('< \\$1/scaling_max_freq', ''))
 
-    def test_heat_level_over_0_no_boost(self):
-        (self.stage / 'heat_cap.level').write_text('1\n')
+    def test_heat_level_3_no_boost(self):
+        (self.stage / 'heat_cap.level').write_text('3\n')
         snaps, log = self.run_loop(['touch_now', ''])
         self.assertEqual('T ' + self.line(MIN0), snaps[1])
         self.assertIn('touch boosts 0, touches skipped for heat 1', log)
+
+    def test_heat_levels_1_and_2_boost_under_the_cap(self):
+        # S25 Ultra bceaef29fb128e94: touches lost the boost whenever the phone was warm
+        for lv in (1, 2):
+            with self.subTest(level=lv):
+                self.tearDown()
+                self.setUp()
+                for p in POLICIES:
+                    (self.cpufreq(p) / 'scaling_max_freq').write_text(f'{CAP[lv][p]}\n')
+                (self.stage / 'heat_cap.level').write_text(f'{lv}\n')
+                bl = self.r / 'sys/class/backlight/panel0-backlight/brightness'
+                bl.write_text('0\n')
+                snaps, log = self.run_loop([f'echo 150 > {bl}', '', '', 'touch_now', ''])
+                capped = {p: min(T70[p], CAP[lv][p]) for p in POLICIES}
+                self.assertEqual(self.line(capped), snaps[1], 'screen-on, at most scaling_max_freq')
+                self.assertEqual('T ' + self.line(T50), snaps[4], 'touch')
+                self.assertIn('touch boosts 1, touches skipped for heat 0', log)
+                self.assertIn('screen-on boosts 1, skipped for heat 0', log)
+                for p in POLICIES:
+                    self.assertEqual(str(CAP[lv][p]), (self.cpufreq(p) / 'scaling_max_freq').read_text().strip())
+
+    def test_heat_3_to_2_resumes_the_touch_boost(self):
+        (self.stage / 'heat_cap.level').write_text('0\n')
+        snaps, log = self.run_loop([self.level(3), 'touch_now', f'{self.level(2)}', 'touch_now', ''])
+        touches = [l for l in snaps if l.startswith('T ')]
+        self.assertEqual(['T ' + self.line(MIN0), 'T ' + self.line(T50)], touches)
+        self.assertIn('touch boosts 1, touches skipped for heat 1', log)
+
+    def test_level_change_sets_a_boost_again_at_the_new_cap(self):
+        # a screen-on boost (70%) when the cap goes to 65%: down to scaling_max_freq at once
+        bl = self.r / 'sys/class/backlight/panel0-backlight/brightness'
+        bl.write_text('0\n')
+        (self.stage / 'heat_cap.level').write_text('0\n')
+        snaps, _ = self.run_loop([f'echo 150 > {bl}', self.level(2), '', ''])
+        self.assertEqual(self.line(T70), snaps[1])
+        self.assertEqual(self.line({p: min(T70[p], CAP[2][p]) for p in POLICIES}), snaps[2])
+        self.assertEqual(self.line(MIN0), snaps[3])
 
     def test_heat_cap_off_still_boosts(self):
         (self.stage / 'heat_cap.level').write_text('3\n')
@@ -277,7 +371,7 @@ sleep() {{
     def test_heat_coming_on_ends_a_boost(self):
         lv = self.stage / 'heat_cap.level'
         lv.write_text('0\n')
-        snaps, _ = self.run_loop([f'touch_now; echo 2 > {lv}', ''])
+        snaps, _ = self.run_loop([f'touch_now; echo 3 > {lv}', ''])
         self.assertEqual('T ' + self.line(T50), snaps[1])
         self.assertEqual(self.line(MIN0), snaps[2])
 
@@ -288,10 +382,10 @@ sleep() {{
         self.assertEqual([self.line(MIN0), self.line(T70), self.line(T70), self.line(MIN0)], snaps[:4])
         self.assertIn('screen-on boosts 1, skipped for heat 0', log)
 
-    def test_screen_on_while_hot_skipped(self):
+    def test_screen_on_at_level_3_skipped(self):
         bl = self.r / 'sys/class/backlight/panel0-backlight/brightness'
         bl.write_text('0\n')
-        (self.stage / 'heat_cap.level').write_text('2\n')
+        (self.stage / 'heat_cap.level').write_text('3\n')
         snaps, log = self.run_loop([f'echo 150 > {bl}', ''])
         self.assertEqual(self.line(MIN0), snaps[1])
         self.assertIn('screen-on boosts 0, skipped for heat 1', log)
