@@ -123,6 +123,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, BringAppsActivity::class.java))
         }
         fullLogsCard(list)
+        val updates = cards.section(list, getString(R.string.guest_updates_title), getColor(R.color.preboot_card))
+        cards.row(updates, getString(R.string.guest_updates_open), getString(R.string.guest_updates_entry)) {
+            startActivity(Intent(this, GuestUpdatesActivity::class.java))
+        }
         val root = cards.section(list, "Root", getColor(R.color.preboot_card))
         cards.row(root, "Root status", if (state.root) "Active · OneOS guest runtime" else state.error ?: "Inactive")
         cards.row(root, "Root permissions", "Manage access for apps in this guest") {

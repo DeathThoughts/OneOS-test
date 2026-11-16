@@ -1,17 +1,6 @@
 package com.fahadali.oneos.core.model
 
-/**
- * The app's own update (0.4.41): `update.json`, an asset of the latest GitHub
- * release, names the newest OneOS APK. The app reads it from [URL], downloads
- * [apk] (only from this repository's releases), checks [bytes] and [sha256],
- * that the APK is signed with the app's own certificate and has a higher
- * versionCode, and root installs it (`selfupdate`).
- *
- * ```
- * {"versionCode": 58, "versionName": "0.4.42", "bytes": 52428800, "sha256": "<64 hex>",
- *  "apk": "https://github.com/fahadalijaved/OneOS/releases/download/v0.4.42/OneOS-0.4.42.apk"}
- * ```
- */
+/** Version and integrity metadata for this fork's host and guest APK channels. */
 data class AppUpdate(
     val versionCode: Int,
     val versionName: String,
@@ -33,8 +22,8 @@ data class AppUpdate(
     fun changes(imageId: String): Boolean = "*" in systems || imageId in systems
 
     companion object {
-        const val URL = "https://github.com/fahadalijaved/OneOS/releases/latest/download/update.json"
-        const val APK_PREFIX = "https://github.com/fahadalijaved/OneOS/releases/download/"
+        const val URL = "https://github.com/DeathThoughts/OneOS-test/releases/latest/download/update-release.json"
+        const val APK_PREFIX = "https://github.com/DeathThoughts/OneOS-test/releases/download/"
 
         /**
          * The team's test channel (Debug settings): an update.json in the owner's own Drive, outside
@@ -57,15 +46,22 @@ data class AppUpdate(
         /** Larger than any OneOS APK without its package set files (0.4.41 is about 60 MB). */
         const val MAX_BYTES = 256L * 1024 * 1024
 
-        private val NAME = Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){1,3}$")
+        fun manifestUrl(debug: Boolean = false, guest: Boolean = false): String {
+            val kind = if (guest) "guest-update" else "update"
+            val channel = if (debug) "debug" else "release"
+            val base = if (debug) "download/oneos-debug" else "latest/download"
+            return "https://github.com/DeathThoughts/OneOS-test/releases/$base/$kind-$channel.json"
+        }
+
+        private val NAME = Regex("^[0-9]{1,3}(\\.[0-9]{1,3}){1,3}(-[A-Za-z0-9][A-Za-z0-9.-]{0,47})?$")
         private val HEX64 = Regex("^[0-9a-f]{64}$")
-        private val APK_PATH = Regex("^v[0-9.]{3,15}/OneOS-[0-9.]{3,15}\\.apk$")
+
 
         /**
          * The update [text] names, or why it is not one (a flat JSON object, these five keys).
          * [test]: the test channel's, whose APK may also be a file in the owner's Drive.
          */
-        fun parse(text: String, test: Boolean = false): Result<AppUpdate> = runCatching {
+        fun parse(text: String, test: Boolean = false, guest: Boolean = false, debug: Boolean = false): Result<AppUpdate> = runCatching {
             if (text.length > 4096) error("update.json is too long")
             fun raw(key: String): String =
                 Regex("\"" + key + "\"\\s*:\\s*(\"[^\"\\\\]*\"|[0-9]+)").findAll(text).toList().let {
@@ -86,7 +82,10 @@ data class AppUpdate(
             val sha = str("sha256")
             if (code !in 1..Int.MAX_VALUE.toLong()) error("versionCode $code")
             if (!NAME.matches(name)) error("versionName '$name'")
-            val release = apk.startsWith(APK_PREFIX) && APK_PATH.matches(apk.removePrefix(APK_PREFIX))
+            val filename = (if (guest) "OneOSGuest-" else "OneOS-") + (if (debug) "debug.apk" else "release.apk")
+            val path = apk.removePrefix(APK_PREFIX)
+            val release = apk.startsWith(APK_PREFIX) &&
+                Regex("^oneos-build-[0-9]+/" + Regex.escape(filename) + "$").matches(path)
             if (!release && !(test && DRIVE_APK.matches(apk))) error("the APK is not a OneOS release file: $apk")
             if (bytes !in 1..MAX_BYTES) error("APK size $bytes")
             if (!HEX64.matches(sha)) error("sha256 '$sha'")

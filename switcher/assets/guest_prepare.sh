@@ -3354,6 +3354,8 @@ if [ "${ONEOS_GUEST_APP:-1}" = 1 ]; then
     mkdir -p "$STAGE/data/oneos_bootui"
     cp "$STAGE/boot_status.sh" "$STAGE/data/oneos_bootui/boot_status.sh"
     chmod 644 "$STAGE/data/oneos_bootui/boot_status.sh"
+    echo 1 > "$STAGE/data/oneos_bootui/manager_updates"
+    chmod 644 "$STAGE/data/oneos_bootui/manager_updates"
     GUEST_APP_APK="$STAGE/OneOSGuest.apk"
     [ ! -f "$STAGE/guest_manager.apk" ] || GUEST_APP_APK="$STAGE/guest_manager.apk"
     # One integrated OneOS app in every guest, including when guest root is off.

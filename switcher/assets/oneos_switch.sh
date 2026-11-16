@@ -4564,6 +4564,16 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # and the home screen counts once this boot's activator pass says so.
             if [ \"\$req\" = ksud:soft-reboot ] && [ -f $STAGE/tmp/guest_softreboot.sh ]; then
                 setprop oneos.guest.powerctl ''
+                # Install the queued guest APK while its PackageManager is alive.
+                # A failed installation leaves the guest running for retry/cancel.
+                if [ -d $STAGE/data/oneos_root/adb/oneos/manager-update/pending ]; then
+                    UP=\$(pidof system_server | awk '{print \$1}')
+                    if [ -z \"\$UP\" ] || [ ! -f /proc/\$UP/root/data/oneos_runtime.sh ] ||
+                       ! timeout 60 $BB nsenter -t \$UP -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_runtime.sh control manager-update-apply; then
+                        echo \"\$(date) guest app update failed; restart deferred\"
+                        continue
+                    fi
+                fi
                 echo \"\$(date) guest requested a soft reboot (\$req) after \${t}s\"
                 if BB=$BB timeout 120 /system/bin/sh $STAGE/tmp/guest_softreboot.sh \"\$req\"; then
                     t=0; dead=-60; sfgone=-30; prev_failed=0; wmseen=0; hwcarm=0; rm -f $STAGE/data/oneos_hwc_forced

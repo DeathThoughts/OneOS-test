@@ -168,6 +168,15 @@ jobs:
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: sh scripts/build-guest-manager.sh ${{ matrix.variant }}
 
+      - name: Verify update handling
+        env:
+          GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
+          GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/test-guest-manager-update.py
+          cd app-android
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
+
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.
       # assembleFullDebug also runs checkFullDebugStagingApk (python3, preinstalled).
@@ -221,12 +230,22 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare guest update metadata
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -eu
+          cp "app-android/guest/build/outputs/apk/$VARIANT/guest-$VARIANT.apk" "dist/OneOSGuest-$VARIANT.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "dist/OneOSGuest-$VARIANT.apk"
+          python3 scripts/write-update-manifests.py --variant "$VARIANT" --run-id "${{ github.run_id }}"
+
       - uses: actions/upload-artifact@v6
         with:
           name: oneos-${{ matrix.variant }}
           path: |
             dist/*.apk
             dist/*.apk.sha256
+            dist/*update-*.json
           if-no-files-found: error
 
 
@@ -257,4 +276,36 @@ jobs:
           done
           gh release create "$tag" --target "$RELEASE_SHA" --title "OneOS build $BUILD_ID" \
             --notes 'Release is for normal use (30% battery or charging, below 42 °C). Debug is for testing (5% battery or charging, below 50 °C).' \
-            dist/OneOS-release.apk dist/OneOS-debug.apk dist/*.sha256
+            dist/*.apk dist/*.sha256 dist/*update-*.json
+
+  publish-debug-updates:
+    if: github.ref_name == 'debug'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: oneos-debug
+          path: dist
+      - name: Publish signed debug updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_ID: ${{ github.run_id }}
+          DEBUG_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          (cd dist && sha256sum -c OneOS-debug.apk.sha256 && sha256sum -c OneOSGuest-debug.apk.sha256)
+          tag="oneos-build-$BUILD_ID"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$DEBUG_SHA" --prerelease --title "OneOS debug build $BUILD_ID" \
+              --notes 'Debug test build. Includes the signed guest app for updates from inside a guest.'
+          fi
+          gh release upload "$tag" dist/*.apk dist/*.sha256 dist/*update-*.json --clobber
+          if ! gh release view oneos-debug >/dev/null 2>&1; then
+            gh release create oneos-debug --target "$DEBUG_SHA" --prerelease --title 'OneOS debug update channel' \
+              --notes 'Update metadata for the newest completed debug build. APK links point to its build release.'
+          fi
+          gh release upload oneos-debug dist/update-debug.json dist/guest-update-debug.json --clobber

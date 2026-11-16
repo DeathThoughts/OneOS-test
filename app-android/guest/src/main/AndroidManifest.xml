@@ -29,6 +29,7 @@
         </activity>
 
         <activity android:name=".ModuleWebActivity" android:exported="false" />
+        <activity android:name=".GuestUpdatesActivity" android:exported="false" />
         <activity android:name=".GuestModulesActivity" android:exported="false" />
         <!-- Bring apps from One UI: lists the catalog the OneOS app left, asks the host session for one app. -->
         <activity android:name=".BringAppsActivity" android:exported="false" android:label="@string/bring_title" />
