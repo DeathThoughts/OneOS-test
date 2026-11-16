@@ -3875,7 +3875,8 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # return_to_oneui.sh stops it as well and does the same (heat_cap.active), for
 # One UI's SSRM to set its own. ONEOS_HEAT_CAP=0 (Advanced: Cool down when hot
 # off): no cap. Out of the app cgroup, like the sampler. The level applied is
-# in $STAGE/heat_cap.level (0 to 3) for the guest boost below.
+# in $STAGE/heat_cap.level (0 to 3) for the guest boost below, which stops at
+# level 3 only.
 # CPU levels (S23 SM-S911B, ColorOS 17, 2026-11-15): skin sat at 44.6 C, just
 # under 45, so the cap never came on, while cpu-1-3 read 88 C, cpuss-2 79 C and
 # policy0/policy3 stayed at their top clock. The same loop also reads the
@@ -3896,6 +3897,12 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # have gone up but was held back is logged once ("held"), with the two before.
 # The higher of the two levels is applied, with the same table; with no skin
 # reading the CPU level alone. The guest thermal status below stays on skin.
+# Samsung's AP sensor (the whole application processor, mName=AP in the same
+# HAL block) is only logged beside skin and the CPU (", ap 49.6 C"), not used:
+# on the S25 Ultra single zones read 100-106 C for 20-30 s while AP read
+# 48-53 C (sessions bceaef29fb128e94, c2d30e95cde9775b, 2c804690b9171656), and
+# a CPU rule on AP needs more AP readings than the logs have to set its
+# thresholds.
 # ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
 # key): skin only, as before.
 # Guest thermal status (Pixel; owner's go, 2026-11-06). Samsung's thermal HAL
@@ -3995,7 +4002,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         done
     }
     lvl=0; first=1; tl=-1; lp=''
-    # The level for the guest boost below: no boost while it is over 0.
+    # The level for the guest boost below: no boost at level 3.
     [ $HEAT_CAP = 1 ] && echo 0 > $STAGE/heat_cap.level
     # cpu_prev, cpu_prev2: the two CPU readings before this one (milli C), not
     # the cap percent pct below, which the same loop sets (review of de66247 by
@@ -4009,8 +4016,12 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             exit 0
         fi
         P=\$(pidof system_server | awk '{print \$1}')
-        sk=''
-        [ -n \"\$P\" ] && sk=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null | sed -n '/^Current temperatures from HAL/,/^[^[:space:]]/p' | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=SKIN,.*/\1/p' | head -n 1)
+        th=''
+        [ -n \"\$P\" ] && th=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null | sed -n '/^Current temperatures from HAL/,/^[^[:space:]]/p')
+        sk=\$(echo \"\$th\" | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=SKIN,.*/\1/p' | head -n 1)
+        # ap: for the log only (see above); mName=AP exactly, not APU. ap_c: ', ap 49.6 C' or empty.
+        ap=\$(echo \"\$th\" | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=AP,.*/\1/p' | head -n 1)
+        ap_c=\${ap:+, ap \$ap C}
         if [ -n \"\$sk\" ] && [ $GUEST_THERMAL_MAP = 1 ]; then
             [ \"\$P\" = \"\$lp\" ] || tl=-1
             lp=\$P
@@ -4018,7 +4029,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             if [ \"\$nt\" != \"\$tl\" ]; then
                 if [ \"\$nt\" = 4 ]; then a=reset; w=\"the HAL status again\"; else a=\"override-status \$nt\"; w=\$nt; fi
                 r=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd thermalservice \$a 2>&1 | head -n 2 | tr '\\n' ' ')
-                echo \"\$(date +%T) skin \$sk C: guest thermal status \$w (cmd thermalservice \$a: \${r:-ok})\" >> \$F
+                echo \"\$(date +%T) skin \$sk C\$ap_c: guest thermal status \$w (cmd thermalservice \$a: \${r:-ok})\" >> \$F
                 tl=\$nt
             fi
         fi
@@ -4030,6 +4041,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 slvl=\$(awk -v s=\"\$sk\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47; t[3] = 50; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 2) l--; print l }')
                 new=\$slvl; why=\"skin \$sk C\"
             fi
+            [ -n \"\$ap\" ] && why=\"\${why:+\$why, }ap \$ap C\"
             if [ -n \"\$ct\" ]; then
                 # Up only as far as this reading and the two before all reach; down on this one.
                 # h: where this reading alone would go; above l, it was held back, and the
@@ -4037,7 +4049,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; h = l; while (h < 3 && s >= t[h + 1]) h++; while (l < 3 && s >= t[l + 1] && p >= t[l + 1] && q >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; if (h > l) printf \"%d %d %d.%d, %d.%d\\n\", l, t[h] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
                 clvl=\${cr%% *}
                 case \"\$cr\" in
-                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz) held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
+                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\$ap_c held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
                 esac
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
@@ -4102,13 +4114,24 @@ fi
 #   comes on (review by the mlcraze5 fork, 2026-11-16);
 # - with either, the backlight going on raises scaling_min_freq to the step
 #   nearest 70% for 2 s (read every second).
-# No boost while the heat cap holds a level over 0 ($STAGE/heat_cap.level);
-# scaling_max_freq is never written. Every value changed is saved first in
-# $STAGE/boost.before and goes back when the loop stops (the return, or no
-# guest namespace record) and in return_to_oneui.sh (boost.active). Logged in
-# $STAGE/boost.log: what was chosen, then counts every 5 minutes, never a line
-# per touch. Out of the app cgroup, like the heat cap. ONEOS_GUEST_BOOST=0 (the
-# adb loop only: the app's session.env has no such key): not started.
+# No boost at heat cap level 3 ($STAGE/heat_cap.level, 50%), where the boost
+# and the cap meet; at levels 1 and 2 (80, 65%) it works as at 0, every value
+# still at or under the policy's scaling_max_freq. It was off from level 1 up,
+# and S25 Ultra session bceaef29fb128e94 (ColorOS native audit 2026-11-16,
+# F11) lost the kernel's input boost for 2.3 of 3.7 minutes at levels 1-3,
+# while the boost's 50% steps (1.79 / 2.25 GHz) sat under the 80% and 65% caps
+# of 3.53 / 4.47 GHz: touches lost the boost whenever the phone was warm,
+# though it could not have taken the CPU past the cap. On each level change a
+# touch or screen-on boost in place is set again at the new scaling_max_freq,
+# and the kernel's input boost is kept off at a level whose scaling_max_freq is
+# under one of its frequencies (the kernel's frequency QoS lets the max win
+# anyway; this keeps the value written under it too). scaling_max_freq is never
+# written. Every value changed is saved first in $STAGE/boost.before and goes
+# back when the loop stops (the return, or no guest namespace record) and in
+# return_to_oneui.sh (boost.active). Logged in $STAGE/boost.log: what was
+# chosen, then counts every 5 minutes, never a line per touch. Out of the app
+# cgroup, like the heat cap. ONEOS_GUEST_BOOST=0 (the adb loop only: the app's
+# session.env has no such key): not started.
 rm -f "$STAGE/boost.active"
 if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
     : > "$STAGE/boost.active"
@@ -4116,7 +4139,7 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
     : oneos_guest_boost
     echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
     F=$STAGE/boost.log; B=$STAGE/boost.before; ST=$STAGE/boost.state; CN=$STAGE/boost.count; GP=$STAGE/boost.gpid
-    echo \"# \$(date) OneOS guest boost: touch and screen-on CPU boost from the host (none while the heat cap holds a level)\" > \$F
+    echo \"# \$(date) OneOS guest boost: touch and screen-on CPU boost from the host (none at heat cap level 3)\" > \$F
     num() { case \"\$1\" in ''|*[!0-9]*) return 1 ;; esac; }
     put_back() {
         [ -f \$B ] || return 0
@@ -4155,13 +4178,14 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
     if [ -n \"\$WF\" ]; then
         of=\$(echo \$(cat \$WF 2>/dev/null)); om=\$(cat \$WM 2>/dev/null)
         # The prime cluster (the highest top clock, with more than one policy) gets 0.
-        CF=''
+        CF=''; KP=''
         for p in /sys/devices/system/cpu/cpufreq/policy*; do
             hw=''; av=''; rc=''
             read -r hw 2>/dev/null < \$p/cpuinfo_max_freq; num \"\$hw\" || continue
             read -r av 2>/dev/null < \$p/scaling_available_frequencies
             read -r rc 2>/dev/null < \$p/related_cpus
             f=\$(near 50); [ \$np -gt 1 ] && [ \$hw = \$top ] && f=0
+            KP=\"\$KP \$p \$f\"
             for i in \$rc; do CF=\"\$CF \$i:\$f\"; done
         done
         case \$WF in
@@ -4192,10 +4216,21 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
         if [ -n \"\$DEV\" ]; then echo \"# mechanism: the touch reader on /dev/input/\$DN (getevent -c 1; held until a second with no touch)\" >> \$F
         else echo \"# no kernel input boost and no touchscreen in /proc/bus/input/devices: the screen-on boost only\" >> \$F; fi
     fi
+    # Level 3 only (S25 Ultra bceaef29fb128e94): at 1 and 2 the boost fits under the cap. Sets hl.
     hot() {
         [ $HEAT_CAP = 1 ] || return 1
         hl=0; read -r hl 2>/dev/null < $STAGE/heat_cap.level
-        num \"\$hl\" && [ \$hl -gt 0 ]
+        num \"\$hl\" && [ \$hl -ge 3 ]
+    }
+    # Every kernel input boost frequency at or under its policy's scaling_max_freq.
+    kfit() {
+        set -- \$KP
+        while [ \$# -ge 2 ]; do
+            mx=''; read -r mx 2>/dev/null < \$1/scaling_max_freq
+            num \"\$mx\" && [ \$2 -gt \$mx ] && return 1
+            shift 2
+        done
+        return 0
     }
     # \$1: 50 or 70 (percent of the top clock); capped at scaling_max_freq, never under the saved value.
     boost_to() {
@@ -4269,13 +4304,23 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
     echo 0 > \$ST; echo '0 0 0' > \$CN
     RP=''; paused=0
     if [ -n \"\$DEV\" ]; then reader & RP=\$!; fi
-    bl=1; son=0; lt=0; tick=0; sn=0; sk=0; wh=0; wst=1; pn=0; pk=0; psn=0; psk=0; pwh=0
+    bl=1; son=0; lt=0; tick=0; pl=''; kf=1; sn=0; sk=0; wh=0; wst=1; pn=0; pk=0; psn=0; psk=0; pwh=0
     while true; do
         [ -f $STAGE/data/oneos_rec_stop ] && stop 'the return started'
         [ -s $STAGE/guest_mntns ] || stop 'no guest namespace record'
-        h=0; hot && h=1
+        h=0; hl=0; hot && h=1
+        # lc: the heat cap level changed (it writes scaling_max_freq before the level).
+        lc=0
+        if [ \"\$hl\" != \"\$pl\" ]; then
+            lc=1; pl=\$hl; kf=1
+            case \$hl in 1|2) kfit || kf=0 ;; esac
+        fi
         st=0; read -r st 2>/dev/null < \$ST
         n=0; k=0; t=0; read -r n k t 2>/dev/null < \$CN
+        # A boost in place when the level changes (1 or 2): again at the new scaling_max_freq.
+        if [ \"\$st\" != 0 ] && [ \$h = 0 ] && [ \$lc = 1 ]; then
+            if [ \"\$st\" = 2 ]; then boost_to 70; else boost_to 50; fi
+        fi
         if [ \"\$st\" != 0 ]; then
             if [ \$h = 1 ]; then son=0; unboost
             elif [ \$son -gt 0 ]; then son=\$((son - 1)); [ \$son = 0 ] && unboost
@@ -4311,18 +4356,19 @@ if [ "${ONEOS_GUEST_BOOST:-1}" = 1 ]; then
             fi
         fi
         if [ -n \"\$M\" ]; then
-            if [ \$h = 1 ]; then
-                [ \$wst = 1 ] && { echo \"\$WOFF\" > \$WF 2>/dev/null; wst=0; echo \"\$(date +%T) the heat cap holds a level: the kernel's input boost off\" >> \$F; }
+            if [ \$h = 1 ] || [ \$kf = 0 ]; then
+                w=''; [ \$h = 1 ] || w=', a scaling_max_freq under its input_boost_freq'
+                [ \$wst = 1 ] && { echo \"\$WOFF\" > \$WF 2>/dev/null; wst=0; echo \"\$(date +%T) the heat cap holds level \$hl\$w: the kernel's input boost off\" >> \$F; }
                 wh=\$((wh + 1))
             elif [ \$wst = 0 ]; then
-                echo \"\$WON\" > \$WF 2>/dev/null; wst=1; echo \"\$(date +%T) the heat cap level is 0: the kernel's input boost on again\" >> \$F
+                echo \"\$WON\" > \$WF 2>/dev/null; wst=1; echo \"\$(date +%T) the heat cap level is \$hl: the kernel's input boost on again\" >> \$F
             fi
         fi
         tick=\$((tick + 1)); [ \$tick -ge 300 ] && summary
         sleep 1
     done
 " </dev/null >/dev/null 2>&1 &
-    echo "Guest boost: on (touch and screen-on, none while the heat cap holds a level; $STAGE/boost.log)"
+    echo "Guest boost: on (touch and screen-on, none at heat cap level 3; $STAGE/boost.log)"
 else
     echo "Guest boost: off (ONEOS_GUEST_BOOST=0)"
 fi
