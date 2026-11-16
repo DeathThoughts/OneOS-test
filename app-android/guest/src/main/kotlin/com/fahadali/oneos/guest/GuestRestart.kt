@@ -8,9 +8,9 @@ import java.io.FileOutputStream
 /** Authenticated by the same private app-data boundary as the existing return request. */
 object GuestRestart {
     fun confirm(activity: Activity) {
-        AlertDialog.Builder(activity).setTitle("Restart this guest?")
-            .setMessage("Guest apps will close and pending module changes will apply. One UI stays stopped while the guest restarts. If recovery fails, OneOS will return to One UI.")
-            .setNegativeButton(android.R.string.cancel,null).setPositiveButton("Restart guest") { _,_ ->
+        AlertDialog.Builder(activity).setTitle(R.string.restart_confirm_title)
+            .setMessage(R.string.restart_confirm_message)
+            .setNegativeButton(android.R.string.cancel,null).setPositiveButton(R.string.restart_action) { _,_ ->
                 activity.startActivity(android.content.Intent(activity,ReturnSplashActivity::class.java).putExtra(EXTRA_RESTART,true))
             }.show()
     }
