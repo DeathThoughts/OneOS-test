@@ -3691,11 +3691,16 @@ fi
 # with a timeout; until the guest's system_server runs only the kernel's
 # values. It stops once return_to_oneui.sh has started (data/oneos_rec_stop,
 # its first step; its pkill of system_server matches this command line too)
-# or the guest's namespace record is gone. Out of the app cgroup, like the
-# watcher, so it outlives the app that started the switch. Also, in
-# $STAGE/cpu_top.log (collected with the stage's logs), the six busiest
-# processes over one second and the CPU totals (HyperOS run 11: 42-44 C skin
-# all session and nothing said which process kept the CPU busy).
+# or the guest's namespace record is gone. mBlurEnabled and
+# disable_window_blurs are read on the first pass with a guest system_server
+# and every 10th after it (5 min), each line keeping the last values: the
+# window dump takes WindowManager's lock and is a big Java dump for one flag
+# that rarely changes (ColorOS native audit 2026-11-16, S25 Ultra, F12). A new
+# system_server (soft reboot of the guest) is read at once. Out of the app
+# cgroup, like the watcher, so it outlives the app that started the switch.
+# Also, in $STAGE/cpu_top.log (collected with the stage's logs), the six
+# busiest processes over one second and the CPU totals (HyperOS run 11:
+# 42-44 C skin all session and nothing said which process kept the CPU busy).
 # Each cpu_top.log line ends with the new processes (forks) and context
 # switches per second since the line before, from /proc/stat's processes and
 # ctxt over /proc/uptime (one awk; "-" on the first line). S25 Ultra
@@ -3711,19 +3716,26 @@ $BB sh -c "
     T=$STAGE/cpu_top.log
     echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core), then forks/s and ctxt/s since the line before (/proc/stat processes, ctxt)\" > \$T
     pc_prev=''
-    echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs, battery %,status\" > \$F
+    bn=0; bp=''; bl=''; dw=''
+    echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs (both read every 5 min), battery %,status\" > \$F
     while true; do
         [ -f $STAGE/data/oneos_rec_stop ] && { echo \"# \$(date +%T) the return started: sampler stopped\" >> \$F; exit 0; }
         [ -s $STAGE/guest_mntns ] || { echo \"# \$(date +%T) no guest namespace record: sampler stopped\" >> \$F; exit 0; }
         t0=\$(date +%s)
         P=\$(pidof system_server | awk '{print \$1}')
-        st=''; sk=''; bl=''; dw=''
+        st=''; sk=''
         if [ -n \"\$P\" ]; then
             TH=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null)
             st=\$(echo \"\$TH\" | sed -n 's/^Thermal Status: *\([0-9][0-9]*\).*/\1/p' | head -n 1)
             sk=\$(echo \"\$TH\" | sed -n '/^Current temperatures from HAL/,/^[^[:space:]]/p' | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=SKIN,.*/\1/p' | head -n 1)
-            bl=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows 2>/dev/null | grep -m 1 -o 'mBlurEnabled=[a-z]*' | sed 's/.*=//')
-            dw=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get global disable_window_blurs 2>/dev/null)
+            if [ \$bn -ge 10 ] || [ \"\$P\" != \"\$bp\" ]; then
+                bn=0; bp=\$P
+                bl=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows 2>/dev/null | grep -m 1 -o 'mBlurEnabled=[a-z]*' | sed 's/.*=//')
+                dw=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get global disable_window_blurs 2>/dev/null)
+            fi
+            bn=\$((bn + 1))
+        else
+            bn=0; bp=''; bl=''; dw=''
         fi
         c=''
         for p in /sys/devices/system/cpu/cpufreq/policy*; do
