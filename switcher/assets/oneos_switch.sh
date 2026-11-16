@@ -2211,8 +2211,13 @@ GUEST_FOLD_FORM=0; [ "${ONEOS_GUEST_FORM:-fold}" = fold ] && GUEST_FOLD_FORM=1
 # An OxygenOS image (its stable display size resource, see "stable display size"
 # in the UI activator).
 GUEST_OXYGEN=0; grep -q '^  "image": "oxygenos' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_OXYGEN=1
-# LineageOS 24's native Sound dashboard loads SettingsLib switch providers.
-GUEST_DOLBY_SETTINGS=0; grep -q '^  "image": "lineage24-infiniti"' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_DOLBY_SETTINGS=1
+# LineageOS 24 and X9UInfinityX 4.1 map SoundSettings to CATEGORY_SOUND.
+# The latter's Settings source (6d0cd76c) binds provider switches through
+# isChecked/onCheckedChanged too. Each image keeps its own saved preference.
+GUEST_DOLBY_SETTINGS=0
+if grep -qE '^  "image": "(lineage24-infiniti|infinityx41-findx9u)"' "$STAGE/.oneos_stage" 2>/dev/null; then
+    GUEST_DOLBY_SETTINGS=1
+fi
 # Start UI Activator daemon. One pass per boot of the guest: after a soft
 # reboot of it (guest_softreboot.sh bumps tmp/softreboot.gen, 0.4.39) the
 # same steps run again for the new boot; it ends with the session.

@@ -16,7 +16,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 
-/** A native switch tile consumed by LineageOS 24's SettingsLib Sound dashboard. */
+/** A native Sound switch for the LineageOS 24 and Infinity-X 4.1 Settings dashboards. */
 public final class DolbySoundSettingsProvider extends ContentProvider {
     private static final String TAG = "OneOSDolbySettings";
     private static final String SETTINGS = "com.android.settings";
