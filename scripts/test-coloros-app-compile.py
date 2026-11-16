@@ -10,7 +10,8 @@ compiled next to nothing (S25 Ultra session 25b4785c4206828f, Madox 4fad5d45:
 OplusLauncher had no odex at all); an app at speed-profile is compiled again.
 A marker is saved only when the status after the compile is compiled code,
 and a compiled status with no odex is compiled again (review by the mlcraze5
-fork, 2026-11-16).
+fork, 2026-11-16); so is an app whose marker matches but whose odex is gone
+(review of de66247 by the mlcraze5 fork, 2026-11-16).
 This runs the real heredoc with stubs for pm, cmd, getprop, dumpsys, sha256sum,
 sleep and timeout, under a temporary root for /data and /system.
 """
@@ -144,6 +145,25 @@ class AppCompile(unittest.TestCase):
             self.assertEqual(g.compiles(), ['com.android.launcher speed'])
             self.assertEqual(g.amark().count('com.android.launcher '), 1)
             self.assertIn('com.android.launcher apk=new boot=image filter=speed', g.amark())
+
+    def test_marker_match_without_odex_compiles(self):
+        # review of de66247 by the mlcraze5 fork, 2026-11-16: the apps' marker
+        # skipped the compile even when the odex was gone
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d); full(g)
+            g.run()
+            full(g)  # back to verify, same APKs: the markers still match
+            (g.st / 'compiles').unlink()
+            o = g.root / 'system/system_ext/priv-app/Settings/oat/arm64/Settings.odex'
+            o.unlink()
+            log = g.run()
+            self.assertEqual(g.compiles(), ['com.android.settings speed'])
+            self.assertIn('com.android.settings compiled on an earlier session for this APK '
+                          '(apk=sha-com.android.settings boot=image filter=speed) but no odex for it was found', log)
+            self.assertIn('com.android.launcher compiled on an earlier session', log)
+            self.assertTrue(o.exists())
+            self.assertEqual([l for l in g.amark().split('\n') if l.startswith('com.android.settings ')],
+                             ['com.android.settings apk=sha-com.android.settings boot=image filter=speed'])
 
     def test_speed_skips(self):
         with tempfile.TemporaryDirectory() as d:

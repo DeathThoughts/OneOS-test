@@ -4260,9 +4260,15 @@ app() {
     k=$(sha256sum "$a" 2>/dev/null | cut -d' ' -f1)
     [ -n "$k" ] || k=$(stat -c 'size=%s,mtime=%Y' "$a" 2>/dev/null)
     K="apk=${k:-unknown} boot=${b:-image} filter=speed"
+    # As for SystemUI, the marker alone does not skip: its odex must still be
+    # there, or the app runs on the interpreter until the APK changes (review
+    # of de66247 by the mlcraze5 fork, 2026-11-16).
     if [ ! -L "$AMARK" ] && [ "$(akey "$p")" = "$K" ]; then
-        log "$p compiled on an earlier session for this APK ($K): skipped"
-        return 0
+        if odex "$a"; then
+            log "$p compiled on an earlier session for this APK ($K): skipped"
+            return 0
+        fi
+        log "$p compiled on an earlier session for this APK ($K) but no odex for it was found: checked again"
     fi
     S=$(astatus "$p")
     if acompiled "$S"; then
