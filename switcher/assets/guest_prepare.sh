@@ -4159,7 +4159,19 @@ echo "OPPO default grants: $([ -f "$STAGE/data/oneos_oplus_grants" ] && echo on 
 # the filter, so lines from the earlier speed-profile step compile once more),
 # a failure writes none, a missing package is skipped, and the step stops
 # (logged as postponed) when the guest's thermal status is 3 (severe) or
-# worse, as dex2oat on a hot phone only heats it more. Same log. ColorOS
+# worse, as dex2oat on a hot phone only heats it more. Same log. After those
+# three come the ColorOS apps opened most: phone (InCallUI), Contacts,
+# Messages, Gallery, File Manager, Clock and Weather (S25 Ultra, ColorOS 17
+# Find X9 Ultra IN image, session bffd23abac05cd7c, 2026-11-16: the three
+# above went verify -> speed in 1-6 s each, and Settings had been at
+# status=verify reason=vdex, as the patched boot class path invalidates the
+# image's prebuilt odex (inferred: the image could not be read), so its
+# apps fall back to the interpreter and JIT).
+# InCallUI, Contacts, Messages, Gallery and File Manager were seen in that
+# session's logs; Clock (com.coloros.alarmclock) and Weather
+# (com.coloros.weather2) are assumed, as the image could not be read, and are
+# skipped as not installed where they are missing. It is still once per APK:
+# after the first session each app costs only its marker check. ColorOS
 # guests only (oplus-services.jar); ONEOS_GUEST_SYSUI_COMPILE=0 leaves it all
 # out.
 rm -f "$STAGE/data/oneos_sysui_compile.sh"
@@ -4303,7 +4315,15 @@ app() {
 PC=com.google.android.permissioncontroller
 [ -n "$(timeout 60 pm path $PC 2>/dev/null)" ] || PC=com.android.permissioncontroller
 [ -L "$AMARK" ] && rm -f "$AMARK"
-for p in com.android.launcher com.android.settings $PC; do
+# Home, Settings and the permission dialogs first, then the ColorOS apps opened
+# most (S25 Ultra, Find X9 Ultra IN image, session bffd23abac05cd7c: seen in
+# its logs, except alarmclock and weather2, which are assumed; a missing one
+# is skipped and the next is tried).
+APPS="com.android.launcher com.android.settings $PC
+com.android.incallui com.android.contacts com.android.mms
+com.coloros.gallery3d com.coloros.filemanager
+com.coloros.alarmclock com.coloros.weather2"
+for p in $APPS; do
     h=$(thermal)
     if [ -n "$h" ] && [ "$h" -ge 3 ]; then
         log "thermal status $h (severe or worse): app compile postponed to a later session (next: $p)"
@@ -4314,7 +4334,7 @@ done
 SYSUI
     chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
-    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings and PermissionController (speed, once per APK; oneos_sysui_compile.log in the guest data)"
+    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings, PermissionController, InCallUI, Contacts, Messages, Gallery, File Manager, Clock and Weather (speed, once per APK; oneos_sysui_compile.log in the guest data)"
 else
     echo "ColorOS SystemUI compile: not a ColorOS guest"
 fi
