@@ -246,7 +246,7 @@ class FakeRoot(
     companion object {
         val APPLETS = listOf(
             "head", "tail", "sha256sum", "stat", "awk", "sed", "grep", "sort", "cut", "tr", "wc", "cat", "ls", "mkdir", "mv",
-            "cp", "rm", "chown", "chmod", "date", "env", "id", "od", "sh",
+            "cp", "rm", "rmdir", "chown", "chmod", "date", "env", "id", "od", "sh",
         )
 
         fun exec(cmd: List<String>): String {

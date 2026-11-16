@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="oneui_media_title">Fotos da One UI no ColorOS</string>
+    <string name="oneui_media_summary">Mostra a câmera e as capturas de tela da One UI no ColorOS, somente leitura: o ColorOS não pode editá-las nem excluí-las. Vale a partir da próxima troca ou reinício do sistema convidado.</string>
+    <string name="oneui_media_asking">Consultando o root…</string>
+    <string name="oneui_media_problem">Nada foi alterado: %1$s</string>
+    <string name="oneui_media_unread">Não foi possível ler: %1$s</string>
+    <string name="oneui_media_not_marker">Desativado: %1$s. Remova isso em um shell root e depois ative.</string>
+</resources>

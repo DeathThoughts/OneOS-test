@@ -407,7 +407,7 @@ object ShellScan {
  * phone's user data, reboots, settings, package wipes or mounts.
  */
 object StageAudit {
-    val VERBS = listOf("guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add")
+    val VERBS = listOf("guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "oneui-media")
 
     val ALLOWED: Set<String> = setOf(
         "umask", "[", "echo", "printf", "id", "stat", "awk", "sed", "grep", "sort", "head", "tail", "cut", "tr", "wc",
@@ -416,9 +416,11 @@ object StageAudit {
         "trap", "am", "od", "find", "sleep",
         // 0.5.17: tool-app off stops the one process whose program is that app's libtimer.so (tool_pids).
         "kill",
+        // Build 156: oneui-media off removes its two empty marker folders, never with rm.
+        "rmdir",
     )
 
-    private val WRITES = setOf("mkdir", "mv", "cp", "rm", "chown", "chmod")
+    private val WRITES = setOf("mkdir", "mv", "cp", "rm", "chown", "chmod", "rmdir")
 
     /** Never in the root code: the phone's user data, reboots, settings, wipes, mounts, props. */
     val FORBIDDEN_TEXT = listOf(
@@ -512,6 +514,26 @@ object StageAudit {
     private val BRING_FIND = listOf("\"\$BCE\"", "\"\$BDE\"", "-newer", "\"\$ref\"", "-type", "f")
     private const val BRING_REF_VALUE = "\"\$dst/since\""
 
+    /**
+     * One UI photos in ColorOS (do_oneui_media only, build 156), a documented write outside the
+     * stage: `$OMEDIA` is exactly
+     * `$OLD_PARENT/oneos-oneui-media`, the marker guest_start.sh reads, and `$OMEDIA_OLD` the S23
+     * prototype's `oneos-media-share-test`; the only writes that name them are on's
+     * `mkdir "$OMEDIA"` and `chown -h "$ROOT_OWNER" "$OMEDIA"` (no chmod, no plain chown: both
+     * follow a link) and off's two rmdirs.
+     */
+    private const val ONEUI_MEDIA_FUNCTION = "do_oneui_media"
+    private val ONEUI_MEDIA_VARS = setOf("OMEDIA", "OMEDIA_OLD")
+    private const val OMEDIA_VALUE = "\"\$OLD_PARENT/oneos-oneui-media\""
+    private const val OMEDIA_OLD_VALUE = "\"\$OLD_PARENT/oneos-media-share-test\""
+    private val ONEUI_MEDIA_WRITES = setOf(
+        "mkdir" to listOf("\"\$OMEDIA\""),
+        "chown" to listOf("-h", "\"\$ROOT_OWNER\"", "\"\$OMEDIA\""),
+        "rmdir" to listOf("\"\$OMEDIA\""),
+        "rmdir" to listOf("\"\$OMEDIA_OLD\""),
+    )
+    private val ONEUI_MEDIA_SOURCE = Regex("""\$\{?(OMEDIA|OMEDIA_OLD)(?![A-Za-z0-9_])""")
+
     private const val PURGE_FUNCTION = "purge_one"
     private val PURGE_VARS = setOf("OLDDIR", "TRASH")
     private const val PURGE_RM = "rm -rf \"\$TRASH\""
@@ -557,6 +579,7 @@ object StageAudit {
         val a = arg.removePrefix("\"")
         val v = Regex("""^\$\{?([A-Za-z_][A-Za-z0-9_]*|1)""").find(a)?.groupValues?.get(1) ?: return false
         if (v in PURGE_VARS) return function == PURGE_FUNCTION
+        if (v in ONEUI_MEDIA_VARS) return function == ONEUI_MEDIA_FUNCTION
         if (v in RESTORE_VARS) return function == RESTORE_FUNCTION
         if (v in REMOVE_VARS) return function == REMOVE_FUNCTION
         if (v in MIGRATE_VARS) return function == MIGRATE_FUNCTION
@@ -613,6 +636,8 @@ object StageAudit {
                 "BCE" -> if (a.value != BCE_VALUE || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BCE=${a.value}"
                 "BDE" -> if (a.value != BDE_VALUE || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BDE=${a.value}"
                 "BFROM" -> p += "line ${a.line}: BFROM=${a.value} (only the loops set it)"
+                "OMEDIA" -> if (a.value != OMEDIA_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA=${a.value}"
+                "OMEDIA_OLD" -> if (a.value != OMEDIA_OLD_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_OLD=${a.value}"
                 "ref" -> if (a.value != BRING_REF_VALUE) p += "line ${a.line}: ref=${a.value}"
                 "OLD_PARENT" -> if (a.value != "\"\$DATA/local/tmp\"") p += "line ${a.line}: OLD_PARENT=${a.value}"
                 "OLDDIR" -> if (a.value != "\"\$OLD_PARENT/\$1\"" || a.function != PURGE_FUNCTION) p += "line ${a.line}: OLDDIR=${a.value}"
@@ -669,9 +694,14 @@ object StageAudit {
             if (args.any { BRING_SOURCE.containsMatchIn(it) } && !bringCopy && !bringLook) {
                 p += "line ${c.line}: $n ${args.joinToString(" ")} takes a bring source (only $BRING_FUNCTION's tests, du and two copies and the status find may)"
             }
+            // The two marker folders: only their own mkdir, chown -h and rmdirs write them.
+            if ((n in WRITES || n in WRITE_HELPERS || n == "to_attic") && args.any { ONEUI_MEDIA_SOURCE.containsMatchIn(it) } &&
+                !(c.function == ONEUI_MEDIA_FUNCTION && (n to args) in ONEUI_MEDIA_WRITES)
+            ) p += "line ${c.line}: $n ${args.joinToString(" ")} writes a One UI photos marker (only its mkdir, chown -h and rmdirs may)"
             if (n in WRITES) {
                 val paths = when (n) {
-                    "chown", "chmod" -> args.drop(1)
+                    // Options first (chown -h): the owner or mode is the first word after them.
+                    "chown", "chmod" -> args.dropWhile { it.startsWith("-") }.drop(1)
                     else -> args.filterNot { it.startsWith("-") }
                 }
                 for (a in paths) {
@@ -688,6 +718,11 @@ object StageAudit {
         for (r in scan.redirects) {
             if (BRING_SOURCE.containsMatchIn(r.target)) p += "line ${r.line}: ${r.op} ${r.target} names a bring source"
             if (!r.op.contains('>')) continue
+            // The marker folders stay empty: nothing is ever written into them.
+            if (ONEUI_MEDIA_SOURCE.containsMatchIn(r.target)) {
+                p += "line ${r.line}: writes to ${r.target}, a One UI photos marker"
+                continue
+            }
             val t = r.target
             val fine = t == "/dev/null" || t.startsWith("&") || r.op.endsWith("&") || t == CGROUP || stagePath(t, r.function, loopVars)
             if (!fine) p += "line ${r.line}: writes to $t"
