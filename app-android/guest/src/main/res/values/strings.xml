@@ -87,4 +87,22 @@
     <string name="dolby_sound_settings_title">Dolby Atmos</string>
     <string name="dolby_sound_settings_summary">Use Dolby sound processing when supported</string>
     <string name="dolby_sound_settings_error">Could not change Dolby Atmos</string>
+    <string name="root_status">Root status</string>
+    <string name="root_active">Active · OneOS guest runtime</string>
+    <string name="root_inactive">Inactive</string>
+    <string name="root_permissions">Root permissions</string>
+    <string name="root_permissions_summary">Manage access for apps in this guest</string>
+    <string name="manage_modules">Manage guest modules</string>
+    <string name="manage_modules_summary">Imports and switches apply on the next guest boot</string>
+    <string name="restart_action">Restart guest</string>
+    <string name="restart_action_summary">Restart this guest and apply pending module changes</string>
+    <string name="restart_confirm_title">Restart this guest?</string>
+    <string name="restart_confirm_message">Guest apps will close and pending module changes will apply. One UI stays stopped while the guest restarts. If recovery fails, OneOS will return to One UI.</string>
+    <string name="framework_status">Framework status</string>
+    <string name="framework_active">%1$s · Active</string>
+    <string name="framework_inactive">%1$s · Not active</string>
+    <string name="framework_open">Open %1$s</string>
+    <string name="framework_manager">Framework manager</string>
+    <string name="framework_open_manager">Open framework manager</string>
+    <string name="framework_open_summary">Reopen the manager without its notification</string>
 </resources>

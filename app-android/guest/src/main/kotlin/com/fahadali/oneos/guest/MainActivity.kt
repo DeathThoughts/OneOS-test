@@ -128,19 +128,26 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, GuestUpdatesActivity::class.java))
         }
         val root = cards.section(list, "Root", getColor(R.color.preboot_card))
-        cards.row(root, "Root status", if (state.root) "Active · OneOS guest runtime" else state.error ?: "Inactive")
-        cards.row(root, "Root permissions", "Manage access for apps in this guest") {
+        cards.row(root, getString(R.string.root_status), if (state.root) getString(R.string.root_active) else state.error ?: getString(R.string.root_inactive))
+        cards.row(root, getString(R.string.root_permissions), getString(R.string.root_permissions_summary)) {
             startActivity(Intent(this, GuestRootActivity::class.java))
         }.isEnabled = state.root
-        cards.row(root, "Manage guest modules", "Imports and switches apply on the next guest boot") {
+        cards.row(root, getString(R.string.manage_modules), getString(R.string.manage_modules_summary)) {
             startActivity(Intent(this, GuestModulesActivity::class.java))
         }.isEnabled = state.root
-        cards.row(root, "Restart guest", "Restart this guest and apply pending module changes") { GuestRestart.confirm(this) }
+        cards.row(root, getString(R.string.restart_action), getString(R.string.restart_action_summary)) { GuestRestart.confirm(this) }
         val xposed = cards.section(list, "Xposed", getColor(R.color.preboot_card))
-        cards.row(xposed, "Framework status", if (state.active) "${state.providerName} · Active" else if (state.provider != "none") "${state.providerName} · Not active" else "Inactive")
-        cards.row(xposed, "Open ${if(state.provider == "none") "framework manager" else state.providerName}", "Reopen the manager without its notification") {
+        val frameworkStatus = when {
+            state.active -> getString(R.string.framework_active, state.providerName)
+            state.provider != "none" -> getString(R.string.framework_inactive, state.providerName)
+            else -> getString(R.string.root_inactive)
+        }
+        cards.row(xposed, getString(R.string.framework_status), frameworkStatus)
+        val openFramework = if (state.provider == "none") getString(R.string.framework_open_manager)
+        else getString(R.string.framework_open, state.providerName)
+        cards.row(xposed, openFramework, getString(R.string.framework_open_summary)) {
             GuestRuntime.work({ GuestRuntime.openFramework(this, state); state }) { next ->
-                if (!isDestroyed && next.error != null) AlertDialog.Builder(this).setTitle("Framework manager")
+                if (!isDestroyed && next.error != null) AlertDialog.Builder(this).setTitle(R.string.framework_manager)
                     .setMessage(next.error).setPositiveButton(android.R.string.ok,null).show()
             }
         }.isEnabled = state.active
