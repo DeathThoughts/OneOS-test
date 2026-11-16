@@ -6,8 +6,11 @@ while cpu-1-3 read 88 C and policy0/policy3 stayed at their top clock. These
 tests render the loop's double-quoted `sh -c` string the way the switch's
 shell does, point /sys at a fake tree, stub the guest's thermal service, and
 run the real loop for a few rounds (each `sleep` moves to the next round).
-A CPU level goes up only on two readings running at or above its threshold
-(review by the mlcraze5 fork, 2026-11-16), so most cases read twice.
+A CPU level goes up only on three readings running at or above its threshold
+(review by the mlcraze5 fork, 2026-11-16; three since the S25 Ultra's session
+bceaef29fb128e94, where two-reading spikes of 94-106 C capped at 50%), so most
+cases read three times. A reading held back logs a "held" line; run_loop
+leaves those out unless asked for them.
 """
 import os
 import subprocess
@@ -58,7 +61,7 @@ class HeatCapCpuTest(unittest.TestCase):
             lines.append(f"echo {zones.get(ty, 40000)} > {self.r}/sys/class/thermal/thermal_zone{i}/temp")
         return '\n'.join(lines) + '\n'
 
-    def run_loop(self, rounds, cpu='1'):
+    def run_loop(self, rounds, cpu='1', held=False):
         """rounds: (skin C or None, {zone type: millidegrees}) per 10 s round."""
         for n, (skin, zones) in enumerate(rounds, 1):
             (self.r / f'round{n}').write_text(self.round_script(skin, zones))
@@ -86,7 +89,8 @@ sleep() {{
 '''
         done = subprocess.run(['sh', '-c', stubs + loop], capture_output=True, text=True, timeout=60)
         self.assertEqual(0, done.returncode, done.stderr)
-        return [l for l in (self.stage / 'heat_cap.log').read_text().splitlines() if not l.startswith('#')]
+        return [l for l in (self.stage / 'heat_cap.log').read_text().splitlines()
+                if not l.startswith('#') and (held or ' held: ' not in l)]
 
     def freq(self, name='policy0'):
         return (self.r / 'sys/devices/system/cpu/cpufreq' / name / 'scaling_max_freq').read_text().strip()
@@ -103,7 +107,7 @@ sleep() {{
             self.assertEqual(0, check.returncode, check.stderr)
 
     def test_cpu_76_is_level_1(self):
-        log = self.run_loop([(40.0, {'cpu-1-3': 76000})] * 2)
+        log = self.run_loop([(40.0, {'cpu-1-3': 76000})] * 3)
         self.assertIn('skin 40.0 C, cpu 76.0 C (cpu-1-3): no cap', log[0])
         self.assertIn('skin 40.0 C, cpu 76.0 C (cpu-1-3), level 0 to 1: 80%', log[1])
         self.assertIn('policy0=1612800/2016000', log[1])
@@ -114,21 +118,49 @@ sleep() {{
         self.assertEqual(['skin 40.0 C, cpu 88.0 C (cpu-1-3): no cap'], [l.split(' ', 1)[1] for l in log])
         self.assertEqual('2016000', self.freq())
 
-    def test_two_readings_running_cap(self):
-        log = self.run_loop([(40.0, {'cpu-1-3': 60000}), (40.0, {'cpu-1-3': 88000}), (40.0, {'cpu-1-3': 88000})])
+    def test_two_hot_readings_then_a_cool_one_do_not_cap(self):
+        # The S25 Ultra's pattern (bceaef29fb128e94): 104 C, 98 C, then 72 C.
+        log = self.run_loop([(44.0, {'cpu-1-3': 60000}), (44.0, {'cpu-1-3': 104300}),
+                             (44.0, {'cpu-1-3': 98000}), (44.0, {'cpu-1-3': 72000})])
+        self.assertEqual(['skin 44.0 C, cpu 60.0 C (cpu-1-3): no cap'], [l.split(' ', 1)[1] for l in log])
+        self.assertEqual('2016000', self.freq())
+
+    def test_three_readings_running_cap(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 60000})] + [(40.0, {'cpu-1-3': 88000})] * 3)
         self.assertEqual(3, len(log), log)
         self.assertIn('no cap', log[0])
         self.assertIn('cpu 88.0 C (cpu-1-3), level 0 to 3: 50%', log[1])
         self.assertIn('stopped: full clock', log[2])
 
-    def test_up_only_as_far_as_both_readings(self):
-        # 81 then 86: level 2 (both reach 80), then 3 once 85 is read twice
-        log = self.run_loop([(40.0, {'cpu-1-3': 81000}), (40.0, {'cpu-1-3': 86000}), (40.0, {'cpu-1-3': 86000})])
+    def test_two_readings_running_no_longer_cap(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 60000})] + [(40.0, {'cpu-1-3': 88000})] * 2)
+        self.assertEqual(['skin 40.0 C, cpu 60.0 C (cpu-1-3): no cap'], [l.split(' ', 1)[1] for l in log])
+        self.assertEqual('2016000', self.freq())
+
+    def test_the_held_line(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 70200}), (40.0, {'cpu-1-3': 79100}),
+                             (40.0, {'cpu-1-3': 104300}), (40.0, {'cpu-1-3': 60000})], held=True)
+        rest = [l.split(' ', 1)[1] for l in log]
+        self.assertEqual(['skin 40.0 C, cpu 70.2 C (cpu-1-3): no cap',
+                          'cpu 79.1 C (cpu-1-3) held: needs three readings over 75 C (before: 70.2, 0.0)',
+                          'cpu 104.3 C (cpu-1-3) held: needs three readings over 85 C (before: 79.1, 70.2)'], rest)
+        self.assertRegex(log[1], r'^\d\d:\d\d:\d\d cpu ')
+
+    def test_no_held_line_on_quiet_or_agreed_readings(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 60000})] * 2 + [(40.0, {'cpu-1-3': 86000})] * 4, held=True)
+        held = [l for l in log if ' held: ' in l]
+        self.assertEqual(2, len(held), log)
+        self.assertIn('level 0 to 3: 50%', log[3])
+        self.assertEqual(5, len(log), log)
+
+    def test_up_only_as_far_as_all_three_readings(self):
+        # 81, 81 then 86: level 2 (all three reach 80), then 3 once 85 is read three times
+        log = self.run_loop([(40.0, {'cpu-1-3': 81000})] * 2 + [(40.0, {'cpu-1-3': 86000})] * 3)
         self.assertIn('cpu 86.0 C (cpu-1-3), level 0 to 2: 65%', log[1])
         self.assertIn('cpu 86.0 C (cpu-1-3), level 2 to 3: 50%', log[2])
 
     def test_leaving_takes_one_reading(self):
-        log = self.run_loop([(40.0, {'cpu-1-3': 86000})] * 2 + [(40.0, {'cpu-1-3': 81000})])
+        log = self.run_loop([(40.0, {'cpu-1-3': 86000})] * 3 + [(40.0, {'cpu-1-3': 81000})])
         self.assertIn('level 0 to 3: 50%', log[1])
         self.assertIn('cpu 81.0 C (cpu-1-3), level 3 to 2: 65%', log[2])
 
@@ -137,13 +169,13 @@ sleep() {{
         self.assertIn('skin 47.5 C, cpu 40.0 C (cpu-0-0), level 0 to 2: 65%', log[0])
 
     def test_the_s23_report_caps_at_50(self):
-        log = self.run_loop([(44.6, {'cpu-1-3': 88000, 'cpuss-2': 79200, 'cpu-0-0': 84000})] * 2)
+        log = self.run_loop([(44.6, {'cpu-1-3': 88000, 'cpuss-2': 79200, 'cpu-0-0': 84000})] * 3)
         self.assertIn('skin 44.6 C, cpu 88.0 C (cpu-1-3), level 0 to 3: 50%', log[1])
         self.assertIn('policy0=1008000/2016000 policy3=1401600/2803200', log[1])
         self.assertIn('full clock', log[-1], 'the return gives the clocks back')
 
     def test_hysteresis(self):
-        log = self.run_loop([(40.0, {'cpu-1-3': 85000})] * 2 + [(40.0, {'cpu-1-3': 83000}), (40.0, {'cpu-1-3': 81000})])
+        log = self.run_loop([(40.0, {'cpu-1-3': 85000})] * 3 + [(40.0, {'cpu-1-3': 83000}), (40.0, {'cpu-1-3': 81000})])
         self.assertIn('level 0 to 3: 50%', log[1])
         self.assertIn('cpu 81.0 C (cpu-1-3), level 3 to 2: 65%', log[2])
         self.assertEqual(4, len(log), log)
@@ -153,13 +185,13 @@ sleep() {{
         self.assertIn('skin 50.5 C, cpu 76.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
 
     def test_no_skin_but_cpu_still_caps(self):
-        log = self.run_loop([(None, {'cpuss-2': 81000})] * 2)
+        log = self.run_loop([(None, {'cpuss-2': 81000})] * 3)
         self.assertIn('cpu 81.0 C (cpuss-2), level 0 to 2: 65%', log[1])
         self.assertNotIn('skin', log[1])
         self.assertIn('policy0=1310400/2016000', log[1])
 
     def test_exynos_zone_names_count(self):
-        log = self.run_loop([(40.0, {'BIG': 80500})] * 2)
+        log = self.run_loop([(40.0, {'BIG': 80500})] * 3)
         self.assertIn('cpu 80.5 C (BIG), level 0 to 2', log[1])
 
     def test_knob_off_ignores_the_cpu(self):
@@ -182,7 +214,7 @@ sleep() {{
 
     def test_the_header_names_the_cpu_thresholds(self):
         self.run_loop([(40.0, {})])
-        self.assertIn('75, 80, 85 C on the hottest CPU thermal zone (two readings running to go up, 3 C hysteresis)',
+        self.assertIn('75, 80, 85 C on the hottest CPU thermal zone (three readings running to go up, 3 C hysteresis)',
                       (self.stage / 'heat_cap.log').read_text())
 
 

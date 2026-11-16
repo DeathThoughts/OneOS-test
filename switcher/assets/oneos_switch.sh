@@ -7,6 +7,12 @@ STAGE="/data/local/tmp/oneos"
 # scripts/deploy-phone.sh) the app-only checks are skipped and a few warn.
 APP="${ONEOS_APP:-0}"
 [ "$APP" = 1 ] || APP=0
+# Timing of the preflight (S25 Ultra bceaef29fb128e94 05:15:57 -> 05:16:12,
+# S23 4d2e95c67f065941 03:02:58 -> 03:03:13): 15 s from the root script's
+# "=== OneOS app launch" to "preflight: switch start", with no line between to
+# say where. The "preflight: <step> <time>" lines below only report; every
+# check stays as and where it was.
+echo "preflight: oneos_switch.sh start $(date +%T)"
 
 # --- PREFLIGHT ------------------------------------------------------------
 # Every refusal comes before the first change to the phone (SELinux, props,
@@ -49,6 +55,7 @@ for ex in /proc/[0-9]*/exe; do
             refuse "the app $a runs a kernel tool (libtimer.so, pid $(echo "$ex" | cut -d/ -f3)) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
     esac
 done
+echo "preflight: process scan done $(date +%T)"
 
 # Root tools: the root manager's own busybox and resetprop (KernelSU, APatch,
 # Magisk), never whatever a search of /data finds (OneLineage fell back to
@@ -140,12 +147,20 @@ if [ "$APP" = 1 ]; then
                 check_host_apex.sh bridges.sh zygote_exec guards.txt $GUARD_JARS; do
         awk -v n="$need" '$2 == n { f = 1 } END { exit !f }' "$SUMS" || refuse "files.sha256 does not list $need"
     done
+    # Suspected for the 15 s (not proven): this loop hashes every staged file,
+    # payload images of hundreds of MB included, on every switch. Its time, how
+    # many files and how many bytes (one stat after the loop, nothing hashed twice).
+    echo "preflight: files.sha256 hash start $(date +%T)"
+    SUMS_FILES=""
     while read -r sum name || [ -n "$sum" ]; do
         f="$STAGE/$name"
         [ -f "$f" ] && [ ! -L "$f" ] || refuse "$name (files.sha256) is missing or a link"
         root_only "$f" || refuse "$name is not root's or is writable by others"
         [ "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] || refuse "$name does not match files.sha256"
+        SUMS_FILES="$SUMS_FILES $f"
     done < "$SUMS"
+    echo "preflight: files.sha256 hash done $(date +%T): $(stat -c '%s %n' $SUMS_FILES 2>/dev/null |
+        awk '{ n++; b += $1; if ($1 > m) { m = $1; f = $2 } } END { sub(/.*\//, "", f); printf "%d files, %.0f bytes (%.1f MB; largest %s, %.1f MB)", n, b, b / 1048576, f, m / 1048576 }')"
     # A leftover the package does not carry would still be bound by
     # guest_prepare.sh (framework_patched.jar, libaudio*_patched.so,
     # PermissionController_patched.apk, an extra payload, an apex info list).
@@ -168,6 +183,7 @@ if [ "$APP" = 1 ]; then
     [ -n "$ID_STAT" ] || refuse "system.raw.id is not \"<size> <sha256> <dev:inode:size:mtime>\""
     [ "$(stat -c '%d:%i:%s:%Y' "$STAGE/system.raw" 2>/dev/null)" = "$ID_STAT" ] ||
         refuse "system.raw changed since it was verified (system.raw.id $ID_STAT, now $(stat -c '%d:%i:%s:%Y' "$STAGE/system.raw" 2>/dev/null))"
+    echo "preflight: system.raw identity done $(date +%T)"
     # The ways back to One UI and the session log cannot be switched off from
     # the app: the root script never writes these keys, checked again here.
     ENVF="$STAGE/session.env"
@@ -238,6 +254,8 @@ for need in $GUARD_JARS; do
     [ -n "$sum" ] && [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] ||
         refuse "$need is missing or not the guarded build in guards.txt"
 done
+# The guarded jars are hashed once more here (also listed in files.sha256).
+echo "preflight: guarded jars done $(date +%T)"
 # The guest vold as "gvld" takes both binaries (guest_prepare.sh refuses one
 # alone too, but only once One UI's framework is stopped).
 [ "$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")" = 1 ] &&
@@ -340,6 +358,7 @@ if [ -n "$TH_MODS" ]; then
     fi
     echo "Thermal modules on:$TH_MODS (One UI's thermal service did not report HAL Ready: false)"
 fi
+echo "preflight: checks done $(date +%T)"
 echo "Preflight passed (ONEOS_APP=$APP, profile ${ONEOS_PROFILE:-none}, busybox $BB, resetprop $RP, mount namespace $SELF_NS)"
 
 # Every ColorOS set (pull request #1 began it for the Z Fold8): copy One UI's
@@ -347,8 +366,11 @@ echo "Preflight passed (ONEOS_APP=$APP, profile ${ONEOS_PROFILE:-none}, busybox 
 # package manager still runs, after checking the stage's guards
 # (switcher/assets/guest_google.sh). It never refuses: without a copy the guest
 # starts without them.
+# Its verify() hashes the GmsCore and Phonesky APKs (sha256sum -c): timed.
+echo "preflight: guest_google.sh snapshot start $(date +%T)"
 STAGE="$STAGE" BB="$BB" /system/bin/sh "$STAGE/guest_google.sh" snapshot ||
     echo "!!! guest_google.sh snapshot failed; the guest starts without One UI's Play services"
+echo "preflight: guest_google.sh snapshot done $(date +%T)"
 
 # mksh keeps a short here-document in memory and writes a long one to a temp
 # file in $TMPDIR, a directory it accepts once, when the shell starts, and
@@ -3618,11 +3640,21 @@ fi
 # $STAGE/cpu_top.log (collected with the stage's logs), the six busiest
 # processes over one second and the CPU totals (HyperOS run 11: 42-44 C skin
 # all session and nothing said which process kept the CPU busy).
+# Each cpu_top.log line ends with the new processes (forks) and context
+# switches per second since the line before, from /proc/stat's processes and
+# ctxt over /proc/uptime (one awk; "-" on the first line). S25 Ultra
+# bceaef29fb128e94 and S23 4d2e95c67f065941: 150-300% sys while nearly idle
+# (05:18:59: user 71%, sys 239%, idle 482%) with the six busiest adding up to
+# little and busybox, sh and top among them. Suspected, not proven:
+# short-lived processes forked by OneOS's own watchers, gone before top sees
+# them; the fork rate says whether that is so. Done in awk: ctxt passes 2^31
+# within a day, beyond mksh's 32-bit arithmetic.
 $BB sh -c "
     echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
     F=$STAGE/diag_series.txt
     T=$STAGE/cpu_top.log
-    echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core)\" > \$T
+    echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core), then forks/s and ctxt/s since the line before (/proc/stat processes, ctxt)\" > \$T
+    pc_prev=''
     echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs, battery %,status\" > \$F
     while true; do
         [ -f $STAGE/data/oneos_rec_stop ] && { echo \"# \$(date +%T) the return started: sampler stopped\" >> \$F; exit 0; }
@@ -3645,7 +3677,12 @@ $BB sh -c "
         bs=\$(cat /sys/class/power_supply/battery/status 2>/dev/null | tr ' ' _)
         echo \"\$(date +%T) thermal=\${st:--} skin=\${sk:--}\$c blur=\${bl:--} disable_window_blurs=\${dw:--} battery=\${bc:-?}%,\${bs:-?}\" >> \$F
         TOP=\$(timeout 10 top -b -n 1 -d 1 -m 6 -s 1 -o %CPU,PID,NAME 2>/dev/null)
-        echo \"\$(date +%T) \$(echo \"\$TOP\" | grep -m 1 'cpu ' | tr -s ' ') |\$(echo \"\$TOP\" | awk '\$1 ~ /^[0-9.]+\$/ && \$2 ~ /^[0-9]+\$/ { printf \" %s %s\", \$1, \$3 }')\" >> \$T
+        # pc: \"<uptime> <processes> <ctxt>,<rates>\", the first part kept for the next pass
+        # (a comma, not a pipe: mksh did not strip up to a bare pipe in the test).
+        pc=\$(awk -v p=\"\$pc_prev\" 'FNR == NR { u = \$1; next } \$1 == \"processes\" { f = \$2 } \$1 == \"ctxt\" { c = \$2 } END { n = split(p, a, \" \"); r = \"forks/s - ctxt/s -\"; if (n == 3 && u > a[1] && f != \"\" && c != \"\") r = sprintf(\"forks/s %.0f ctxt/s %.0f\", (f - a[2]) / (u - a[1]), (c - a[3]) / (u - a[1])); if (f == \"\" || c == \"\") printf \",%s\", r; else printf \"%s %.0f %.0f,%s\", u, f, c, r }' /proc/uptime /proc/stat 2>/dev/null)
+        [ -n \"\$pc\" ] || pc=',forks/s - ctxt/s -'
+        pc_prev=\${pc%%,*}
+        echo \"\$(date +%T) \$(echo \"\$TOP\" | grep -m 1 'cpu ' | tr -s ' ') |\$(echo \"\$TOP\" | awk '\$1 ~ /^[0-9.]+\$/ && \$2 ~ /^[0-9]+\$/ { printf \" %s %s\", \$1, \$3 }') | \${pc#*,}\" >> \$T
         s=\$((t0 + 30 - \$(date +%s))); [ \$s -gt 0 ] || s=1
         sleep \$s
     done
@@ -3676,10 +3713,17 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # and cpuss-*, Exynos and Tensor's BIG, MID and LITTLE, any other *cpu*; never
 # a gpu, ddr, modem, npu, battery or skin zone) and keeps a CPU level of its
 # own: 1 from 75 C, 2 from 80, 3 from 85, each ending 3 C under where it began.
-# A higher CPU level is entered only on two readings running (20 s) at or
+# A higher CPU level is entered only on three readings running (30 s) at or
 # above its threshold, so a single spike (a compile, an app start) does not cap
 # the clocks for the minutes the hysteresis then holds them (review by the
 # mlcraze5 fork, 2026-11-16); the skin levels still take one reading.
+# Two readings were not enough (S25 Ultra, Snapdragon 8 Elite, ColorOS 17,
+# session bceaef29fb128e94): single zones (cpu-1-1-1, cpu-1-0-1, cpu-0-2-1)
+# read 94-106 C for two readings and 64-79 C at the third, five times in
+# 3.5 min, while Samsung's AP sensor read 52-53 C and skin 44-46 C; each went
+# to level 3 (50%) and turned the guest boost off. The S23's 84-88 C above
+# held for minutes, so three readings still catch it. A reading that would
+# have gone up but was held back is logged once ("held"), with the two before.
 # The higher of the two levels is applied, with the same table; with no skin
 # reading the CPU level alone. The guest thermal status below stays on skin.
 # ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
@@ -3711,7 +3755,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     if [ $HEAT_CAP = 1 ]; then
         echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (2 C hysteresis)\" > \$F
         if [ $HEAT_CAP_CPU = 1 ]; then
-            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (two readings running to go up, 3 C hysteresis); the higher level applies\" >> \$F
+            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (three readings running to go up, 3 C hysteresis); the higher level applies\" >> \$F
         else
             echo \"# CPU thermal zones not read (ONEOS_HEAT_CAP_CPU=0): skin only\" >> \$F
         fi
@@ -3783,10 +3827,10 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     lvl=0; first=1; tl=-1; lp=''
     # The level for the guest boost below: no boost while it is over 0.
     [ $HEAT_CAP = 1 ] && echo 0 > $STAGE/heat_cap.level
-    # cpu_prev: the CPU reading before this one (milli C), not the cap percent pct
-    # below, which the same loop sets (review of de66247 by the mlcraze5 fork,
-    # 2026-11-16).
-    slvl=0; clvl=0; cpu_prev=0
+    # cpu_prev, cpu_prev2: the two CPU readings before this one (milli C), not
+    # the cap percent pct below, which the same loop sets (review of de66247 by
+    # the mlcraze5 fork, 2026-11-16; three readings: S25 Ultra, bceaef29fb128e94).
+    slvl=0; clvl=0; cpu_prev=0; cpu_prev2=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -3808,7 +3852,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 tl=\$nt
             fi
         fi
-        cpu_prev=\${ct:-0}; ct=''; cz=''
+        cpu_prev2=\$cpu_prev; cpu_prev=\${ct:-0}; ct=''; cz=''
         [ $HEAT_CAP = 1 ] && cpu_temp
         if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
@@ -3817,8 +3861,14 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 new=\$slvl; why=\"skin \$sk C\"
             fi
             if [ -n \"\$ct\" ]; then
-                # Up only as far as this reading and the one before both reach; down on this one.
-                clvl=\$(awk -v s=\$ct -v p=\$cpu_prev -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; while (l < 3 && s >= t[l + 1] && p >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; print l }')
+                # Up only as far as this reading and the two before all reach; down on this one.
+                # h: where this reading alone would go; above l, it was held back, and the
+                # awk adds that threshold (C) and the two readings before (C) for the log.
+                cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; h = l; while (h < 3 && s >= t[h + 1]) h++; while (l < 3 && s >= t[l + 1] && p >= t[l + 1] && q >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; if (h > l) printf \"%d %d %d.%d, %d.%d\\n\", l, t[h] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
+                clvl=\${cr%% *}
+                case \"\$cr\" in
+                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz) held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
+                esac
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
