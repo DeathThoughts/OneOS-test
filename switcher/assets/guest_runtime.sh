@@ -13,6 +13,44 @@ verify_private_adb_bind() {
     done
 }
 
+# Print, in /proc order, the pids of the host's LSPosed/Vector daemons: those
+# whose command line, NULs read as spaces and trailing newlines dropped, is a
+# daemon name alone or followed by a space. argv[0] must be the bare name, so
+# /system/bin/lspd or lspdx are not ours. $1 is the proc root (tests pass a
+# fixture). The guest baseline took 14-16 s of preflight on a Galaxy S25 Ultra
+# with ColorOS 17 (sessions 4d2e95c67f065941, 72c85663e0588d41,
+# 25b4785c4206828f, 3d9814984612c525); the old scan forked a subshell and tr
+# for each of the phone's 1000-2000 processes. mksh's builtin read with a NUL
+# delimiter reads argv[0] without a fork, and gives the same verdict: argv[0]
+# is the text before the first NUL, and a command line with no NUL at all is
+# taken whole, minus its trailing newlines as $(...) dropped them. A shell
+# whose read cannot split at NUL (dash, or a mksh without -d) fails the probe
+# on our own command line and keeps the old forking scan. comm is no filter:
+# it is cut at 15 bytes and org.lsposed.lspd is 16. Processes that exit or
+# cannot be read in between are skipped, as before.
+host_framework_pids() {
+    root=${1:-/proc}
+    fast=0
+    probe=''
+    if IFS= read -r -d '' probe 2>/dev/null < /proc/self/cmdline && [ -n "$probe" ]; then fast=1; fi
+    nl='
+'
+    for proc in "$root"/[0-9]*; do
+        if [ "$fast" = 1 ]; then
+            name=''
+            if ! IFS= read -r -d '' name 2>/dev/null < "$proc/cmdline"; then
+                while [ "${name%"$nl"}" != "$name" ]; do name=${name%"$nl"}; done
+            fi
+        else
+            name=$({ tr '\000' ' ' < "$proc/cmdline"; } 2>/dev/null || true)
+        fi
+        case "$name" in vectord|vectord' '*|lspd|lspd' '*|org.lsposed.lspd|org.lsposed.lspd' '*|org.matrix.vector.daemon|org.matrix.vector.daemon' '*)
+            echo "${proc##*/}"
+            ;;
+        esac
+    done
+}
+
 case "${1:-}" in
 control)
     A=/data/adb
@@ -153,24 +191,28 @@ baseline)
         fi
         : > "$B/allowlist.protected"
     fi
+    # The whole baseline took 14-16 s of preflight in every session on a Galaxy
+    # S25 Ultra with ColorOS 17 (sessions 4d2e95c67f065941, 72c85663e0588d41,
+    # 25b4785c4206828f, 3d9814984612c525), with no timing inside it. These
+    # lines go to takeover_app.log with the switch's own preflight lines.
+    echo "guest baseline: allowlist kept $(date +%T)"
     : > "$B/host-frameworks"
-    for proc in /proc/[0-9]*; do
-        name=$({ tr '\000' ' ' < "$proc/cmdline"; } 2>/dev/null || true)
-        case "$name" in vectord|vectord' '*|lspd|lspd' '*|org.lsposed.lspd|org.lsposed.lspd' '*|org.matrix.vector.daemon|org.matrix.vector.daemon' '*)
-            pid=${proc##*/}
-            start=$(awk '{print $22}' "$proc/stat")
-            kill -STOP "$pid" || exit 1
-            echo "$pid $start" >> "$B/host-frameworks"
-            ;;
-        esac
+    for pid in $(host_framework_pids /proc); do
+        start=$(awk '{print $22}' "/proc/$pid/stat")
+        kill -STOP "$pid" || exit 1
+        echo "$pid $start" >> "$B/host-frameworks"
     done
+    echo "guest baseline: frameworks scanned $(date +%T)"
     "$S/guest_root" --host-audit > "$B/root.unsorted" || exit 0
     sort "$B/root.unsorted" > "$B/root"
+    echo "guest baseline: host audit done $(date +%T)"
     sha256sum /sys/fs/selinux/policy > "$B/selinux" || exit 0
+    echo "guest baseline: selinux hashed $(date +%T)"
     awk '{print $1, $2, $6}' /proc/modules | sort > "$B/kernel-modules"
     if [ -f /data/adb/ksu/.allowlist ]; then sha256sum /data/adb/ksu/.allowlist > "$B/allowlist"; fi
     cat /proc/sys/kernel/random/boot_id > "$B/boot"
     : > "$B/ready"
+    echo "guest baseline: done $(date +%T)"
     ;;
 verify-return)
     [ -f "$STATE/enabled" ] || exit 0
