@@ -477,7 +477,7 @@ every guest today; in the app they must be limited to the families listed.
 | `diag.fold_test` | Per lid event: state, layout, screenshot, 10 s cover touches | fold: on / advanced | `sw:631-735` | activator | screenshots are personal data |
 | `diag.wallpaper_probe` [CF] | Wallpapers page view tree and screenshot | proposed off (one-off) / dev (`ONEOS_WALLPAPER_PROBE`) | `sw:736-759` | activator | investigation finished in run 33 |
 | `diag.screen_record` | Record the session (90 s segments x 6) | off / toggle (`ONEOS_RECORD`) | `mp:504-506`; `mi:284-303`; `ret:5-15` | inner | consent needed |
-| `diag.net_apex_watch` | Network and APEX watch logs every 10 s | on / locked | `sw:403-431` | watcher | |
+| `diag.net_apex_watch` | Network watch log every 10 s, APEX watch log every 60 s | on / locked | `sw:403-431` | watcher | |
 | `diag.boot_failures` | List of failed system services | on / locked | `mp:890-900` | activator | |
 | `diag.adb_watchdog` | Keep adb alive (restart adbd, re-add adb to the USB config) | on / advanced | `sw:109-169`; `ret:20-22` | watcher | |
 | `diag.prepare_only` | Dry run: prepare, check and return without starting the guest | off / advanced (`ONEOS_PREPARE_ONLY`) | `sw:396-401` | stage | good first test on a new phone |

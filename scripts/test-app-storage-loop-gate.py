@@ -12,8 +12,7 @@ SCRIPT = (ROOT / 'switcher/assets/guest_prepare.sh').read_text()
 HEAD = "app_storage_loop.sh\" <<'APPLOOP'\n"
 START = SCRIPT.index(HEAD) + len(HEAD)
 BODY = SCRIPT[START:SCRIPT.index('\nAPPLOOP\n', START) + 1]
-SUBS = [('/system/bin/sh /data/local/tmp/net_fix.sh', '"$T/net_fix.sh"'),
-        ('/system/bin/sh /data/local/tmp/ensure_app_storage.sh', '"$T/ensure.sh"'),
+SUBS = [('/system/bin/sh /data/local/tmp/ensure_app_storage.sh', '"$T/ensure.sh"'),
         ('/data/system/packages.list', '"$T/packages.list"'),
         ('/data/app_storage.log', '"$T/app_storage.log"')]
 LOOP = BODY
@@ -50,7 +49,6 @@ def run(shell, plan, rounds=None):
         b = t / 'bin'
         b.mkdir()
         for name, body in {**STUBS,
-                           'net_fix.sh': 'echo net >> "$T/events"\n',
                            'ensure.sh': 'echo ensure >> "$T/events"\n[ -e "$T/ensureout" ] && echo "made dirs for com.x"\nexit 0\n'}.items():
             p = (t if name.endswith('.sh') else b) / name
             p.write_text('#!/bin/sh\n' + body)
@@ -96,8 +94,6 @@ class AppStorageLoopGate(unittest.TestCase):
         def check(ev, log):
             self.assertEqual(sorted(ev), list(range(1, 11)))
             self.assertEqual(ensured(ev), [1])
-            for n in ev:
-                self.assertEqual(ev[n].count('net'), 1, n)   # net_fix every round
             self.assertFalse(any(e.startswith('am') for n in ev for e in ev[n]))
             self.assertEqual(log, '')
         self.each([''] * 10, check)
@@ -108,7 +104,7 @@ class AppStorageLoopGate(unittest.TestCase):
         def check(ev, log):
             self.assertEqual(ensured(ev), [1, 5])
             self.assertEqual([n for n in ev if 'am force-stop com.android.launcher3' in ev[n]], [5])
-            self.assertEqual(ev[5], ['net', 'ensure', 'am force-stop com.android.launcher3'])
+            self.assertEqual(ev[5], ['ensure', 'am force-stop com.android.launcher3'])
             self.assertEqual(log.count('package list changed -> launcher refreshed'), 1)
         self.each(plan, check)
 
@@ -160,8 +156,12 @@ class AppStorageLoopGate(unittest.TestCase):
             self.assertEqual(ensured(ev), [4])
         self.each(plan, check)
 
-    def test_net_fix_output_logged(self):
-        self.assertIn('[ -n "$netout" ] && echo "$(date) $netout" >> "$T/app_storage.log"', LOOP)
+    def test_no_guest_net_fix(self):
+        # oneos_switch.sh's host net_watch is the one copy of net_fix.sh; the
+        # guest shares its network namespace (coloros native audit 2026-11-16,
+        # S25 Ultra: the two copies ran on the same table 4242).
+        self.assertNotIn('/data/local/tmp/net_fix.sh', BODY)
+        self.assertNotIn('netout', BODY)
         self.assertIn('    sleep 10\n', BODY)
 
 

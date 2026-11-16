@@ -151,18 +151,29 @@ class GuestPanelFit(unittest.TestCase):
         self.assertEqual(f"!!! guest_panel_fit: {KEY} not set to 515,26:567,78 for the guest's 1080x2340 (it is 686,34:756,104)\n", out)
         self.assertIsNone(s.width())
 
-    def watch(self, s, sizes, form='phone', pid=None):
+    def watch(self, s, sizes, form='phone', pid=None, slept=False):
+        """slept: the clock moves by what the watcher sleeps (in tenths of a second) instead of one second per look."""
         (s.d / 'stage/wm_sizes').write_text('\n'.join(sizes) + '\n')
         (s.d / 'stage/guest_mntns').write_text('mnt:[4026533000]\n')
+        for f in ('calls', 'clock', 'sleeps'):
+            (s.d / 'stage' / f).unlink(missing_ok=True)
         gate = SOURCE.split(WATCH, 1)[1].split('\nfi\n', 1)[0] + '\nfi\n'
         self.assertTrue(gate.startswith('if [ "${ONEOS_GUEST_FORM:-fold}" != fold ]') and 'fit_guest_panel </dev/null &' in gate, gate)
-        # One second on the clock for every look at it.
-        clock = 'date() { c=$(cat "$STAGE/clock" 2>/dev/null); c=$((${c:-0} + 1)); echo $c > "$STAGE/clock"; echo $c; }\n'
-        code = 'sleep() { :; }\n' + clock + (WATCH + gate).replace('/system/bin/sh', '/bin/sh') + 'wait\n'
+        if slept:
+            clock = ('sleep() { echo "$1" >> "$STAGE/sleeps"; case $1 in *.*) d=$((${1%.*}0 + ${1#*.})) ;; *) d=$(($1 * 10)) ;; esac;'
+                     ' c=$(cat "$STAGE/clock" 2>/dev/null); echo $((${c:-0} + d)) > "$STAGE/clock"; }\n'
+                     'date() { c=$(cat "$STAGE/clock" 2>/dev/null); echo $((${c:-0} / 10)); }\n')
+        else:
+            # One second on the clock for every look at it.
+            clock = ('sleep() { echo "$1" >> "$STAGE/sleeps"; }\n'
+                     'date() { c=$(cat "$STAGE/clock" 2>/dev/null); c=$((${c:-0} + 1)); echo $c > "$STAGE/clock"; echo $c; }\n')
+        code = clock + (WATCH + gate).replace('/system/bin/sh', '/bin/sh') + 'wait\n'
         env = dict(s.env, ONEOS_GUEST_FORM=form, TAKEOVER_PID=str(pid or os.getpid()))
         r = subprocess.run(['/bin/sh', '-c', code], env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual((0, ''), (r.returncode, r.stderr))
         calls = s.d / 'stage/calls'
+        sleeps = s.d / 'stage/sleeps'
+        self.sleeps = sleeps.read_text().split() if sleeps.exists() else []
         return r.stdout, int(calls.read_text()) if calls.exists() else 0
 
     def test_watcher_fits_when_the_window_manager_answers_and_follows_a_change(self):
@@ -172,6 +183,8 @@ class GuestPanelFit(unittest.TestCase):
         self.assertEqual(['at 1080x2340', 'at 720x1560'], re.findall(r'at \d+x\d+', out))
         self.assertEqual(('343,17:378,52', '720'), (s.prop(), s.width()))
         self.assertNotIn('SystemUI was up', out)
+        # Half a second until the first answer (the third call), then 3 s.
+        self.assertEqual(['0.5'] * 3 + ['3'] * 4, self.sleeps)
 
     def test_watcher_ends_two_minutes_after_the_first_answer(self):
         s = self.stage()
@@ -179,6 +192,27 @@ class GuestPanelFit(unittest.TestCase):
         self.assertEqual(('', 120), (out, calls))
         self.assertIn('[ $((now - t0)) -lt 600 ] || return 0', WATCH)
         self.assertEqual(('686,34:756,104', None), (s.prop(), s.width()))
+        self.assertEqual(['0.5'] + ['3'] * 120, self.sleeps)
+
+    def test_watcher_asks_every_3_s_after_the_first_answer(self):
+        # ColorOS native audit 2026-11-16, S25 Ultra, F9: at 0.5 s all along it made about
+        # 300 calls while the guest booted. On a clock that moves by what it sleeps: three
+        # half seconds without a window manager, the answer at 2 s, then every 3 s up to
+        # 120 s after it (the call at 122 s is not made).
+        s = self.stage()
+        out, calls = self.watch(s, ['none', 'none', 'none', '1440x3120'], slept=True)
+        self.assertEqual(('', 3 + 40), (out, calls))
+        self.assertEqual(['0.5'] * 4 + ['3'] * 40, self.sleeps)
+        self.assertEqual('1220', (s.d / 'stage/clock').read_text().strip())
+
+    def test_watcher_fits_on_the_first_answer_and_a_later_change_at_3_s(self):
+        s = self.stage()
+        out, calls = self.watch(s, ['none', '1080x2340', '1080x2340', '1080x2340', '720x1560'], slept=True)
+        self.assertEqual(['at 1080x2340', 'at 720x1560'], re.findall(r'at \d+x\d+', out))
+        self.assertEqual(('343,17:378,52', '720'), (s.prop(), s.width()))
+        # The answer at 1 s: until 121 s, a call every 3 s from it.
+        self.assertEqual(1 + 40, calls)
+        self.assertEqual(['0.5'] * 2 + ['3'] * 40, self.sleeps)
 
     def test_watcher_only_for_a_bar_phone_with_the_property_and_a_live_guest(self):
         s = self.stage()

@@ -1640,8 +1640,18 @@ fi
 # booting, which for a broken guest is never. Run guest_prepare's net_fix.sh
 # from the host side for the whole session, and log what the network looked
 # like, so a drop that routing cannot fix (wifi itself going away) shows up.
+# This is the only copy of net_fix.sh that runs: it covers the whole session,
+# from before the guest boots until the return, and app_storage_loop.sh no
+# longer runs its own inside the guest, which shares this network namespace
+# and could race this one on table 4242 (coloros native audit 2026-11-16, S25
+# Ultra).
+# The APEX watch runs every 6th pass (60 s) and reads the loop backing files
+# with builtins: every pass with cat/basename/dirname per loop device was 54+
+# forks every 10 s, 338 rounds of 33 lines in apex_watch.log in session
+# bceaef29fb128e94 (same audit).
 NETFIX="$STAGE/data/local/tmp/net_fix.sh"
 $BB sh -c "
+    apass=0
     while [ -f $STAGE/rootfs/system/build.prop ]; do
         /system/bin/sh $NETFIX 2>&1 | sed \"s/^/\$(date +%T) /\"
         {
@@ -1654,13 +1664,17 @@ $BB sh -c "
         } 2>&1
         # Watch One UI's APEX backing files: after earlier sessions One UI's
         # decompressed APEXes read back with dm-verity I/O errors.
-        {
+        apass=\$((apass + 1))
+        [ \$apass -eq 1 ] && {
             echo \"--- \$(date +%T) apex\"
             ls -l /data/apex/decompressed/ 2>&1 | awk '{print \$5, \$6, \$7, \$NF}'
             for l in /sys/block/loop*/loop/backing_file; do
-                case \"\$(cat \$l 2>/dev/null)\" in /data/apex/*) echo \"\$(basename \$(dirname \$(dirname \$l))): \$(cat \$l)\";; esac
+                b=''
+                read -r b 2>/dev/null < \$l
+                case \"\$b\" in /data/apex/*) n=\${l#/sys/block/}; echo \"\${n%%/*}: \$b\";; esac
             done
         } >> $STAGE/apex_watch.log 2>&1
+        [ \$apass -lt 6 ] || apass=0
         sleep 10
     done
 " </dev/null >>"$STAGE/net_watch.log" 2>&1 &
@@ -2103,16 +2117,20 @@ protect_zygote_sockets() {
 protect_zygote_sockets </dev/null &
 # The size the guest runs the panel at, for the camera hole (guest_panel_fit.sh
 # above), as soon as the guest's window manager answers: SystemUI, which reads
-# the property, starts some seconds after it. Bar phones and flips with a
-# ColorOS hole property only. The guest is entered through the takeover pid
-# (its mount namespace is the guest's; no process is looked for), each call
-# bounded. It ends two minutes after the first answer, with the return or the
-# takeover process, or after ten minutes without a window manager. The UI
-# activator checks once more, also after a soft reboot of the guest.
+# the property, starts some seconds after it, so until that answer it is asked
+# every half second. After it, every 3 s is enough to follow a change of size
+# (ColorOS native audit 2026-11-16, S25 Ultra, F9: at 0.5 s for the whole two
+# minutes, about 300 calls and 2,500 program starts while the guest booted).
+# Bar phones and flips with a ColorOS hole property only. The guest is entered
+# through the takeover pid (its mount namespace is the guest's; no process is
+# looked for), each call bounded. It ends two minutes after the first answer,
+# with the return or the takeover process, or after ten minutes without a
+# window manager. The UI activator checks once more, also after a soft reboot
+# of the guest.
 fit_guest_panel() {
-    t0=$(date +%s) first="" last=""
+    t0=$(date +%s) first="" last="" nap=0.5
     while :; do
-        sleep 0.5
+        sleep $nap
         [ -s "$STAGE/guest_mntns" ] || return 0
         [ ! -f "$STAGE/data/oneos_rec_stop" ] || return 0
         [ -d "/proc/$TAKEOVER_PID" ] || return 0
@@ -2124,7 +2142,7 @@ fit_guest_panel() {
         fi
         s=$(timeout 10 $BB nsenter -t "$TAKEOVER_PID" -m /system/bin/sh /data/oneos_genv.sh /system/bin/wm size -d 0 2>/dev/null | sed -n 's/^Physical size: \([0-9]*\)x\([0-9]*\)$/\1 \2/p' | head -n 1)
         [ -n "$s" ] || continue
-        [ -n "$first" ] || first=$now
+        [ -n "$first" ] || first=$now nap=3
         [ "$s" != "$last" ] || continue
         last=$s
         /system/bin/sh "$STAGE/guest_panel_fit.sh" $s
@@ -3775,11 +3793,16 @@ fi
 # with a timeout; until the guest's system_server runs only the kernel's
 # values. It stops once return_to_oneui.sh has started (data/oneos_rec_stop,
 # its first step; its pkill of system_server matches this command line too)
-# or the guest's namespace record is gone. Out of the app cgroup, like the
-# watcher, so it outlives the app that started the switch. Also, in
-# $STAGE/cpu_top.log (collected with the stage's logs), the six busiest
-# processes over one second and the CPU totals (HyperOS run 11: 42-44 C skin
-# all session and nothing said which process kept the CPU busy).
+# or the guest's namespace record is gone. mBlurEnabled and
+# disable_window_blurs are read on the first pass with a guest system_server
+# and every 10th after it (5 min), each line keeping the last values: the
+# window dump takes WindowManager's lock and is a big Java dump for one flag
+# that rarely changes (ColorOS native audit 2026-11-16, S25 Ultra, F12). A new
+# system_server (soft reboot of the guest) is read at once. Out of the app
+# cgroup, like the watcher, so it outlives the app that started the switch.
+# Also, in $STAGE/cpu_top.log (collected with the stage's logs), the six
+# busiest processes over one second and the CPU totals (HyperOS run 11:
+# 42-44 C skin all session and nothing said which process kept the CPU busy).
 # Each cpu_top.log line ends with the new processes (forks) and context
 # switches per second since the line before, from /proc/stat's processes and
 # ctxt over /proc/uptime (one awk; "-" on the first line). S25 Ultra
@@ -3795,19 +3818,26 @@ $BB sh -c "
     T=$STAGE/cpu_top.log
     echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core), then forks/s and ctxt/s since the line before (/proc/stat processes, ctxt)\" > \$T
     pc_prev=''
-    echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs, battery %,status\" > \$F
+    bn=0; bp=''; bl=''; dw=''
+    echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs (both read every 5 min), battery %,status\" > \$F
     while true; do
         [ -f $STAGE/data/oneos_rec_stop ] && { echo \"# \$(date +%T) the return started: sampler stopped\" >> \$F; exit 0; }
         [ -s $STAGE/guest_mntns ] || { echo \"# \$(date +%T) no guest namespace record: sampler stopped\" >> \$F; exit 0; }
         t0=\$(date +%s)
         P=\$(pidof system_server | awk '{print \$1}')
-        st=''; sk=''; bl=''; dw=''
+        st=''; sk=''
         if [ -n \"\$P\" ]; then
             TH=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null)
             st=\$(echo \"\$TH\" | sed -n 's/^Thermal Status: *\([0-9][0-9]*\).*/\1/p' | head -n 1)
             sk=\$(echo \"\$TH\" | sed -n '/^Current temperatures from HAL/,/^[^[:space:]]/p' | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=SKIN,.*/\1/p' | head -n 1)
-            bl=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows 2>/dev/null | grep -m 1 -o 'mBlurEnabled=[a-z]*' | sed 's/.*=//')
-            dw=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get global disable_window_blurs 2>/dev/null)
+            if [ \$bn -ge 10 ] || [ \"\$P\" != \"\$bp\" ]; then
+                bn=0; bp=\$P
+                bl=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows 2>/dev/null | grep -m 1 -o 'mBlurEnabled=[a-z]*' | sed 's/.*=//')
+                dw=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get global disable_window_blurs 2>/dev/null)
+            fi
+            bn=\$((bn + 1))
+        else
+            bn=0; bp=''; bl=''; dw=''
         fi
         c=''
         for p in /sys/devices/system/cpu/cpufreq/policy*; do
@@ -4556,6 +4586,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # by this watcher from \$! instead, a round that ended first
                     # would leave a stale pid that a reused pid keeps alive.
                     ( read -r dpid _ < /proc/self/stat && echo \$dpid > $STAGE/diag.pid
+                    # With the end line below, a round's length can be read from
+                    # the log (ColorOS native audit 2026-11-16, S25 Ultra session
+                    # bceaef29fb128e94: the 20 s round ran 45 s and pushed the 40 s
+                    # round out, which only the skip line showed).
+                    echo \"\$(date) display diagnostics \$dname started\" >> $STAGE/auto_return.log
                     mkdir -p \$D
                     # Who has the vold names now: One UI's vold keeps vold and
                     # android.system.vold.IVold/default, the guest's is gvld (run 44).
@@ -4613,8 +4648,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # Galaxy S24 family kernel panics in free_pipe_info (10 reports, 0.4.84-0.5.01, ColorOS IN,
                     # OriginOS and Pixel 9 Pro XL): the exiting thread is almost always named libtimer.so (else
                     # \"POSIX timer N\"), and no log tells whose it is. Record each such thread's process.
+                    # The name is read by the shell itself: a cat per thread of the whole
+                    # system was thousands of forks a round (audit 2026-11-16, S25 Ultra
+                    # bceaef29fb128e94). IFS= keeps the name whole, spaces included.
                     for tk in /proc/[0-9]*/task/[0-9]*; do
-                        c=\$(cat \$tk/comm 2>/dev/null)
+                        IFS= read -r c 2>/dev/null < \$tk/comm || continue
                         case \"\$c\" in
                             libtimer*|'POSIX timer'*)
                                 p=\${tk#/proc/}; p=\${p%%/*}
@@ -4624,29 +4662,52 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # Did user 0 unlock, did the launcher get a window, and if not,
                     # where are the launcher and SystemUI main threads stuck?
                     if [ \$dname != 20 ]; then
+                        # debuggerd stops every thread of SystemUI and the launcher while it
+                        # dumps them (1.77 MB and 1.42 MB of native stacks), the fd scan
+                        # reads every process's fds and getevent holds the touchscreen 15 s:
+                        # in S25 Ultra sessions bceaef29fb128e94 and 4d2e95c67f065941
+                        # (ColorOS native audit 2026-11-16) the rounds froze the UI while it
+                        # booted, with Full session logs off, and touch_events.txt was empty.
+                        # They run when Full session logs are on, or when the home screen
+                        # has not come yet: then something is stuck and the stacks are the
+                        # point. SurfaceFlinger's own dump below keeps its condition (it
+                        # never registered, a stuck case already).
+                        heavy=1
+                        if [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$home = 1 ]; then
+                            heavy=0
+                            echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off and the home screen was up' > \$D/heavy_skipped.txt
+                        fi
+                        # Every thread's name, state and wait channel, from the kernel, read
+                        # by the shell itself (a cat, sed, cut and cat per thread before,
+                        # audit 2026-11-16). The state is the first field after the last
+                        # \") \" of stat: the name in parentheses may hold \") \" too.
+                        thread_list() {
+                            for tk in /proc/\$1/task/*; do
+                                IFS= read -r tc 2>/dev/null < \$tk/comm || continue
+                                ts=''; read -r ts 2>/dev/null < \$tk/stat; ts=\${ts##*') '}
+                                # wchan ends without a newline: read sets tw and fails.
+                                tw=''; IFS= read -r tw 2>/dev/null < \$tk/wchan
+                                echo \"\$tc \${ts%% *} \$tw\"
+                            done
+                        }
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/am get-started-user-state 0 > \$D/user0.txt 2>&1
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows > \$D/windows.txt 2>&1
                         for app in com.android.launcher com.android.systemui; do
                             ap=\$(pidof \$app | awk '{print \$1}')
                             [ -n \"\$ap\" ] || continue
-                            timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd -j \$ap > \$D/stack_\$app.txt 2>&1
+                            [ \$heavy = 1 ] && timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd -j \$ap > \$D/stack_\$app.txt 2>&1
                             timeout 5 cat /dev/binderfs/binder_logs/proc/\$ap > \$D/binder_\$app.txt 2>&1
-                            # From the kernel, in case ART's stack dump hangs too:
-                            # every thread's name, state and wait channel.
-                            for tk in /proc/\$ap/task/*; do
-                                echo \"\$(cat \$tk/comm) \$(sed 's/.*) //' \$tk/stat | cut -d' ' -f1) \$(cat \$tk/wchan)\"
-                            done > \$D/threads_\$app.txt 2>&1
+                            # From the kernel, in case ART's stack dump hangs too.
+                            thread_list \$ap > \$D/threads_\$app.txt 2>&1
                             cat /proc/\$ap/task/\$ap/stack >> \$D/threads_\$app.txt 2>&1
-                            timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd \$ap > \$D/native_\$app.txt 2>&1
+                            [ \$heavy = 1 ] && timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd \$ap > \$D/native_\$app.txt 2>&1
                         done
                         cp -r $STAGE/data/anr \$D/anr 2>/dev/null
                         # A guest SurfaceFlinger that never registered (A34 OxygenOS 16, 0.4.67
                         # deb8690c: stuck once its RenderEngine started, the framework then waited in
                         # SurfaceSession until its watchdog): its threads and native stacks.
                         if grep -q 'find service: SurfaceFlinger' \$D/surfaceflinger.txt 2>/dev/null; then
-                            for tk in /proc/\$SFP/task/*; do
-                                echo \"\$(cat \$tk/comm) \$(sed 's/.*) //' \$tk/stat | cut -d' ' -f1) \$(cat \$tk/wchan)\"
-                            done > \$D/threads_surfaceflinger.txt 2>&1
+                            thread_list \$SFP > \$D/threads_surfaceflinger.txt 2>&1
                             timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd \$SFP > \$D/native_surfaceflinger.txt 2>&1
                         fi
                         # Touch: where events go (guest input dispatcher state, focus),
@@ -4697,6 +4758,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             [ \"\$(cat \$e/device/name 2>/dev/null)\" = sec_touchscreen ] || continue
                             dev=/dev/input/\${e##*/}
                             echo \"\$dev enabled=\$(cat \$e/device/enabled 2>/dev/null)\" > \$D/touch_holders.txt
+                            [ \$heavy = 1 ] || continue
                             ls -l /proc/[0-9]*/fd/* 2>/dev/null | grep \" \$dev\$\" >> \$D/touch_holders.txt
                             timeout 15 getevent -lt \$dev > \$D/touch_events.txt 2>&1
                         done

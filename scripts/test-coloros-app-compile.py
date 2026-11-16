@@ -12,6 +12,9 @@ A marker is saved only when the status after the compile is compiled code,
 and a compiled status with no odex is compiled again (review by the mlcraze5
 fork, 2026-11-16); so is an app whose marker matches but whose odex is gone
 (review of de66247 by the mlcraze5 fork, 2026-11-16).
+After those three it compiles the ColorOS apps opened most (S25 Ultra, Find
+X9 Ultra IN image, session bffd23abac05cd7c, 2026-11-16), in order; a missing
+one is skipped and the next is tried.
 This runs the real heredoc with stubs for pm, cmd, getprop, dumpsys, sha256sum,
 sleep and timeout, under a temporary root for /data and /system.
 """
@@ -30,6 +33,18 @@ APPS = {
     'com.android.launcher': '/system/system_ext/priv-app/Launcher/Launcher.apk',
     'com.android.settings': '/system/system_ext/priv-app/Settings/Settings.apk',
     'com.google.android.permissioncontroller': '/data/app/~~x/com.google.android.permissioncontroller-y/base.apk',
+}
+
+# The ColorOS apps after the three above, in the script's order (session
+# bffd23abac05cd7c). Not installed in the other tests, so those see them skipped.
+EXTRA = {
+    'com.android.incallui': '/system/system_ext/app/InCallUI/InCallUI.apk',
+    'com.android.contacts': '/system/system_ext/priv-app/Contacts/Contacts.apk',
+    'com.android.mms': '/system/system_ext/priv-app/Mms/Mms.apk',
+    'com.coloros.gallery3d': '/data/app/~~g/com.coloros.gallery3d-z/base.apk',
+    'com.coloros.filemanager': '/system/product/app/FileManager/FileManager.apk',
+    'com.coloros.alarmclock': '/system/product/app/Clock/Clock.apk',
+    'com.coloros.weather2': '/system/product/app/Weather/Weather.apk',
 }
 
 STUBS = {
@@ -225,6 +240,55 @@ class AppCompile(unittest.TestCase):
             self.assertIn('com.android.launcher: not installed: skipped', log)
             self.assertEqual(g.compiles(), ['com.android.settings speed',
                                             'com.android.permissioncontroller speed'])
+
+    def test_coloros_apps_after_the_three_in_order(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d); full(g)
+            for p, a in EXTRA.items():
+                g.app(p, 'verify', a)
+            log = g.run()
+            self.assertEqual(g.compiles(), [f'{p} speed' for p in list(APPS) + list(EXTRA)])
+            for p in EXTRA:
+                self.assertIn(f'{p} apk=sha-{p} boot=image filter=speed\n', g.amark())
+            # the next session: every one is only its marker check
+            full(g)
+            for p, a in EXTRA.items():
+                g.app(p, 'verify', a)
+            (g.st / 'compiles').unlink()
+            log = g.run()
+            self.assertEqual(g.compiles(), [])
+            for p in EXTRA:
+                self.assertIn(f'{p} compiled on an earlier session', log)
+
+    def test_missing_coloros_app_does_not_stop_the_rest(self):
+        # Clock and Weather were not confirmed on the image: one missing in the
+        # middle of the list must not stop the ones after it
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d); full(g)
+            missing = ('com.android.mms', 'com.coloros.alarmclock')
+            for p, a in EXTRA.items():
+                if p not in missing:
+                    g.app(p, 'verify', a)
+            log = g.run()
+            self.assertEqual(g.compiles(), [f'{p} speed' for p in list(APPS) + list(EXTRA) if p not in missing])
+            for p in missing:
+                self.assertIn(f'{p}: not installed: skipped', log)
+                self.assertNotIn(f'{p} ', g.amark())
+            self.assertIn('com.coloros.weather2 apk=sha-com.coloros.weather2 boot=image filter=speed', g.amark())
+
+    def test_thermal_postpones_mid_list(self):
+        # the gate runs before each app: hot after Contacts, the rest wait
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d); full(g)
+            for p, a in EXTRA.items():
+                g.app(p, 'verify', a)
+            cmd = g.bin / 'cmd'
+            cmd.write_text(cmd.read_text().replace(
+                'echo Success\n', 'echo Success\nif [ "$p" = com.android.contacts ]; then echo 3 > "$ST/thermal"; fi\n'))
+            log = g.run()
+            self.assertEqual(g.compiles()[-1], 'com.android.contacts speed')
+            self.assertIn('app compile postponed to a later session (next: com.android.mms)', log)
+            self.assertNotIn('com.android.mms ', g.amark())
 
     def test_failure_leaves_no_marker(self):
         with tempfile.TemporaryDirectory() as d:
