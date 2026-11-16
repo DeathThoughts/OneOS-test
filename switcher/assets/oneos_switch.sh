@@ -209,12 +209,17 @@ case "${ONEOS_FULL_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_FULL_LOGS=$ONEOS_FULL_L
 case "${ONEOS_GUEST_QUIET_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_QUIET_LOGS=$ONEOS_GUEST_QUIET_LOGS (0 or 1)" ;; esac
 [ "${ONEOS_GUEST_GMS:-1}" = 1 ] && [ "${ONEOS_GUEST_HIDE_GMS:-0}" = 1 ] && [ -f "$STAGE/gmssystem_payload.img" ] &&
     refuse "ONEOS_GUEST_GMS is on (the default) with gmssystem_payload.img staged, and ONEOS_GUEST_HIDE_GMS=1 hides Google services: set one of them to 0"
-# facehal-rs in a HyperOS guest (guest_prepare.sh, guest_start.sh): 0 or 1,
-# unset meaning 0. It enrolls a face inside the guest, which the fork's rule
-# leaves to One UI, so only the adb loop can ask for it: the app's session.env
-# has no such key and oneos_root.sh unsets every other ONEOS_* variable. Both
-# scripts inherit this environment and take only 1 as on.
-case "${ONEOS_GUEST_FACEHAL:-0}" in 0|1) ;; *) refuse "ONEOS_GUEST_FACEHAL=$ONEOS_GUEST_FACEHAL (0 or 1)" ;; esac
+# facehal-rs in a HyperOS guest is gone (review by the mlcraze5 fork,
+# 2026-11-16): it enrolled a face inside the guest, and the fork's rule is that
+# only One UI enrolls and nothing is added that lets the guest. guest_prepare.sh
+# and guest_start.sh never stage or start it and clear what an earlier session
+# left; ONEOS_GUEST_FACEHAL=1 (the adb loop's experiment) is refused here, before
+# One UI's framework stops, rather than quietly ignored.
+case "${ONEOS_GUEST_FACEHAL:-0}" in
+    0) ;;
+    1) refuse "ONEOS_GUEST_FACEHAL=1: the in-guest face enrollment (facehal-rs) was removed; only One UI enrolls, and the guest unlocks with One UI's face through Samsung's HAL (unset it)" ;;
+    *) refuse "ONEOS_GUEST_FACEHAL=$ONEOS_GUEST_FACEHAL (0 or unset; facehal-rs was removed)" ;;
+esac
 # The same guard and app-id checks as guest_prepare.sh, here so a refusal comes
 # before One UI's framework stops (after it, guest_prepare's exit 3 reboots).
 if [ "${ONEOS_GUEST_GMS:-1}" = 1 ] && [ -f "$STAGE/gmssystem_payload.img" ]; then

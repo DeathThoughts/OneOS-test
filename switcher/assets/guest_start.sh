@@ -2907,53 +2907,23 @@ sm_diag() {
 }
 sm_diag "before zygote"
 ( sleep 45; sm_diag "45 s after zygote" ) &
-# One UI's face HAL (sec-biometrics-face-aidl) owns IFace/default until it is
-# stopped; facehal-rs then registers the same AIDL instance in the guest mount
-# namespace before the framework starts, so FaceService binds it instead of
-# Samsung's HAL (return_to_oneui.sh starts One UI's service again). Templates
-# stay in the guest.
-# Payload, /data/local/tmp/facehal: bin/hw/android.hardware.biometrics.face-service.facehal,
-# lib64/libfacehal_jni.so, and the S25U vendor image's libjni_stfaceunlock_api.so,
-# libtensorflowlite*.so and libc++_shared.so.
-# Only with ONEOS_GUEST_FACEHAL=1: facehal-rs enrolls a face inside the guest,
-# and the fork's rule is that only One UI enrolls. Off (the default), Samsung's
-# HAL stays and the guest unlocks with One UI's face, whose metadata
-# guest_prepare.sh carried into /data/system/users/0 just before this script
-# ran. A session that had facehal-rs moved that metadata aside once and left
-# the marker; the aside copy and the marker go, and the freshly carried files
-# stay where they are.
-FACEHAL_DIR=/data/local/tmp/facehal
-if [ "${ONEOS_GUEST_FACEHAL:-0}" != 1 ]; then
-    if [ -L /data/system/users ] || [ -L /data/system/users/0 ] || [ -L /data/system/users/0/oneos-face-host ]; then
-        echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment; /data/system/users/0/oneos-face-host or a parent is a symlink, left alone"
-    elif [ -f /data/oneos_facehal_moved ] || [ -d /data/system/users/0/oneos-face-host ]; then
-        rm -rf /data/system/users/0/oneos-face-host
-        rm -f /data/oneos_facehal_moved
-        echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment; an earlier facehal-rs session's moved-aside face metadata removed"
-    else
-        echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment (facehal-rs off; ONEOS_GUEST_FACEHAL=1 is the in-guest enrollment experiment)"
-    fi
-elif [ -x "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal" ]; then
-    echo "[Pivoted Root] WARNING: ONEOS_GUEST_FACEHAL=1: facehal-rs enrolls a face inside the guest, against the fork's rule that only One UI enrolls"
-    if [ ! -f /data/oneos_facehal_moved ]; then
-        mkdir -p /data/system/users/0/oneos-face-host
-        mv -f /data/system/users/0/settings_face.xml /data/system/users/0/face_enrolled_position_0.xml /data/system/users/0/oneos-face-host/ 2>/dev/null
-        touch /data/oneos_facehal_moved
-        echo "[Pivoted Root] facehal-rs: One UI face metadata moved aside"
-    fi
-    echo "[Pivoted Root] facehal-rs: stopping One UI's face HAL"
-    stop sec-biometrics-face-aidl 2>/dev/null || true
-    sleep 1
-    (
-        export LD_LIBRARY_PATH="$FACEHAL_DIR:$FACEHAL_DIR/lib64"
-        export FACEHAL_ALGORITHM_LIBRARY="$FACEHAL_DIR/lib64/libjni_stfaceunlock_api.so"
-        exec "$FACEHAL_DIR/bin/hw/android.hardware.biometrics.face-service.facehal"
-    ) </dev/null >/data/facehal.log 2>&1 &
-    echo $! >/data/facehal.pid
-    sleep 1
-    echo "[Pivoted Root] facehal-rs: $(service check android.hardware.biometrics.face.IFace/default 2>&1)"
+# Face: Samsung's face HAL (sec-biometrics-face-aidl) with One UI's
+# enrollment, whose metadata guest_prepare.sh carried into
+# /data/system/users/0 just before this script ran. facehal-rs, which once
+# replaced it as IFace/default behind ONEOS_GUEST_FACEHAL=1 and enrolled a face
+# inside the guest, is removed (review by the mlcraze5 fork, 2026-11-16: only
+# One UI enrolls; oneos_switch.sh refuses the knob) and never started here. A
+# session that had it moved One UI's metadata aside once and left the marker;
+# the aside copy and the marker go, and the freshly carried files stay where
+# they are.
+if [ -L /data/system/users ] || [ -L /data/system/users/0 ] || [ -L /data/system/users/0/oneos-face-host ]; then
+    echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment; /data/system/users/0/oneos-face-host or a parent is a symlink, left alone"
+elif [ -f /data/oneos_facehal_moved ] || [ -d /data/system/users/0/oneos-face-host ]; then
+    rm -rf /data/system/users/0/oneos-face-host
+    rm -f /data/oneos_facehal_moved
+    echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment; an earlier facehal-rs session's moved-aside face metadata removed"
 else
-    echo "[Pivoted Root] Face: ONEOS_GUEST_FACEHAL=1 but no facehal-rs payload at $FACEHAL_DIR; Samsung's face HAL stays"
+    echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment"
 fi
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."
 if [ -f /data/oneos_root/enabled ]; then
