@@ -36,6 +36,26 @@ MARK="$STAGE/persist_session.active"
 BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
 sha() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
 mark_field() { sed -n "s/^$1=//p" "$MARK" 2>/dev/null | head -n 1; }
+# The panel's own dpi, for the ColorOS fingerprint icon below: the dpi=X of
+# One UI's SurfaceFlinger mode with the largest width in $1
+# (display_modes_host.log: "{id=0, hwcId=0, resolution=1440x3120, ...,
+# dpi=501.04x501.57, ...}"), the same mode the HyperOS FOD glyph is placed
+# from. Galaxy S25 Ultra with ColorOS 17, session c2d30e95cde9775b: the first
+# "N x N dpi" of the file was a virtual display the shell had made ("329.0 x
+# 329.0 dpi"), the icon went 483 px from the bottom instead of 735, below the
+# sensor, and touches on it did not unlock. Only hwcId= lines count (no virtual
+# display has one); the largest width decides even when its dpi is missing,
+# and a dpi outside 200..800 or a missing file prints nothing, so the caller's
+# fallback is used.
+panel_dpi() {
+    awk '/hwcId=/ && match($0, /resolution=[0-9]+x[0-9]+/) {
+            split(substr($0, RSTART + 11, RLENGTH - 11), a, "x")
+            if (a[1] + 0 <= w) next
+            w = a[1] + 0; d = ""
+            if (match($0, /dpi=[0-9]+(\.[0-9]+)?/)) d = substr($0, RSTART + 4, RLENGTH - 4)
+        }
+        END { if (d != "" && d + 0 >= 200 && d + 0 <= 800) print d }' "$1" 2>/dev/null || :
+}
 # The persist snapshot is only ever used when this stage's own session took it:
 # persist_session.active (format 2, written by snapshot-persist) holds its
 # sha256 and the sha256 of the app's stage marker .oneos_stage ("none" without
@@ -1384,7 +1404,10 @@ add)
         fp=$(cat "$FP_POS")
         fp_mb=$(echo "$fp" | cut -d, -f1)
         fp_ah=$(echo "$fp" | cut -d, -f4)
-        fp_dpi=$(sed -n 's/.* \([0-9][0-9.]*\) x [0-9][0-9.]* dpi.*/\1/p' "$STAGE/display_modes_host.log" 2>/dev/null | head -n 1)
+        # The panel's physical pixels at its full resolution (735 px on the S25
+        # Ultra's 1440x3120 at 501.04 dpi), whatever resolution One UI runs at;
+        # 501.0411, the S25 Ultra's, when no usable mode is in the stage.
+        fp_dpi=$(panel_dpi "$STAGE/display_modes_host.log")
         [ -n "$fp_dpi" ] || fp_dpi=501.0411
         fp_loc=$(awk -v mb="$fp_mb" -v ah="$fp_ah" -v dpi="$fp_dpi" 'BEGIN { printf "%.0f", (mb + ah / 2) * dpi / 25.4 }')
         for kv in persist.vendor.fingerprint.sensor_type=ultrasonic \
