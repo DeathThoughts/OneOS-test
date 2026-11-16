@@ -61,4 +61,12 @@
     <string name="bring_open">Abrir</string>
     <string name="tile_label">Voltar para a One UI</string>
     <string name="tile_subtitle">OneOS</string>
+    <string name="logs_title">Logs</string>
+    <string name="full_logs_title">Começar a gravar logs completos</string>
+    <string name="full_logs_off">Algo deu errado? Comece a gravar, reproduza o problema e volte para a One UI para enviar um relatório.</string>
+    <string name="full_logs_starting">Iniciando…</string>
+    <string name="full_logs_on">Gravando logs completos. Quando terminar, volte para a One UI e envie um relatório.</string>
+    <string name="full_logs_confirm">Gravar logs completos até voltar para a One UI? Isso pode gastar mais bateria e ocupar mais espaço. Os logs serão incluídos no relatório.</string>
+    <string name="full_logs_start">Gravar</string>
+    <string name="full_logs_failed">Não foi possível iniciar a gravação dos logs: %1$s</string>
 </resources>

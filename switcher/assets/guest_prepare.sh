@@ -3295,9 +3295,11 @@ fi
 # Essential Space from a double press of the power key, for a Nothing image
 # (switcher/overlays/nothing_essential_key): Nothing opens it with its own
 # Essential key, which no Galaxy has. Any phone; the double-tap camera gesture
-# goes with it. ONEOS_GUEST_NT_ESSENTIAL_KEY=0 leaves the power key alone.
+# goes with it. Off since 0.5.17 (owner: "vol down i guess, as power button can be for cams"): a
+# double press of Volume Down is the Essential key (OneOSEssentialKey, oneos_switch.sh) and the
+# power key keeps the camera; ONEOS_GUEST_NT_ESSENTIAL_KEY=1 brings the power double press back.
 if [ -f "$STAGE/OneOSNtEssentialKey.apk" ] && [ -d "$GUEST_PRODUCT/overlayfs_origin/system/noth/priv-app/EssentialSpace" ] &&
-   [ "${ONEOS_GUEST_NT_ESSENTIAL_KEY:-1}" = 1 ]; then
+   [ "${ONEOS_GUEST_NT_ESSENTIAL_KEY:-0}" = 1 ]; then
     mkdir -p "$STAGE/oem/overlay" &&
         cp "$STAGE/OneOSNtEssentialKey.apk" "$STAGE/oem/overlay/" &&
         chmod 755 "$STAGE/oem" "$STAGE/oem/overlay" && chmod 644 "$STAGE/oem/overlay/OneOSNtEssentialKey.apk" &&
@@ -3484,6 +3486,32 @@ for pair in libcamera_client_patched.so:libcamera_client.so libcameracompatbilit
         echo "Bound ${pair%%:*} -> $ROOTFS/system/lib64/${pair#*:}"
     fi
 done
+# Bluetooth on OxygenOS 16 (the CPH2745 build's libbluetooth_jni.so only; 0.5.17, from a tester's own module
+# on his Galaxy A17: "Guest-only BQR crash bypass"): bluetooth::bqr::vendor_specific_event_callback returns at
+# once, so a vendor-specific Bluetooth quality report event (diagnostics only) from a Galaxy's chip no longer
+# takes the stack down. One instruction: the shadow-stack push after its BTI landing pad becomes RET, before
+# the return address is signed, so it is safe on every CPU. Made here from the image's own file, only when
+# both hashes match (before and after); anything else is left as it is. ONEOS_GUEST_BT_BQR_PATCH=0: off.
+BTJ="$ROOTFS/system/lib64/libbluetooth_jni.so"
+BTJ_OLD=a82e3a5a6396a2338d8889404ebfeb2976247550291a3c5fb07a358657036621
+BTJ_NEW=c7a41a6f64e09204c3d1833c0abf631e889c62a8a9c8fbb8f8855eaf17e6abf3
+if [ "${ONEOS_GUEST_BT_BQR_PATCH:-1}" = 1 ] && [ -f "$BTJ" ] && [ ! -L "$BTJ" ] &&
+   [ "$($BB sha256sum "$BTJ" 2>/dev/null | cut -c1-64)" = "$BTJ_OLD" ]; then
+    BTP="$STAGE/libbluetooth_jni_patched.so"
+    if [ "$($BB sha256sum "$BTP" 2>/dev/null | cut -c1-64)" != "$BTJ_NEW" ]; then
+        rm -f "$BTP.tmp"
+        cp -f "$BTJ" "$BTP.tmp" &&
+            $BB printf '\300\003\137\326' | $BB dd of="$BTP.tmp" bs=1 seek=8231888 count=4 conv=notrunc 2>/dev/null &&
+            [ "$($BB sha256sum "$BTP.tmp" 2>/dev/null | cut -c1-64)" = "$BTJ_NEW" ] && mv -f "$BTP.tmp" "$BTP" ||
+            { rm -f "$BTP.tmp"; echo "Bluetooth BQR patch: not made (hash after the change did not match); the image's own library stays"; }
+    fi
+    if [ "$($BB sha256sum "$BTP" 2>/dev/null | cut -c1-64)" = "$BTJ_NEW" ]; then
+        chmod 644 "$BTP"
+        $BB chcon u:object_r:system_lib_file:s0 "$BTP" 2>/dev/null || true
+        $BB umount -l "$BTJ" 2>/dev/null || true
+        $BB mount --bind "$BTP" "$BTJ" && echo "Bound libbluetooth_jni_patched.so -> $BTJ (no BQR vendor-event callback)"
+    fi
+fi
 # libcomposer_ext_patched.so (vivo OriginOS, MediaTek): its ComposerExt client
 # asked 21 times, 100 ms apart, for MediaTek's IComposerExt (no such service on
 # a Samsung vendor) on every display power-mode change, stalling SurfaceFlinger

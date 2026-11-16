@@ -445,4 +445,8 @@
     <string name="bring_change_data">A One UI tem dados mais novos</string>
     <string name="bring_change_app">Atualizado na One UI desde então</string>
     <string name="bring_change_gone">Não está mais instalado na One UI</string>
+    <string name="lock_risk_title">Trocar de sistema com o bloqueio de tela ativo?</string>
+    <string name="lock_risk_message">Se você usa PIN, padrão, senha, impressão digital ou reconhecimento facial, versões recentes do sistema da Samsung impedem o acesso ao Modo Download. Se a troca der errado, o celular pode ficar sem iniciar e sem acesso ao Modo Download. Nesse caso, só dá para recuperar o aparelho restaurando as configurações de fábrica, o que apaga todos os dados. Isso já aconteceu durante os testes.\n\nUm módulo como o backdownload reduz o risco, mas ele ainda existe. Faça um backup antes de continuar. Ao prosseguir, você assume o risco para o aparelho e seus dados.</string>
+    <string name="lock_risk_accept_wait">Entendo o risco (%1$d)</string>
+    <string name="lock_risk_accept">Entendo o risco</string>
 </resources>
