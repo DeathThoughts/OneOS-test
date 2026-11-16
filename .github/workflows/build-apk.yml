@@ -7,6 +7,13 @@ on:
         description: Publish both APKs to GitHub Releases
         type: boolean
         default: false
+  pull_request:
+    branches: [debug]
+    paths:
+      - "app-android/**"
+      - "switcher/**"
+      - "scripts/**"
+      - ".github/workflows/build-apk.yml"
   push:
     branches: [release, debug]
     paths:
@@ -25,7 +32,9 @@ permissions:
 
 jobs:
   build:
-    if: github.ref_name == 'release' || github.ref_name == 'debug'
+    if: >-
+      github.ref_name == 'release' || github.ref_name == 'debug' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     strategy:
       fail-fast: false
       matrix:
@@ -176,6 +185,19 @@ jobs:
           python3 scripts/test-guest-manager-update.py
           cd app-android
           ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
+
+      - name: Verify signed guest startup patch format
+        run: |
+          classes=$(mktemp -d)
+          javac -d "$classes" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/PatchDownload.java" scripts/GuestStartPatchTest.java "scripts/PatchDownloadTest.java"
+          java -cp "$classes" GuestStartPatchTest
+          java -cp "$classes" com.fahadali.oneos.patch.PatchDownloadTest
+
+      - name: Verify restart Home acknowledgement
+        run: |
+          sh -n switcher/assets/oneos_switch.sh
+          sh -n switcher/assets/guest_prepare.sh
+          python3 scripts/test-restart-home.py
 
       - name: Verify guest media mount safety
         run: python3 scripts/test-guest-media-share.py

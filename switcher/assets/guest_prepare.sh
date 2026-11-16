@@ -7400,9 +7400,16 @@ stat -c %d $S/rootfs > $S/guest_rootdev 2>/dev/null
       [ -S "$f" ] && ! $BB awk -v m="$f" '$5 == m { f = 1 } END { exit !f }' /proc/self/mountinfo &&
           $BB mount --bind "$f" "$f" && echo "$(date +%T) soft reboot: $f pinned again"
   done ) </dev/null >>$S/auto_return.log 2>&1 &
-g=$(cat $S/tmp/softreboot.gen 2>/dev/null); case "$g" in ''|*[!0-9]*) g=0 ;; esac
-echo $((g + 1)) > $S/tmp/softreboot.gen
-echo "$(date +%T) soft reboot: guest_start.sh running again (pid $TP, $NEW_NS), generation $((g + 1))"
+g=$(cat "$S/tmp/softreboot.gen" 2>/dev/null)
+case "$g" in ''|*[!0-9]*) g=0 ;; esac
+next_gen=$((g + 1))
+if (umask 077; printf '%s\n' "$next_gen" > "$S/tmp/softreboot.gen.next") &&
+    mv -f "$S/tmp/softreboot.gen.next" "$S/tmp/softreboot.gen"; then
+    echo "$(date +%T) soft reboot: guest_start.sh running again (pid $TP, $NEW_NS), generation $next_gen"
+else
+    echo "$(date +%T) soft reboot: could not record generation"
+    exit 1
+fi
 exit 0
 GUESTSOFTREBOOT
 chmod 700 "$STAGE/tmp/guest_modules.sh" "$STAGE/tmp/guest_softreboot.sh"
