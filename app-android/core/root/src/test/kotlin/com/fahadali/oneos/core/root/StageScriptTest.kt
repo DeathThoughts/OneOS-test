@@ -2211,4 +2211,129 @@ class StageScriptTest {
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.TOOL_APP, listOf("off", pkg)))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.TOOL_APP, listOf("list")))
     }
+
+    /**
+     * Build 156: One UI photos in ColorOS. The owner made the marker by hand from a root shell; the
+     * verb makes exactly that folder (root's, 0700), removes it and the prototype's marker with rmdir
+     * only, and refuses a link, a file, a wrong owner or mode, or a folder with something in it,
+     * changing nothing.
+     */
+    @Test
+    fun oneUiMediaMakesAndRemovesOnlyItsMarkerFolders() = eachShell { fr ->
+        val s = Stager(fr)
+        ok(s.begin())
+        val tmp = File(fr.root, "data/local/tmp")
+        val marker = File(tmp, "oneos-oneui-media")
+        val legacy = File(tmp, "oneos-media-share-test")
+        fun media(mode: String) = fr.run(RootScript.Verb.ONEUI_MEDIA, mode)
+        fun unchanged(r: FakeRoot.Run, part: String) {
+            val before = fr.snapshot()
+            refused(r, part)
+            assertEquals(r.toString(), before, fr.snapshot())
+        }
+
+        // Off by default: status reads, and makes nothing.
+        var before = fr.snapshot()
+        var r = media("status")
+        ok(r)
+        assertEquals(listOf("oneui-media off"), r.reply.results)
+        assertEquals(before, fr.snapshot())
+
+        // On: the folder, 0700, the runner's (root's on the phone); again changes nothing.
+        r = media("on")
+        ok(r)
+        assertEquals(listOf("oneui-media on"), r.reply.results)
+        assertTrue(marker.isDirectory)
+        assertEquals("700", fr.mode(marker))
+        assertEquals(fr.uid, FakeRoot.exec(listOf("stat", "-c", "%u", marker.path)).trim())
+        assertFalse(legacy.exists())
+        before = fr.snapshot()
+        ok(media("on"))
+        assertEquals(before, fr.snapshot())
+        assertEquals(listOf("oneui-media on"), media("status").reply.results)
+
+        // Off: the marker and the prototype's marker go; again changes nothing.
+        FakeRoot.exec(listOf("mkdir", "-m", "700", legacy.path))
+        assertEquals(listOf("oneui-media on", "oneui-media-legacy /data/local/tmp/oneos-media-share-test"), media("status").reply.results)
+        r = media("off")
+        ok(r)
+        assertEquals(listOf("oneui-media off"), r.reply.results)
+        assertFalse(marker.exists())
+        assertFalse(legacy.exists())
+        before = fr.snapshot()
+        ok(media("off"))
+        assertEquals(before, fr.snapshot())
+
+        // On refuses whatever is at the path and is not the marker, and leaves it as it is.
+        val elsewhere = File(fr.root, "elsewhere").apply { mkdirs() }
+        FakeRoot.exec(listOf("chmod", "0755", elsewhere.path))
+        java.nio.file.Files.createSymbolicLink(marker.toPath(), elsewhere.toPath())
+        unchanged(media("on"), "is a symlink")
+        assertEquals("755", fr.mode(elsewhere))
+        r = media("status")
+        assertEquals(listOf("oneui-media off", "oneui-media-why /data/local/tmp/oneos-oneui-media is a symlink"), r.reply.results)
+        // Off does not follow or remove a link either.
+        unchanged(media("off"), "is a symlink")
+        assertTrue(elsewhere.isDirectory)
+        assertTrue(marker.delete())
+        marker.writeText("not a folder\n")
+        unchanged(media("on"), "is not a folder")
+        unchanged(media("off"), "is not a folder")
+        assertTrue(marker.delete())
+        FakeRoot.exec(listOf("mkdir", "-m", "755", marker.path))
+        unchanged(media("on"), "not root's 0700 folder")
+        assertEquals("oneui-media off", media("status").reply.results.first())
+        FakeRoot.exec(listOf("chmod", "0700", marker.path))
+        assertEquals(listOf("oneui-media on"), media("status").reply.results)
+
+        // Off refuses a folder with something in it (either one) and removes neither.
+        File(marker, "photo.jpg").writeText("x")
+        unchanged(media("off"), "is not empty")
+        assertTrue(File(marker, "photo.jpg").delete())
+        FakeRoot.exec(listOf("mkdir", "-m", "700", legacy.path))
+        File(legacy, ".hidden").writeText("x")
+        unchanged(media("off"), "is not empty")
+        assertTrue(marker.isDirectory)
+        assertTrue(File(legacy, ".hidden").delete())
+        assertTrue(legacy.delete())
+        java.nio.file.Files.createSymbolicLink(legacy.toPath(), elsewhere.toPath())
+        unchanged(media("off"), "is a symlink")
+        assertTrue(marker.isDirectory)
+        assertTrue(legacy.delete())
+        ok(media("off"))
+        assertFalse(marker.exists())
+        assertTrue(elsewhere.isDirectory)
+
+        // Only on, off and status.
+        assertEquals(RootScript.EXIT_USAGE, fr.runUnchecked(RootScript.Verb.ONEUI_MEDIA, "status", "wipe").exit)
+        assertTrue(RootScript.problems(RootScript.Verb.ONEUI_MEDIA, listOf("wipe")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.ONEUI_MEDIA, emptyList()).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.ONEUI_MEDIA, listOf("on", "off")).isNotEmpty())
+        for (m in listOf("on", "off", "status")) assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.ONEUI_MEDIA, listOf(m)))
+    }
+
+    /**
+     * Right after an app update the stage still holds the older build's root script: oneui-media installs
+     * this build's (as guest-runtime does) in a prepared stage, so Advanced's switch works without
+     * preparing again; with no prepared stage it refuses and makes nothing.
+     */
+    @Test
+    fun oneUiMediaWorksRightAfterAnAppUpdate() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val bin = File(fr.stage, "bin/oneos_root.sh")
+        bin.writeText("# an older build's oneos_root.sh\nexit 9\n")
+        val r = fr.run(RootScript.Verb.ONEUI_MEDIA, "on")
+        ok(r)
+        assertEquals(fr.scriptSha, Hashes.sha256(bin))
+        assertTrue(File(fr.root, "data/local/tmp/oneos-oneui-media").isDirectory)
+        // No prepared stage: nothing is installed or made.
+        ok(fr.run(RootScript.Verb.ONEUI_MEDIA, "off"))
+        bin.writeText("exit 9\n")
+        assertTrue(File(fr.stage, StageMarker.FILE_NAME).delete())
+        val before = fr.snapshot()
+        refused(fr.run(RootScript.Verb.ONEUI_MEDIA, "status"), "no prepared stage")
+        assertEquals(before, fr.snapshot())
+        assertEquals("exit 9\n", bin.readText())
+    }
 }

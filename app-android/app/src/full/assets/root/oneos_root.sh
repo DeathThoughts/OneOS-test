@@ -63,6 +63,13 @@
 #   bring-status                      read only (build 104): each brought app,
 #                                     what became of it in the guest, and
 #                                     whether One UI's app or data is newer
+#   oneui-media <on|off|status>       One UI photos in ColorOS (build 156):
+#                                     on makes the marker folder
+#                                     /data/local/tmp/oneos-oneui-media
+#                                     (root's, 0700) that guest_start.sh reads
+#                                     at every guest boot; off removes it and
+#                                     the prototype's oneos-media-share-test,
+#                                     with rmdir only; status reads both
 #
 # Writes: only under $STAGE. Documented exceptions, nothing else:
 #   - begin aside renames $STAGE to its sibling $STAGE.old-<epoch>;
@@ -92,12 +99,17 @@
 #   - bring-collect and bring-clear rename the last brought apps
 #     ($STAGE/data/oneos_bring, nothing else) to $STAGE.old-<epoch> and purge
 #     it, after purge's checks.
+#   - oneui-media on makes $DATA/local/tmp/oneos-oneui-media (mkdir under
+#     umask 077, chown -h); off removes it and
+#     $DATA/local/tmp/oneos-media-share-test, each with rmdir and only while it
+#     is an empty real folder. Nothing else outside the stage, and nothing in it.
 # Reads of One UI's user data, never written: selfupdate reads the app's own
 # downloaded update; bring-collect reads the data folders of the packages the
 # owner chose (through /proc/1/root) and copies them into the stage.
 # Apart from purge (and remove and bring, through it), nothing is ever deleted except this script's own files: incoming/*.part,
 # incoming/plan and incoming/received, and an old system.raw that a new one
-# replaces (an image, never user data). Everything else that is in the way is
+# replaces (an image, never user data), and oneui-media off's two empty
+# marker folders (rmdir). Everything else that is in the way is
 # moved to $STAGE/attic/<epoch>/. Every refusal comes before the first change
 # of its verb (`@@REFUSED <why>`, exit 2); bad arguments exit 3, a failed
 # write exits 4 (`@@FAILED <what>`). The renames of migrate_legacy are no
@@ -2528,6 +2540,79 @@ do_bring_clear() {
     say "@@OK bring-clear"
 }
 
+# --- One UI photos in ColorOS (build 156) ------------------------------------
+# The owner turned the sharing of One UI's camera and screenshot folders on by
+# hand, with mkdir from a root shell (Termux), and did not want to (Galaxy
+# S25 Ultra session 9a5159cc76ee3748, 2026-11-16). guest_start.sh shares them
+# read-only only while $OMEDIA is a real folder of root's (uid 0, gid 0)
+# with mode 0700, and reads it at every guest boot and guest restart: this
+# verb only makes or removes that folder, and nothing in the stage. Off
+# removes the S23 prototype's test-only marker $OMEDIA_OLD as well; on never
+# makes it. Both are emptied by nobody, so only rmdir removes them: a folder
+# with something in it, a link or a file is refused and left as it is.
+oneui_media_why() { # <path>: why it is not the marker (a real root:root 0700 folder); nothing when it is
+    if [ -L "$1" ]; then say "is a symlink"; return 0; fi
+    if [ ! -d "$1" ]; then say "is not a folder"; return 0; fi
+    # %g too: the contract is root's group as well, and guest_start.sh reads %u:%a.
+    mg=$(stat -c '%u:%g %a' "$1" 2>/dev/null)
+    [ "$mg" = "$ROOT_OWNER 700" ] || say "is ${mg:-unreadable} (uid:gid mode), not root's 0700 folder"
+}
+oneui_media_status() {
+    if [ -e "$OMEDIA" ] || [ -L "$OMEDIA" ]; then
+        mw=$(oneui_media_why "$OMEDIA")
+        if [ -z "$mw" ]; then
+            say "@@RESULT oneui-media on"
+        else
+            say "@@RESULT oneui-media off"
+            say "@@RESULT oneui-media-why ${OMEDIA#$T} $mw"
+        fi
+    else
+        say "@@RESULT oneui-media off"
+    fi
+    if [ -e "$OMEDIA_OLD" ] || [ -L "$OMEDIA_OLD" ]; then say "@@RESULT oneui-media-legacy ${OMEDIA_OLD#$T}"; fi
+}
+oneui_media_removable() { # <path>: refuses unless it is absent or an empty real folder
+    [ -e "$1" ] || [ -L "$1" ] || return 0
+    [ ! -L "$1" ] || refuse "${1#$T} is a symlink: it was not followed or removed; nothing was changed"
+    [ -d "$1" ] || refuse "${1#$T} is not a folder: it was not removed; nothing was changed"
+    [ -z "$(ls -A "$1" 2>/dev/null | head -n 1)" ] || refuse "${1#$T} is not empty: it was not removed; nothing was changed"
+}
+do_oneui_media() {
+    [ $# -eq 1 ] || usage "oneui-media <on|off|status>"
+    OMEDIA="$OLD_PARENT/oneos-oneui-media"
+    OMEDIA_OLD="$OLD_PARENT/oneos-media-share-test"
+    case "$1" in
+        status) ;;
+        on)
+            if [ -e "$OMEDIA" ] || [ -L "$OMEDIA" ]; then
+                mw=$(oneui_media_why "$OMEDIA")
+                [ -z "$mw" ] || refuse "${OMEDIA#$T} $mw: it was left as it is; nothing was changed"
+            else
+                step "share One UI's photos"
+                # Made 0700 by mkdir itself and chowned with -h, never chmod or a plain chown: /data/local/tmp
+                # is the shell user's, which could swap the new folder for a link, and those follow links.
+                ( umask 077; mkdir "$OMEDIA" ) || die "could not make ${OMEDIA#$T}"
+                chown -h "$ROOT_OWNER" "$OMEDIA" || die "could not make ${OMEDIA#$T} root's"
+                mw=$(oneui_media_why "$OMEDIA")
+                [ -z "$mw" ] || die "${OMEDIA#$T} $mw after it was made"
+            fi ;;
+        off)
+            # Both checked before either goes: a refusal changes nothing.
+            oneui_media_removable "$OMEDIA"
+            oneui_media_removable "$OMEDIA_OLD"
+            if [ -e "$OMEDIA" ]; then
+                step "stop sharing One UI's photos"
+                rmdir "$OMEDIA" || die "could not remove ${OMEDIA#$T}"
+            fi
+            if [ -e "$OMEDIA_OLD" ]; then
+                rmdir "$OMEDIA_OLD" || die "could not remove ${OMEDIA_OLD#$T}"
+            fi ;;
+        *) usage "oneui-media <on|off|status>" ;;
+    esac
+    oneui_media_status
+    say "@@OK oneui-media $1"
+}
+
 # --- Main ---------------------------------------------------------------------
 [ -n "$T" ] || [ "$(id -u)" = 0 ] || refuse "not root"
 verb=$1
@@ -2568,5 +2653,6 @@ case "$verb" in
     bring-forget) do_bring_forget "$@" ;;
     bring-catalog) do_bring_catalog "$@" ;;
     bring-add) do_bring_add "$@" ;;
+    oneui-media) do_oneui_media "$@" ;;
     *) usage "unknown verb '$verb'" ;;
 esac

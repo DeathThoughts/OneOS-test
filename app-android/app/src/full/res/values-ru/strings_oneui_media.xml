@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="oneui_media_title">Фото One UI в ColorOS</string>
+    <string name="oneui_media_summary">Показывает камеру и скриншоты One UI в ColorOS только для чтения: ColorOS не может их изменить или удалить. Применяется при следующем переключении или перезапуске гостевой системы.</string>
+    <string name="oneui_media_asking">Запрос к root…</string>
+    <string name="oneui_media_problem">Ничего не изменено: %1$s</string>
+    <string name="oneui_media_unread">Не прочитано: %1$s</string>
+    <string name="oneui_media_not_marker">Выключено: %1$s. Удалите это из root-оболочки, затем включите снова.</string>
+</resources>
