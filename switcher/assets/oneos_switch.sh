@@ -988,6 +988,8 @@ ims_st=1
 # and 30 s at most otherwise (was 90 s). The gate runs behind the handoff splash, which takes every touch: on a
 # phone with no SIM in service it only ever timed out, and owners took the 90 s for a hang and forced a restart
 # (0.5.14: S23 OxygenOS dfff02e3, voice out of service throughout; A17 5G LineageOS a3fa601d).
+# Every slot ABSENT is the plainest case of it: S25 Ultra session 25b4785c4206828f lost the full 90 s on every
+# switch before this (Madox, d5f10a81); scripts/test-ims-gate-no-sim.py runs the gate against each SIM state.
 ims_max=15
 case "$(getprop gsm.sim.state)" in *READY*|*LOADED*) ;; *) ims_max=0; echo "IMS gate: skipped (no SIM ready: $(getprop gsm.sim.state))" ;; esac
 [ "$(settings get global airplane_mode_on 2>/dev/null)" = 1 ] && { ims_max=0; echo "IMS gate: skipped (airplane mode)"; }
