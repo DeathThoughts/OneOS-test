@@ -3,10 +3,13 @@
 
 S23 SM-S911B, ColorOS 17 (2026-11-15): SystemUI went from verify to speed in
 43 s, while Home, Settings and the permission dialogs stayed verify-only. The
-script now compiles those three after SystemUI with speed-profile, one at a
-time, one marker line per APK, and stops when the guest's thermal status is 3
-or more. This runs the real heredoc with stubs for pm, cmd, getprop, dumpsys,
-sha256sum, sleep and timeout, under a temporary root for /data and /system.
+script now compiles those three after SystemUI with speed, one at a time, one
+marker line per APK, and stops when the guest's thermal status is 3 or more.
+speed, not speed-profile: a session has no useful profile, so speed-profile
+compiled next to nothing (S25 Ultra session 25b4785c4206828f, Madox 4fad5d45:
+OplusLauncher had no odex at all); an app at speed-profile is compiled again.
+This runs the real heredoc with stubs for pm, cmd, getprop, dumpsys, sha256sum,
+sleep and timeout, under a temporary root for /data and /system.
 """
 import os
 import subprocess
@@ -100,14 +103,14 @@ class AppCompile(unittest.TestCase):
             log = g.run()
             self.assertEqual(g.compiles(), [
                 'com.android.systemui speed',
-                'com.android.launcher speed-profile',
-                'com.android.settings speed-profile',
-                'com.google.android.permissioncontroller speed-profile',
+                'com.android.launcher speed',
+                'com.android.settings speed',
+                'com.google.android.permissioncontroller speed',
             ])
             self.assertIn('SystemUI arm64 now speed', log)
-            self.assertIn('com.android.launcher arm64 now speed-profile', log)
+            self.assertIn('com.android.launcher arm64 now speed\n', log)
             for p in list(APPS)[1:]:
-                self.assertIn(f'{p} apk=sha-{p} boot=image\n', g.amark())
+                self.assertIn(f'{p} apk=sha-{p} boot=image filter=speed\n', g.amark())
 
     def test_marker_match_skips(self):
         with tempfile.TemporaryDirectory() as d:
@@ -122,17 +125,44 @@ class AppCompile(unittest.TestCase):
             # a new launcher APK compiles that one only
             (g.root / APPS['com.android.launcher'].lstrip('/')).write_text('new')
             g.run()
-            self.assertEqual(g.compiles(), ['com.android.launcher speed-profile'])
+            self.assertEqual(g.compiles(), ['com.android.launcher speed'])
             self.assertEqual(g.amark().count('com.android.launcher '), 1)
-            self.assertIn('com.android.launcher apk=new boot=image', g.amark())
+            self.assertIn('com.android.launcher apk=new boot=image filter=speed', g.amark())
 
-    def test_speed_profile_skips(self):
+    def test_speed_skips(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d); full(g, 'speed-profile')
+            g = Guest(d); full(g, 'speed')
             log = g.run()
             self.assertEqual(g.compiles(), [])
-            self.assertIn('com.android.launcher arm64 is speed-profile already', log)
-            self.assertIn('com.android.launcher apk=', g.amark())
+            self.assertIn('com.android.launcher arm64 is speed already', log)
+            self.assertIn('com.android.launcher apk=sha-com.android.launcher boot=image filter=speed', g.amark())
+
+    def test_speed_profile_compiles_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d); full(g, 'speed-profile')
+            g.app('com.android.systemui', 'speed')
+            log = g.run()
+            self.assertEqual(g.compiles(), [
+                'com.android.launcher speed',
+                'com.android.settings speed',
+                'com.google.android.permissioncontroller speed',
+            ])
+            self.assertIn('com.android.launcher arm64 is speed-profile (apk=sha-com.android.launcher '
+                          'boot=image filter=speed): cmd package compile -m speed -f com.android.launcher', log)
+
+    def test_old_speed_profile_marker_compiles_once_more(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d); full(g, 'speed-profile')
+            g.app('com.android.systemui', 'speed')
+            # a line from the earlier speed-profile step: no filter in its key
+            (g.root / 'data/oneos_app_compiled').write_text(
+                ''.join(f'{p} apk=sha-{p} boot=image\n' for p in list(APPS)[1:]))
+            g.run()
+            self.assertEqual(len(g.compiles()), 3)
+            for p in list(APPS)[1:]:
+                self.assertEqual([l for l in g.amark().split('\n') if l.startswith(p + ' ')],
+                                 [f'{p} apk=sha-{p} boot=image filter=speed'])
+                self.assertIn(f'{p} apk=sha-{p} boot=image filter=speed\n', g.amark())
 
     def test_thermal_postpones(self):
         with tempfile.TemporaryDirectory() as d:
@@ -157,8 +187,8 @@ class AppCompile(unittest.TestCase):
             g.app('com.android.permissioncontroller', 'verify', '/system/priv-app/PermissionController/PermissionController.apk')
             log = g.run()
             self.assertIn('com.android.launcher: not installed: skipped', log)
-            self.assertEqual(g.compiles(), ['com.android.settings speed-profile',
-                                            'com.android.permissioncontroller speed-profile'])
+            self.assertEqual(g.compiles(), ['com.android.settings speed',
+                                            'com.android.permissioncontroller speed'])
 
     def test_failure_leaves_no_marker(self):
         with tempfile.TemporaryDirectory() as d:

@@ -4177,12 +4177,16 @@ echo "OPPO default grants: $([ -f "$STAGE/data/oneos_oplus_grants" ] && echo on 
 # PermissionController (com.google.android.permissioncontroller, else
 # com.android.permissioncontroller) the same way (S23 SM-S911B, ColorOS 17,
 # 2026-11-15: SystemUI went from verify to speed in 43 s, while Home, Settings
-# and the permission dialogs still ran from verify-only code). Those are
-# regular apps, so they get speed-profile, the filter the guest itself uses
-# for installs and background dexopt: only what the APK's profile names is
-# compiled, which keeps each compile and its odex small. One app at a time,
-# 300 s each, once per session; each success is one line of
-# /data/oneos_app_compiled (package, its APK's sha256 and the boot image key),
+# and the permission dialogs still ran from verify-only code). They get speed,
+# not speed-profile: a session has no profile worth the name (the guest's
+# background dexopt, which would gather one, never runs), so speed-profile
+# compiles next to nothing. S25 Ultra session 25b4785c4206828f (Madox,
+# 4fad5d45): OplusLauncher had only its /system vdex and a runtime app image,
+# no odex, and ran on the interpreter and JIT. An app already at speed-profile
+# is compiled again with speed for the same reason. One app at a time, 300 s
+# each, once per session; each success is one line of
+# /data/oneos_app_compiled (package, its APK's sha256, the boot image key and
+# the filter, so lines from the earlier speed-profile step compile once more),
 # a failure writes none, a missing package is skipped, and the step stops
 # (logged as postponed) when the guest's thermal status is 3 (severe) or
 # worse, as dex2oat on a hot phone only heats it more. Same log. ColorOS
@@ -4255,10 +4259,9 @@ case "$A" in
 esac
 }
 [ $SYSUI_APK = 1 ] && sysui
-# The apps after SystemUI, one at a time: speed-profile, as for any app the
-# guest installs, compiles what the APK's baseline/cloud profile names, so the
-# odex stays small and each compile short at the warm end of the boot; speed is
-# kept for SystemUI, which runs all the time.
+# The apps after SystemUI, one at a time, with speed: speed-profile compiles
+# only what a profile names, and a session has none worth the name (S25 Ultra
+# session 25b4785c4206828f, Madox 4fad5d45: the launcher had no odex at all).
 thermal() { timeout 30 dumpsys thermalservice 2>/dev/null | sed -n 's/^[[:space:]]*Thermal Status: *\([0-9][0-9]*\).*/\1/p' | head -n 1; }
 astatus() { timeout 60 pm art dump "$1" 2>/dev/null | sed -n 's/.*arm64: \[status=\([^]]*\)\].*/\1/p' | head -n 1; }
 akey() { grep "^$1 " "$AMARK" 2>/dev/null | head -n 1 | cut -d' ' -f2-; }
@@ -4272,30 +4275,30 @@ app() {
     [ -n "$a" ] && [ -f "$a" ] || { log "$p: not installed: skipped"; return 0; }
     k=$(sha256sum "$a" 2>/dev/null | cut -d' ' -f1)
     [ -n "$k" ] || k=$(stat -c 'size=%s,mtime=%Y' "$a" 2>/dev/null)
-    K="apk=${k:-unknown} boot=${b:-image}"
+    K="apk=${k:-unknown} boot=${b:-image} filter=speed"
     if [ ! -L "$AMARK" ] && [ "$(akey "$p")" = "$K" ]; then
         log "$p compiled on an earlier session for this APK ($K): skipped"
         return 0
     fi
     S=$(astatus "$p")
-    if compiled "$S"; then
+    if [ "$S" != speed-profile ] && compiled "$S"; then
         aremember "$p" "$K"
         log "$p arm64 is $S already: nothing to compile ($K)"
         return 0
     fi
     case "$S" in
-        run-from-apk|verify|error|extract) ;;
+        run-from-apk|verify|error|extract|speed-profile) ;;
         *) log "$p arm64 status '${S:-not read}': not compiled"; return 0 ;;
     esac
-    log "$p arm64 is $S ($K): cmd package compile -m speed-profile -f $p"
+    log "$p arm64 is $S ($K): cmd package compile -m speed -f $p"
     t0=$(date +%s)
-    R=$(timeout 300 cmd package compile -m speed-profile -f "$p" 2>&1)
+    R=$(timeout 300 cmd package compile -m speed -f "$p" 2>&1)
     rc=$?
     t=$(($(date +%s) - t0))
     A=$(astatus "$p")
     log "$p result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); $p arm64 now ${A:-not read}"
     case "$A" in
-        ''|run-from-apk|error|extract) log "$p: no marker: tried again next session" ;;
+        ''|run-from-apk|error|extract|speed-profile) log "$p: no marker: tried again next session" ;;
         *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
                aremember "$p" "$K" && log "$p: marker saved: later sessions skip it until the APK or the boot image changes"
            else
@@ -4317,7 +4320,7 @@ done
 SYSUI
     chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
-    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings and PermissionController (speed-profile, once per APK; oneos_sysui_compile.log in the guest data)"
+    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings and PermissionController (speed, once per APK; oneos_sysui_compile.log in the guest data)"
 else
     echo "ColorOS SystemUI compile: not a ColorOS guest"
 fi
