@@ -2106,7 +2106,21 @@ GUEST_OXYGEN=0; grep -q '^  "image": "oxygenos' "$STAGE/.oneos_stage" 2>/dev/nul
 # Start UI Activator daemon. One pass per boot of the guest: after a soft
 # reboot of it (guest_softreboot.sh bumps tmp/softreboot.gen, 0.4.39) the
 # same steps run again for the new boot; it ends with the session.
-$BB sh -c "
+#
+# Run from a file, not as `sh -c "..."` (S23 SM-S911B, ColorOS 17, session
+# 9120b5a653a89fdb, 2026-11-15: ui_activator.log held only "busybox: Argument
+# list too long", no 'Home activated', and the watcher returned to One UI after
+# 150 s with the guest up and usable). Expanded, this text is over 128 KB, and
+# Linux takes no single argv string over MAX_ARG_STRLEN (131072 bytes): execve
+# failed with E2BIG and the activator never ran. An assignment has no such
+# limit and the here-document reaches cat on its stdin, so the text below is
+# the same double-quoted string as before, expanded the same way, written to
+# $STAGE/tmp (root's alone, 0700, made above; a stage file there would be
+# refused by oneos_root.sh as "left from an older stage") and run with sh.
+# return_to_oneui.sh's pkill -f "ui_activator" matches the file's name on the
+# command line. Keep every other `sh -c "..."` string far under 128 KB
+# (scripts/test-sh-c-size.py checks 96 KB).
+UI_ACTIVATOR="
 BB=\"$BB\"
 [ -n \"\$BB\" ] || BB=\$(which busybox 2>/dev/null || echo /data/adb/ksu/bin/busybox)
 GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=1; BRPID=''; SYSUI=''
@@ -3541,7 +3555,22 @@ done
 GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=\$((PASS + 1))
 echo \"[UI Activator] soft reboot of the guest (generation \$GEN): pass \$PASS, waiting for its new boot\"
 done
-" </dev/null >/data/local/tmp/ui_activator.log 2>&1 &
+"
+# A fresh file every session: rm -f takes a link at that path away (not what
+# it points to), and set -C refuses whatever appears there in between. A
+# running activator of an earlier session keeps reading its own, unlinked copy.
+rm -f "$STAGE/tmp/ui_activator.sh"
+if (umask 077; set -C; $BB cat > "$STAGE/tmp/ui_activator.sh") 2>/dev/null <<UIACT
+# Written by oneos_switch.sh at every start (the UI activator); see there.
+$UI_ACTIVATOR
+UIACT
+then
+    $BB sh "$STAGE/tmp/ui_activator.sh" </dev/null >/data/local/tmp/ui_activator.log 2>&1 &
+else
+    echo "[UI Activator] could not write $STAGE/tmp/ui_activator.sh; not started" > /data/local/tmp/ui_activator.log
+    echo "!!! UI activator: could not write $STAGE/tmp/ui_activator.sh; not started"
+fi
+unset UI_ACTIVATOR
 
 # Samsung CPU/GPU votes survive the host framework; capability-detected on every profile.
 # 0.4.38: only with the heat cap off (Cool down when hot, Advanced). With it on, the heat cap

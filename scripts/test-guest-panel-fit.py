@@ -195,12 +195,12 @@ class GuestPanelFit(unittest.TestCase):
 
 
 class ActivatorScript(unittest.TestCase):
-    """The activator is one double-quoted string of the switch; a quote too many in it only shows on a phone."""
+    """The activator is one double-quoted string of the switch (written to a file); a quote too many in it only shows on a phone."""
 
     def test_it_parses_for_every_kind_of_guest(self):
-        start = SOURCE.index('\n$BB sh -c "\n', SOURCE.index('\nGUEST_FOLD_FORM=')) + 1
-        end = SOURCE.index('\n" </dev/null >/data/local/tmp/ui_activator.log 2>&1 &\n', start)
-        body = SOURCE[start + len('$BB sh -c "\n'):end]
+        start = SOURCE.index('\nUI_ACTIVATOR="\n', SOURCE.index('\nGUEST_FOLD_FORM=')) + 1
+        end = SOURCE.index('\n"\n# A fresh file every session', start)
+        body = SOURCE[start + len('UI_ACTIVATOR="\n'):end]
         names = sorted(set(re.findall(r'(?<!\\)\$\{?([A-Za-z_][A-Za-z0-9_]*)', body)))
         self.assertIn('GUEST_OXYGEN', names)
         kinds = ({'GUEST_OPLUS': '1', 'GUEST_AOSP_SYSUI': '0', 'GUEST_MIUI': '0', 'GUEST_FOLD_FORM': '0', 'GUEST_OXYGEN': '1'},
