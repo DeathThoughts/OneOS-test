@@ -177,6 +177,9 @@ jobs:
           cd app-android
           ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
 
+      - name: Verify guest media mount safety
+        run: python3 scripts/test-guest-media-share.py
+
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.
       # assembleFullDebug also runs checkFullDebugStagingApk (python3, preinstalled).
