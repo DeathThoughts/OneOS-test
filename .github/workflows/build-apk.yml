@@ -1,13 +1,14 @@
-# Builds a debug APK of the OneOS app. CI is where the app gets built because
-# its One UI libraries (io.github.tribalfs:oneui-design and tribalfs' sesl
-# forks) are only on GitHub Packages, which needs a GitHub token. Debug only:
-# the release keystore stays on the owner's machine.
 name: Build APK
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish both APKs to GitHub Releases
+        type: boolean
+        default: false
   push:
-    branches: ["work/**", "ci/**", "s23-fixes*"]
+    branches: [release, debug]
     paths:
       - "app-android/**"
       - "switcher/**"
@@ -24,6 +25,12 @@ permissions:
 
 jobs:
   build:
+    if: github.ref_name == 'release' || github.ref_name == 'debug'
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(github.ref_name == 'release' && '["debug","release"]' || '["debug"]') }}
+    environment: ${{ matrix.variant == 'release' && 'release-signing' || 'debug-build' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -31,7 +38,15 @@ jobs:
       # app/build.gradle.kts), so a shallow clone is enough.
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          ref: ${{ matrix.variant == 'debug' && github.ref_name == 'release' && 'debug' || github.sha }}
+          persist-credentials: false
+
+      - name: Check debug branch is based on this release
+        if: matrix.variant == 'debug' && github.ref_name == 'release'
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: git merge-base --is-ancestor "$RELEASE_SHA" HEAD
 
       # jvmToolchain = "21" (gradle/libs.versions.toml) and gradle.properties
       # forbids toolchain auto-download, so JDK 21 must be on the runner.
@@ -69,7 +84,50 @@ jobs:
       # still signed with another one. So the key also goes to a fixed path,
       # exported as ONEOS_DEBUG_KEYSTORE, which app/ and guest/build.gradle.kts
       # set as the debug signing config's storeFile.
+      - name: Install release keystore
+        if: matrix.variant == 'release'
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -eu
+          : "${KEYSTORE_B64:?Missing RELEASE_KEYSTORE_B64}"
+          : "${STORE_PASSWORD:?Missing RELEASE_STORE_PASSWORD}"
+          : "${KEY_ALIAS:?Missing RELEASE_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Missing RELEASE_KEY_PASSWORD}"
+          umask 077
+          export SIGNING_DIR="$HOME/.oneos-release"
+          mkdir -p "$SIGNING_DIR"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$SIGNING_DIR/oneos-release.jks"
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+
+          def escape(value):
+              return ''.join(f'\\u{unit:04x}' for unit in (
+                  int.from_bytes(pair, 'big') for pair in chunks(value.encode('utf-16-be'))
+              ))
+
+          def chunks(data):
+              return (data[i:i + 2] for i in range(0, len(data), 2))
+
+          directory = Path(os.environ['SIGNING_DIR'])
+          properties = {
+              'storeFile': str(directory / 'oneos-release.jks'),
+              'storePassword': os.environ['STORE_PASSWORD'],
+              'keyAlias': os.environ['KEY_ALIAS'],
+              'keyPassword': os.environ['KEY_PASSWORD'],
+          }
+          (directory / 'keystore.properties').write_text(
+              ''.join(f'{key}={escape(value)}\n' for key, value in properties.items()),
+              encoding='ascii',
+          )
+          PYTHON
+
       - name: Install debug keystore
+        if: matrix.variant == 'debug'
         env:
           DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         run: |
@@ -108,7 +166,7 @@ jobs:
           # and, if its owner is not the actor, a variable GH_PACKAGES_USER.
           GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
-        run: sh scripts/build-guest-manager.sh --debug
+        run: sh scripts/build-guest-manager.sh ${{ matrix.variant }}
 
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.
@@ -118,25 +176,28 @@ jobs:
         env:
           GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
-        run: ./gradlew --console=plain :app:assembleFullDebug
+        run: ./gradlew --console=plain :app:assembleFull${{ matrix.variant == 'release' && 'Release' || 'Debug' }}
 
-      - name: Hash APK and write summary
+      - name: Verify signature and prepare download
         id: apk
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
           set -eu
-          dir=app-android/app/build/outputs/apk/full/debug
-          set -- "$dir"/*.apk
-          apk=$1
-          name=$(basename "$apk")
+          built="app-android/app/build/outputs/apk/full/$VARIANT/app-full-$VARIANT.apk"
+          mkdir -p dist
+          name="OneOS-$VARIANT.apk"
+          apk="dist/$name"
+          cp "$built" "$apk"
           sha=$(sha256sum "$apk" | cut -d' ' -f1)
           echo "$sha  $name" > "$apk.sha256"
           badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk" | head -n 1)
           vname=$(printf '%s\n' "$badging" | sed -n "s/.* versionName='\([^']*\)'.*/\1/p")
           vcode=$(printf '%s\n' "$badging" | sed -n "s/.* versionCode='\([^']*\)'.*/\1/p")
-          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" 2>/dev/null | grep -m1 'certificate SHA-256 digest' | sed 's/.*: //' | tr 'A-F' 'a-f' || true)
+          [ -n "$signer" ] || { echo "::error::APK signature could not be verified"; exit 1; }
           {
-            echo "### OneOS debug APK"
+            echo "### OneOS $VARIANT APK"
             echo ""
             echo "| | |"
             echo "|---|---|"
@@ -162,8 +223,38 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: oneos-full-debug-${{ steps.apk.outputs.short_sha }}
+          name: oneos-${{ matrix.variant }}
           path: |
-            app-android/app/build/outputs/apk/full/debug/*.apk
-            app-android/app/build/outputs/apk/full/debug/*.apk.sha256
+            dist/*.apk
+            dist/*.apk.sha256
           if-no-files-found: error
+
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'release' && inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: oneos-*
+          merge-multiple: true
+          path: dist
+      - name: Publish both APKs on one release page
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+          BUILD_ID: ${{ github.run_id }}
+        run: |
+          set -eu
+          tag="oneos-build-$BUILD_ID"
+          for variant in debug release; do
+            test -s "dist/OneOS-$variant.apk"
+            (cd dist && sha256sum -c "OneOS-$variant.apk.sha256")
+          done
+          gh release create "$tag" --target "$RELEASE_SHA" --title "OneOS build $BUILD_ID" \
+            --notes 'Release is for normal use (30% battery or charging, below 42 °C). Debug is for testing (5% battery or charging, below 50 °C).' \
+            dist/OneOS-release.apk dist/OneOS-debug.apk dist/*.sha256
