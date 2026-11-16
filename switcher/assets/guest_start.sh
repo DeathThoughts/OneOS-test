@@ -21,7 +21,23 @@ done
 echo "[Pivoted Root] time $($BB date +%T) start"
 echo "[Pivoted Root] Preparing pivot..."
 cd /data/local/tmp/oneos/rootfs
-$BB mount --make-rprivate /
+oneos_media_enabled=0
+if "$BB" mount --make-rprivate /; then
+    # Deliberate, root-only opt-in for the disposable album across guest boots.
+    oneos_media_opt=/data/local/tmp/oneos-media-share-test
+    if [ -d "$oneos_media_opt" ] && [ ! -L "$oneos_media_opt" ] &&
+       [ "$("$BB" stat -c '%u:%a' "$oneos_media_opt")" = 0:700 ] &&
+       [ "$(pwd -P)" = /data/local/tmp/oneos/rootfs ] &&
+       [ ! -L ../.oneos_stage ] &&
+       "$BB" grep -q '^  "image": "coloros[^" ]*",$' ../.oneos_stage; then
+        oneos_media_ns=$("$BB" readlink /proc/self/ns/mnt)
+        oneos_media_host_ns=$("$BB" readlink /proc/1/ns/mnt)
+        if [ -n "$oneos_media_ns" ] && [ -n "$oneos_media_host_ns" ] &&
+           [ "$oneos_media_ns" != "$oneos_media_host_ns" ]; then
+            oneos_media_enabled=1
+        fi
+    fi
+fi
 if ! $BB pivot_root . postinstall; then
     echo "[Pivoted Root] Fallback: bind mounting rootfs onto itself..."
     $BB mount --bind . .
@@ -48,10 +64,82 @@ else
     echo "[Pivoted Root] FATAL: could not hide /proc/sysrq-trigger. Not starting the guest."
     exit 1
 fi
+# One UI media prototype (S23): only the explicitly named test album, and
+# only once the kernel has made the staging bind read-only. The whole-data
+# bind is reachable solely under a root-only directory before guest apps run.
+oneos_media_tmp=
+oneos_media_suffix=DCIM/OneOSShareTest
+oneos_media_flags=ro,nosuid,nodev,noexec,noatime,nosymfollow
+
+oneos_media_absent() {
+    "$BB" awk -v p="$1" '$5 == p { n++ } END { exit (NR == 0 || n != 0) }' /proc/self/mountinfo
+}
+
+oneos_media_protected() {
+    # Field 6 is per-mount flags. The shared filesystem itself may be rw.
+    "$BB" awk -v p="$1" -v wanted="$oneos_media_flags" '
+        $5 == p { n++; options = "," $6 "," }
+        END {
+            if (n != 1) exit 1
+            split(wanted, flags, ",")
+            for (i in flags) if (!index(options, "," flags[i] ",")) exit 1
+        }' /proc/self/mountinfo
+}
+
+oneos_media_unmount() {
+    oneos_media_absent "$1" && return 0
+    "$BB" umount "$1" || return 1
+    oneos_media_absent "$1"
+}
+
+oneos_media_fatal() {
+    echo "[Pivoted Root] FATAL: media prototype could not detach a mount. Not starting the guest."
+    exit 1
+}
+
+oneos_media_release_temp() {
+    [ -n "$oneos_media_tmp" ] || return 0
+    oneos_media_unmount "$oneos_media_tmp/album" || oneos_media_fatal
+    oneos_media_unmount "$oneos_media_tmp/host" || oneos_media_fatal
+    "$BB" rmdir "$oneos_media_tmp/album" "$oneos_media_tmp/host" "$oneos_media_tmp" 2>/dev/null || true
+    oneos_media_tmp=
+}
+
+oneos_media_stage() {
+    [ ! -L /data ] && [ ! -L /postinstall/data ] || return 1
+    oneos_media_tmp=$("$BB" mktemp -d /data/oneos_media_hold.XXXXXX) || return 1
+    [ "$("$BB" stat -c '%u:%a' "$oneos_media_tmp")" = 0:700 ] || return 1
+    "$BB" mkdir "$oneos_media_tmp/host" "$oneos_media_tmp/album" || return 1
+    # Non-recursive: do not copy OneOS's /data/media bridge into the view.
+    "$BB" mount --bind /postinstall/data "$oneos_media_tmp/host" || return 1
+    "$BB" mount -o "remount,bind,$oneos_media_flags" /postinstall/data "$oneos_media_tmp/host" || return 1
+    oneos_media_protected "$oneos_media_tmp/host" || return 1
+    host_media=$("$BB" stat -c '%d:%i' "$oneos_media_tmp/host/media") || return 1
+    guest_media=$("$BB" stat -c '%d:%i' /data/media) || return 1
+    [ "$host_media" != "$guest_media" ] || return 1
+    album="$oneos_media_tmp/host/media/0/$oneos_media_suffix"
+    (
+        # Pin the directory via cwd. The temporary parent mount refuses to
+        # follow symlinks, including at any intermediate source component.
+        cd -P "$album" && [ "$(pwd -P)" = "$album" ] || exit 1
+        source_inode=$("$BB" stat -c '%d:%i' .) || exit 1
+        "$BB" mount --bind /proc/self/cwd "$oneos_media_tmp/album" &&
+            [ "$("$BB" stat -c '%d:%i' "$oneos_media_tmp/album")" = "$source_inode" ]
+    ) || return 1
+    oneos_media_protected "$oneos_media_tmp/album" || return 1
+    # After pinning the leaf, no process needs a view of the parent tree.
+    oneos_media_unmount "$oneos_media_tmp/host" || oneos_media_fatal
+}
+
+if [ "$oneos_media_enabled" = 1 ] && ! oneos_media_stage; then
+    oneos_media_release_temp
+    echo "[Pivoted Root] Media prototype skipped: source missing or protected mount unavailable"
+fi
+
 # OneOS: pivot_root left the host's whole old root at /postinstall, including
 # vold's bind of the phone's real /data/media and every unbridged /data tree.
-# Nothing in the guest needs it (this namespace is rprivate, so this does not
-# touch the host).
+# The optional media prototype has already taken just its protected leaf.
+# The old root still must be detached before any guest process starts.
 $BB umount -l /postinstall 2>/dev/null
 if awk '$5 ~ "^/postinstall(/|$)"' /proc/self/mountinfo | grep -q .; then
     echo "[Pivoted Root] FATAL: host mounts still under /postinstall. Not starting the guest."
@@ -107,6 +195,72 @@ mkdir -p /mnt/user/0
 $BB mount -t tmpfs tmpfs /mnt/user/0 2>/dev/null || true
 mkdir -p /mnt/user/0/emulated
 $BB mount --bind /data/media/0 /mnt/user/0/emulated 2>/dev/null || true
+
+oneos_media_publish() {
+    media_roots='/data/media/0 /storage/emulated/0 /mnt/user/0/emulated'
+    media_inode=$("$BB" stat -c '%d:%i' /data/media/0) || return 1
+    album_inode=$("$BB" stat -c '%d:%i' "$oneos_media_tmp/album") || return 1
+    for media_view in installer androidwritable; do
+        alias_root="/mnt/$media_view/0/emulated"
+        if [ -e "$alias_root" ] || [ -L "$alias_root" ]; then
+            media_roots="$media_roots $alias_root"
+        fi
+    done
+    for media_root in $media_roots; do
+        [ "$(cd -P "$media_root/DCIM" 2>/dev/null && pwd -P)" = "$media_root/DCIM" ] &&
+            [ "$("$BB" stat -c '%d:%i' "$media_root")" = "$media_inode" ] || return 1
+        media_target="$media_root/$oneos_media_suffix"
+        [ ! -L "$media_target" ] && oneos_media_absent "$media_target" || return 1
+    done
+    # All aliases showed the same underlying guest directory. An existing
+    # nonempty album belongs to the guest and must never be covered.
+    target="/data/media/0/$oneos_media_suffix"
+    if [ -d "$target" ]; then
+        contents=$("$BB" ls -A "$target") || return 1
+        [ -z "$contents" ] || return 1
+    else
+        "$BB" mkdir -m 0777 "$target" || return 1
+    fi
+    for media_root in $media_roots; do
+        media_target="$media_root/$oneos_media_suffix"
+        # A slave view can have received this mount from /mnt/user already.
+        if oneos_media_absent "$media_target"; then
+            "$BB" mount --bind "$oneos_media_tmp/album" "$media_target" || break
+        fi
+        if ! oneos_media_protected "$media_target" ||
+           [ "$("$BB" stat -c '%d:%i' "$media_target")" != "$album_inode" ]; then
+            break
+        fi
+        media_target=
+    done
+    if [ -z "$media_target" ]; then
+        # Check all aliases again after propagation from the last bind.
+        for media_root in $media_roots; do
+            media_target="$media_root/$oneos_media_suffix"
+            if ! oneos_media_protected "$media_target" ||
+               [ "$("$BB" stat -c '%d:%i' "$media_target")" != "$album_inode" ]; then
+                break
+            fi
+            media_target=
+        done
+    fi
+    if [ -n "$media_target" ]; then
+        for media_root in $media_roots; do
+            oneos_media_unmount "$media_root/$oneos_media_suffix" || oneos_media_fatal
+        done
+        return 1
+    fi
+}
+
+if [ -n "$oneos_media_tmp" ]; then
+    if oneos_media_publish; then
+        oneos_media_release_temp
+        echo "[Pivoted Root] Media prototype: OneOSShareTest mounted read-only"
+    else
+        oneos_media_release_temp
+        echo "[Pivoted Root] Media prototype skipped: guest storage aliases could not be protected"
+    fi
+fi
 
 echo "[Pivoted Root] Rootfs successfully activated as /"
 # oneos_switch.sh's TMPDIR ($STAGE/tmp) is not a path of the pivoted
