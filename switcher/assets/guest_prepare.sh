@@ -2358,8 +2358,10 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
     # ONEOS_GUEST_FACEHAL=1 and is removed (review by the mlcraze5 fork,
     # 2026-11-16; oneos_switch.sh refuses the knob): nothing is staged, and a
     # payload an earlier prepare staged into the guest's data is removed, so
-    # guest_start.sh cannot find one. The set's facehal_payload.tar stays (set
-    # files are pinned) and is never read.
+    # guest_start.sh cannot find one. facehal_payload.tar is out of the HyperOS
+    # set too (review of de66247 by the mlcraze5 fork, 2026-11-16): an older
+    # stage's copy no longer matches the set, the app asks to prepare again,
+    # and that prepare's finish moves it to the attic.
     FH_DST="$STAGE/data/local/tmp/facehal"
     if [ -e "$FH_DST" ] || [ -L "$FH_DST" ]; then
         no_symlink local/tmp/facehal

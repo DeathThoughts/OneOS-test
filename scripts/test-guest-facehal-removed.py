@@ -72,11 +72,11 @@ class Prepare(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             st = Path(d)
             (st / 'data/local/tmp').mkdir(parents=True)
-            (st / 'facehal_payload.tar').write_text('pinned set file')
+            (st / 'facehal_payload.tar').write_text('an older stage copy')
             done = self.run_block(st)
             self.assertEqual(0, done.returncode, done.stderr)
             self.assertFalse((st / 'data/local/tmp/facehal').exists())
-            self.assertEqual('pinned set file', (st / 'facehal_payload.tar').read_text(), 'set file left as it is')
+            self.assertEqual('an older stage copy', (st / 'facehal_payload.tar').read_text(), 'left for the next prepare to move to the attic')
             self.assertIn("Samsung's face HAL with One UI's enrollment", done.stdout)
 
     def test_an_earlier_payload_is_removed(self):
