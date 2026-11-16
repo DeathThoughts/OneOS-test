@@ -7,6 +7,12 @@ STAGE="/data/local/tmp/oneos"
 # scripts/deploy-phone.sh) the app-only checks are skipped and a few warn.
 APP="${ONEOS_APP:-0}"
 [ "$APP" = 1 ] || APP=0
+# Timing of the preflight (S25 Ultra bceaef29fb128e94 05:15:57 -> 05:16:12,
+# S23 4d2e95c67f065941 03:02:58 -> 03:03:13): 15 s from the root script's
+# "=== OneOS app launch" to "preflight: switch start", with no line between to
+# say where. The "preflight: <step> <time>" lines below only report; every
+# check stays as and where it was.
+echo "preflight: oneos_switch.sh start $(date +%T)"
 
 # --- PREFLIGHT ------------------------------------------------------------
 # Every refusal comes before the first change to the phone (SELinux, props,
@@ -49,6 +55,7 @@ for ex in /proc/[0-9]*/exe; do
             refuse "the app $a runs a kernel tool (libtimer.so, pid $(echo "$ex" | cut -d/ -f3)) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
     esac
 done
+echo "preflight: process scan done $(date +%T)"
 
 # Root tools: the root manager's own busybox and resetprop (KernelSU, APatch,
 # Magisk), never whatever a search of /data finds (OneLineage fell back to
@@ -140,12 +147,20 @@ if [ "$APP" = 1 ]; then
                 check_host_apex.sh bridges.sh zygote_exec guards.txt $GUARD_JARS; do
         awk -v n="$need" '$2 == n { f = 1 } END { exit !f }' "$SUMS" || refuse "files.sha256 does not list $need"
     done
+    # Suspected for the 15 s (not proven): this loop hashes every staged file,
+    # payload images of hundreds of MB included, on every switch. Its time, how
+    # many files and how many bytes (one stat after the loop, nothing hashed twice).
+    echo "preflight: files.sha256 hash start $(date +%T)"
+    SUMS_FILES=""
     while read -r sum name || [ -n "$sum" ]; do
         f="$STAGE/$name"
         [ -f "$f" ] && [ ! -L "$f" ] || refuse "$name (files.sha256) is missing or a link"
         root_only "$f" || refuse "$name is not root's or is writable by others"
         [ "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] || refuse "$name does not match files.sha256"
+        SUMS_FILES="$SUMS_FILES $f"
     done < "$SUMS"
+    echo "preflight: files.sha256 hash done $(date +%T): $(stat -c '%s %n' $SUMS_FILES 2>/dev/null |
+        awk '{ n++; b += $1; if ($1 > m) { m = $1; f = $2 } } END { sub(/.*\//, "", f); printf "%d files, %.0f bytes (%.1f MB; largest %s, %.1f MB)", n, b, b / 1048576, f, m / 1048576 }')"
     # A leftover the package does not carry would still be bound by
     # guest_prepare.sh (framework_patched.jar, libaudio*_patched.so,
     # PermissionController_patched.apk, an extra payload, an apex info list).
@@ -168,6 +183,7 @@ if [ "$APP" = 1 ]; then
     [ -n "$ID_STAT" ] || refuse "system.raw.id is not \"<size> <sha256> <dev:inode:size:mtime>\""
     [ "$(stat -c '%d:%i:%s:%Y' "$STAGE/system.raw" 2>/dev/null)" = "$ID_STAT" ] ||
         refuse "system.raw changed since it was verified (system.raw.id $ID_STAT, now $(stat -c '%d:%i:%s:%Y' "$STAGE/system.raw" 2>/dev/null))"
+    echo "preflight: system.raw identity done $(date +%T)"
     # The ways back to One UI and the session log cannot be switched off from
     # the app: the root script never writes these keys, checked again here.
     ENVF="$STAGE/session.env"
@@ -238,6 +254,8 @@ for need in $GUARD_JARS; do
     [ -n "$sum" ] && [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] ||
         refuse "$need is missing or not the guarded build in guards.txt"
 done
+# The guarded jars are hashed once more here (also listed in files.sha256).
+echo "preflight: guarded jars done $(date +%T)"
 # The guest vold as "gvld" takes both binaries (guest_prepare.sh refuses one
 # alone too, but only once One UI's framework is stopped).
 [ "$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")" = 1 ] &&
@@ -340,6 +358,7 @@ if [ -n "$TH_MODS" ]; then
     fi
     echo "Thermal modules on:$TH_MODS (One UI's thermal service did not report HAL Ready: false)"
 fi
+echo "preflight: checks done $(date +%T)"
 echo "Preflight passed (ONEOS_APP=$APP, profile ${ONEOS_PROFILE:-none}, busybox $BB, resetprop $RP, mount namespace $SELF_NS)"
 
 # Every ColorOS set (pull request #1 began it for the Z Fold8): copy One UI's
@@ -347,8 +366,11 @@ echo "Preflight passed (ONEOS_APP=$APP, profile ${ONEOS_PROFILE:-none}, busybox 
 # package manager still runs, after checking the stage's guards
 # (switcher/assets/guest_google.sh). It never refuses: without a copy the guest
 # starts without them.
+# Its verify() hashes the GmsCore and Phonesky APKs (sha256sum -c): timed.
+echo "preflight: guest_google.sh snapshot start $(date +%T)"
 STAGE="$STAGE" BB="$BB" /system/bin/sh "$STAGE/guest_google.sh" snapshot ||
     echo "!!! guest_google.sh snapshot failed; the guest starts without One UI's Play services"
+echo "preflight: guest_google.sh snapshot done $(date +%T)"
 
 # mksh keeps a short here-document in memory and writes a long one to a temp
 # file in $TMPDIR, a directory it accepts once, when the shell starts, and
