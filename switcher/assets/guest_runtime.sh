@@ -153,6 +153,11 @@ baseline)
         fi
         : > "$B/allowlist.protected"
     fi
+    # The whole baseline took 14-16 s of preflight in every session on a Galaxy
+    # S25 Ultra with ColorOS 17 (sessions 4d2e95c67f065941, 72c85663e0588d41,
+    # 25b4785c4206828f, 3d9814984612c525), with no timing inside it. These
+    # lines go to takeover_app.log with the switch's own preflight lines.
+    echo "guest baseline: allowlist kept $(date +%T)"
     : > "$B/host-frameworks"
     for proc in /proc/[0-9]*; do
         name=$({ tr '\000' ' ' < "$proc/cmdline"; } 2>/dev/null || true)
@@ -164,13 +169,17 @@ baseline)
             ;;
         esac
     done
+    echo "guest baseline: frameworks scanned $(date +%T)"
     "$S/guest_root" --host-audit > "$B/root.unsorted" || exit 0
     sort "$B/root.unsorted" > "$B/root"
+    echo "guest baseline: host audit done $(date +%T)"
     sha256sum /sys/fs/selinux/policy > "$B/selinux" || exit 0
+    echo "guest baseline: selinux hashed $(date +%T)"
     awk '{print $1, $2, $6}' /proc/modules | sort > "$B/kernel-modules"
     if [ -f /data/adb/ksu/.allowlist ]; then sha256sum /data/adb/ksu/.allowlist > "$B/allowlist"; fi
     cat /proc/sys/kernel/random/boot_id > "$B/boot"
     : > "$B/ready"
+    echo "guest baseline: done $(date +%T)"
     ;;
 verify-return)
     [ -f "$STATE/enabled" ] || exit 0
