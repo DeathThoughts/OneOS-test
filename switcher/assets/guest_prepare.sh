@@ -4168,7 +4168,10 @@ echo "OPPO default grants: $([ -f "$STAGE/data/oneos_oplus_grants" ] && echo on 
 # compiled. A success is remembered in /data/oneos_sysui_compiled under the
 # APK's sha256 and the boot image's size and time: those sessions skip the
 # check, and a new set file, an OTA or a rebuilt boot image compiles again. A
-# failure leaves no marker. SystemUI is not restarted for it: the compiled code
+# failure leaves no marker, and so does a compile after which the status is not
+# compiled code (verify, say), and a compiled status with no odex next to the
+# APK or in the dalvik-cache is compiled again (review by the mlcraze5 fork,
+# 2026-11-16). SystemUI is not restarted for it: the compiled code
 # is used from its next start (the wallpaper AOD feature's screen-off restart in
 # oneos_panoramic_aod.sh, or the next session). Log: /data/oneos_sysui_compile.log
 # in the guest data. Every write is the guest script's, in the guest's mount
@@ -4210,6 +4213,15 @@ log() { echo "$(date '+%m-%d %T') $*"; }
 # arm64 status of SystemUI's APK as ArtService reports it (run-from-apk, verify, speed, ...).
 status() { timeout 60 pm art dump com.android.systemui 2>/dev/null | sed -n 's/.*arm64: \[status=\([^]]*\)\].*/\1/p' | head -n 1; }
 compiled() { case "$1" in speed|speed-profile|everything|everything-profile) return 0 ;; esac; return 1; }
+# An odex for the APK $1: next to it (oat/arm64/<name>.odex) or in the guest's
+# dalvik-cache (<path with @>@classes.dex). A compiled status is not taken on
+# its word alone (review by the mlcraze5 fork, 2026-11-16: OplusLauncher had
+# only a vdex, S25 Ultra session 25b4785c4206828f).
+odex() {
+    d=${1%/*}; n=${1##*/}
+    [ -f "$d/oat/arm64/${n%.apk}.odex" ] && return 0
+    ls /data/dalvik-cache/arm64/*@"${d##*/}"@"$n"@classes.dex >/dev/null 2>&1
+}
 remember() { rm -f "$MARK.new"; echo "$KEY" > "$MARK.new" && mv -f "$MARK.new" "$MARK"; }
 if [ -f "$APK" ]; then SYSUI_APK=1; else SYSUI_APK=0; log "no $APK: nothing to do for SystemUI"; fi
 # Shared with One UI's properties, so already 1 in practice: the sleep 60 is the real wait.
@@ -4232,14 +4244,18 @@ if [ -f "$MARK" ] && [ ! -L "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY"
 fi
 S=$(status)
 if compiled "$S"; then
-    remember
-    log "SystemUI arm64 is $S already: nothing to compile ($KEY)"
-    return 0
+    if odex "$APK"; then
+        remember
+        log "SystemUI arm64 is $S already: nothing to compile ($KEY)"
+        return 0
+    fi
+    log "SystemUI arm64 is $S but no odex for it was found: compiled again"
+else
+    case "$S" in
+        run-from-apk|verify|error|extract) ;;
+        *) log "SystemUI arm64 status '${S:-not read}': not compiled"; return 0 ;;
+    esac
 fi
-case "$S" in
-    run-from-apk|verify|error|extract) ;;
-    *) log "SystemUI arm64 status '${S:-not read}': not compiled"; return 0 ;;
-esac
 f=$(getprop dalvik.vm.systemuicompilerfilter)
 f=${f:-speed}
 log "SystemUI arm64 is $S ($KEY): cmd package compile -m $f -f com.android.systemui"
@@ -4249,20 +4265,23 @@ rc=$?
 t=$(($(date +%s) - t0))
 A=$(status)
 log "result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); SystemUI arm64 now ${A:-not read}"
-case "$A" in
-    ''|run-from-apk|error|extract) log "no marker: tried again next session" ;;
-    *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
-           remember && log "marker saved: later sessions skip this until the APK or the boot image changes"
-       else
-           log "no marker: tried again next session"
-       fi ;;
-esac
+# Only a compiled status after it saves the marker: a compile that ends at
+# verify (or any status that is not compiled code) is tried again next
+# session instead of being skipped for good (review by the mlcraze5 fork,
+# 2026-11-16).
+if compiled "$A" && [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
+    remember && log "marker saved: later sessions skip this until the APK or the boot image changes"
+else
+    log "no marker: tried again next session"
+fi
 }
 [ $SYSUI_APK = 1 ] && sysui
 # The apps after SystemUI, one at a time, with speed: speed-profile compiles
 # only what a profile names, and a session has none worth the name (S25 Ultra
 # session 25b4785c4206828f, Madox 4fad5d45: the launcher had no odex at all).
 thermal() { timeout 30 dumpsys thermalservice 2>/dev/null | sed -n 's/^[[:space:]]*Thermal Status: *\([0-9][0-9]*\).*/\1/p' | head -n 1; }
+# Compiled with the apps' filter (speed) or more; speed-profile is not, see above.
+acompiled() { case "$1" in speed|everything|everything-profile) return 0 ;; esac; return 1; }
 astatus() { timeout 60 pm art dump "$1" 2>/dev/null | sed -n 's/.*arm64: \[status=\([^]]*\)\].*/\1/p' | head -n 1; }
 akey() { grep "^$1 " "$AMARK" 2>/dev/null | head -n 1 | cut -d' ' -f2-; }
 aremember() {
@@ -4281,15 +4300,19 @@ app() {
         return 0
     fi
     S=$(astatus "$p")
-    if [ "$S" != speed-profile ] && compiled "$S"; then
-        aremember "$p" "$K"
-        log "$p arm64 is $S already: nothing to compile ($K)"
-        return 0
+    if acompiled "$S"; then
+        if odex "$a"; then
+            aremember "$p" "$K"
+            log "$p arm64 is $S already: nothing to compile ($K)"
+            return 0
+        fi
+        log "$p arm64 is $S but no odex for it was found: compiled again"
+    else
+        case "$S" in
+            run-from-apk|verify|error|extract|speed-profile) ;;
+            *) log "$p arm64 status '${S:-not read}': not compiled"; return 0 ;;
+        esac
     fi
-    case "$S" in
-        run-from-apk|verify|error|extract|speed-profile) ;;
-        *) log "$p arm64 status '${S:-not read}': not compiled"; return 0 ;;
-    esac
     log "$p arm64 is $S ($K): cmd package compile -m speed -f $p"
     t0=$(date +%s)
     R=$(timeout 300 cmd package compile -m speed -f "$p" 2>&1)
@@ -4297,14 +4320,12 @@ app() {
     t=$(($(date +%s) - t0))
     A=$(astatus "$p")
     log "$p result: $(echo "$R" | tail -n 1 | cut -c1-200) (exit $rc, $t s); $p arm64 now ${A:-not read}"
-    case "$A" in
-        ''|run-from-apk|error|extract|speed-profile) log "$p: no marker: tried again next session" ;;
-        *) if [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
-               aremember "$p" "$K" && log "$p: marker saved: later sessions skip it until the APK or the boot image changes"
-           else
-               log "$p: no marker: tried again next session"
-           fi ;;
-    esac
+    # As for SystemUI: verify or speed-profile after it saves no marker.
+    if acompiled "$A" && [ $rc = 0 ] && echo "$R" | grep -q '^Success'; then
+        aremember "$p" "$K" && log "$p: marker saved: later sessions skip it until the APK or the boot image changes"
+    else
+        log "$p: no marker: tried again next session"
+    fi
 }
 PC=com.google.android.permissioncontroller
 [ -n "$(timeout 60 pm path $PC 2>/dev/null)" ] || PC=com.android.permissioncontroller
