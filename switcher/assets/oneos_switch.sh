@@ -1621,8 +1621,18 @@ fi
 # booting, which for a broken guest is never. Run guest_prepare's net_fix.sh
 # from the host side for the whole session, and log what the network looked
 # like, so a drop that routing cannot fix (wifi itself going away) shows up.
+# This is the only copy of net_fix.sh that runs: it covers the whole session,
+# from before the guest boots until the return, and app_storage_loop.sh no
+# longer runs its own inside the guest, which shares this network namespace
+# and could race this one on table 4242 (coloros native audit 2026-11-16, S25
+# Ultra).
+# The APEX watch runs every 6th pass (60 s) and reads the loop backing files
+# with builtins: every pass with cat/basename/dirname per loop device was 54+
+# forks every 10 s, 338 rounds of 33 lines in apex_watch.log in session
+# bceaef29fb128e94 (same audit).
 NETFIX="$STAGE/data/local/tmp/net_fix.sh"
 $BB sh -c "
+    apass=0
     while [ -f $STAGE/rootfs/system/build.prop ]; do
         /system/bin/sh $NETFIX 2>&1 | sed \"s/^/\$(date +%T) /\"
         {
@@ -1635,13 +1645,17 @@ $BB sh -c "
         } 2>&1
         # Watch One UI's APEX backing files: after earlier sessions One UI's
         # decompressed APEXes read back with dm-verity I/O errors.
-        {
+        apass=\$((apass + 1))
+        [ \$apass -eq 1 ] && {
             echo \"--- \$(date +%T) apex\"
             ls -l /data/apex/decompressed/ 2>&1 | awk '{print \$5, \$6, \$7, \$NF}'
             for l in /sys/block/loop*/loop/backing_file; do
-                case \"\$(cat \$l 2>/dev/null)\" in /data/apex/*) echo \"\$(basename \$(dirname \$(dirname \$l))): \$(cat \$l)\";; esac
+                b=''
+                read -r b 2>/dev/null < \$l
+                case \"\$b\" in /data/apex/*) n=\${l#/sys/block/}; echo \"\${n%%/*}: \$b\";; esac
             done
         } >> $STAGE/apex_watch.log 2>&1
+        [ \$apass -lt 6 ] || apass=0
         sleep 10
     done
 " </dev/null >>"$STAGE/net_watch.log" 2>&1 &
