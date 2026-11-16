@@ -8,6 +8,17 @@ done
 [ -n "$BB" ] || [ "${ONEOS_APP:-0}" = 1 ] || BB=$(command -v busybox 2>/dev/null)
 [ -n "$BB" ] || { echo "[Pivoted Root] FATAL: no busybox. Not starting the guest."; exit 1; }
 
+# Step times (ColorOS native audit 2026-11-16, F15): no [Pivoted Root] line
+# carried a time, so the 21 s from this script's start to the zygote (S25
+# Ultra session bceaef29fb128e94: 05:16:48 -> 05:17:09) could not be split
+# into steps. One "[Pivoted Root] time HH:MM:SS <step>" line where each
+# major step begins, and around every wait that can take seconds; the lines
+# above and below keep their text. "time" right after the prefix and a
+# one-word step: nothing that reads takeover.log (analyze-session.py's SF kick
+# lines, oneos_switch.sh's "SurfaceFlinger PID:" and "HW overlays" greps, the
+# tests' "Launching guest Zygote") takes it for one of its lines.
+# scripts/test-guest-start-step-times.py checks the form.
+echo "[Pivoted Root] time $($BB date +%T) start"
 echo "[Pivoted Root] Preparing pivot..."
 cd /data/local/tmp/oneos/rootfs
 $BB mount --make-rprivate /
@@ -47,6 +58,7 @@ if awk '$5 ~ "^/postinstall(/|$)"' /proc/self/mountinfo | grep -q .; then
     exit 1
 fi
 echo "[Pivoted Root] Host root detached from /postinstall"
+echo "[Pivoted Root] time $($BB date +%T) storage"
 
 export PATH=/system/bin:/system/xbin
 
@@ -103,6 +115,7 @@ echo "[Pivoted Root] Rootfs successfully activated as /"
 mkdir -p /data/local/tmp 2>/dev/null
 export TMPDIR=/data/local/tmp
 
+echo "[Pivoted Root] time $($BB date +%T) class-paths"
 # Class paths. This shell inherits the HOST's BOOTCLASSPATH and
 # SYSTEMSERVERCLASSPATH (One UI's, with Samsung jars such as knoxanalyticssdk
 # and semwifi-service). init normally runs derive_classpath and load_exports
@@ -137,6 +150,7 @@ done < /data/system/environ/classpath
 exec "$@"
 GENV
 chmod 755 /data/oneos_genv.sh
+echo "[Pivoted Root] time $($BB date +%T) checks"
 echo "[Pivoted Root] Testing /dev/null resolution:"
 exec 8< /dev/null
 echo -n "FD 8: "
@@ -177,6 +191,7 @@ if [ -f "$DISPLAYCONFIG/display_layout_configuration.xml" ] && [ "${ONEOS_KEEP_F
         echo "[Pivoted Root] Fold layout config hidden from the guest ($(ls /data/oneos_displayconfig | wc -l) display configs kept)"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) host-sf-release"
 # Gap splash (oneos_switch.sh): [4b/6] froze One UI's surfaceflinger
 # (SIGSTOP) on the switcher's OneOS screen instead of killing it, so its
 # composer client stayed and the panel kept that frame through the host-side
@@ -198,6 +213,7 @@ fi
 # Thaw that exact compositor before restarting it for the new guest client.
 command -v oneos_boot_release_display >/dev/null 2>&1 && oneos_boot_release_display
 
+echo "[Pivoted Root] time $($BB date +%T) composer-restart"
 # The vendor composer still treats the killed host SurfaceFlinger as its client:
 # every frame from the guest's came back NO_RESOURCES on both displays and the
 # panel kept showing One UI's last frame. Restart it so the guest gets a fresh
@@ -269,6 +285,7 @@ while [ $n -lt 20 ] && pidof surfaceflinger >/dev/null; do
 done
 echo "[Pivoted Root] Host surfaceflinger after composer restart: $(pidof surfaceflinger || echo none)"
 
+echo "[Pivoted Root] time $($BB date +%T) composer-dump"
 # What the composer has to offer, recorded BEFORE the guest's SurfaceFlinger
 # asks for it. The diag rounds in oneos_switch.sh all start from
 # `pidof surfaceflinger`, so a guest SF that dies leaves no display diag at all:
@@ -312,6 +329,7 @@ CD=/data/oneos_composer_before_sf.log
     fi
 } > "$CD" 2>&1
 
+echo "[Pivoted Root] time $($BB date +%T) surfaceflinger"
 # Shader caches. init.rc makes /data/misc/surfaceflinger (0700 system system)
 # and sets service.sf.cache_dir_available; the container has no init, so the
 # guest's RenderEngine could not save one (run 32 all.log:276689, 39 times:
@@ -336,6 +354,7 @@ echo "[Pivoted Root] SurfaceFlinger PID: $SF_PID"
 # boot animation (see the composer restart above).
 if [ -f /data/oneos_gap_slow ]; then sleep 2; else sleep 0.5; fi
 
+echo "[Pivoted Root] time $($BB date +%T) sf-wait"
 # Samsung's composer rejected ColorOS's surfaceflinger's command batches
 # (executeCommands BAD_VALUE, presentOrValidate NO_RESOURCES on every frame:
 # black panel). Disable hardware overlays (developer options "Disable HW
@@ -345,6 +364,7 @@ n=0
 while [ $n -lt 25 ] && ! service check SurfaceFlinger 2>/dev/null | grep -q ": found"; do
     n=$((n + 1)); sleep 0.2
 done
+echo "[Pivoted Root] time $($BB date +%T) sf-ready"
 # /data/oneos_hwc (guest_prepare.sh) leaves the overlays on: the default since
 # run 44 for guests without oplus-services.jar and since 0.4.76 for ColorOS
 # (see there), ONEOS_GUEST_HWC=0 for GPU composition.
@@ -381,6 +401,7 @@ else
     echo "[Pivoted Root] SurfaceFlinger HW overlays disabled: $(cat /data/sf_1008.log)"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) fold-layout"
 # Fold layout (see "Foldable layouts" above), like the Find N6: lid closed
 # (Samsung's device state 0) puts ColorOS on the cover, lid open (3) on the
 # inner panel; the other panel is switched off. State 0 comes first and lists
@@ -518,6 +539,7 @@ LAYOUT
     fi
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) sf-kick"
 # Render rate, Pixel guest (run 42). Pixel's DisplayModeDirector gives
 # SurfaceFlinger an app-request render range of [0, 120] next to the primary
 # [120, 120] the UI activator's min/peak refresh rate set (the cover: [0, inf]
@@ -716,6 +738,7 @@ if [ -f /data/oneos_record ]; then
     echo "[Pivoted Root] Recording the screen to /data/oneos_rec_N.mp4"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) bootanimation"
 echo "[Pivoted Root] Starting guest BootAnimation..."
 setprop service.bootanim.exit 0
 /system/bin/bootanimation > /data/anim.log 2>&1 &
@@ -861,6 +884,7 @@ BLEOF
     else echo "[Pivoted Root] Backlight: brightness bridge started for $BL (it runs only if the composer refuses brightness and the system does not use the lights HAL; see backlight.log)"; fi
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) aconfig"
 # aconfig flag storage. init/aconfigd normally build /metadata/aconfig from
 # every partition's and APEX's etc/{package.map,flag.map,flag.val,flag.info};
 # the container had none, so flag lookups failed ("failed to open
@@ -898,6 +922,7 @@ fi
 # rejects, executeCommands BAD_VALUE / presentOrValidate NO_RESOURCES on every
 # frame, a black panel. Without flag storage it runs on defaults, which worked.)
 
+echo "[Pivoted Root] time $($BB date +%T) vold"
 # OneOS: the guest framework must get THIS vold, never One UI's (which holds the
 # phone's real storage). Up to run 43 both registered "vold" in the shared
 # servicemanager, the guest's last. Run 44: with vold_patched bound
@@ -994,11 +1019,13 @@ fi
 /system/bin/vold --blkid_context=u:r:blkid:s0 --blkid_untrusted_context=u:r:blkid_untrusted:s0 --fsck_context=u:r:fsck:s0 --fsck_untrusted_context=u:r:fsck_untrusted:s0 $VOLD_EXTRA > /data/vold.log 2>&1 &
 VOLD_PID=$!
 echo "[Pivoted Root] Vold PID: $VOLD_PID"
+echo "[Pivoted Root] time $($BB date +%T) vold-wait"
 n=0
 while [ $n -lt 50 ]; do
     [ "$(svc_pid $VOLD_NAME)" = "$VOLD_PID" ] && break
     n=$((n + 1)); sleep 0.2
 done
+echo "[Pivoted Root] time $($BB date +%T) vold-ready"
 if [ "$(svc_pid $VOLD_NAME)" != "$VOLD_PID" ]; then
     echo "[Pivoted Root] FATAL: servicemanager's $VOLD_NAME is pid '$(dumpsys --pid $VOLD_NAME 2>&1 | head -n 1)', not the guest's $VOLD_PID. Not starting the guest."
     exit 1
@@ -1015,6 +1042,7 @@ if [ "$VOLD_NAME" = gvld ]; then
     echo "[Pivoted Root] One UI's vold ($HOST_VOLD) still has vold and android.system.vold.IVold/default ($(vdef))"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) wificond"
 # Wifi. oneos_switch.sh stops the host wificond; the guest's own registers
 # IWificond before WifiService initialises, and drives Samsung's wifi HAL (which
 # is still registered by host init) with matching AIDL.
@@ -1030,6 +1058,7 @@ else
     echo "[Pivoted Root] No wificond in the image: the guest's wifi module drives nl80211 itself"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) oplus-daemons"
 # ColorOS list/feedback daemons ("class main" in system_ext/etc/init/
 # mmlistservice.rc and atlasservice.rc; host init never starts them). ColorOS's
 # AudioTrack, ToneGenerator and NuPlayer and its audioserver look them up with a
@@ -1069,6 +1098,7 @@ if [ -f /data/guest_media.flag ]; then
     echo "[Pivoted Root] mediametrics PID: $!"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) audio"
 # Guest audioserver (oneos_switch.sh stopped Samsung's): ColorOS's audio
 # interfaces are not numbered like Samsung's (run 29: no routing strategies,
 # volume groups or ports; Samsung's AudioFlinger refused every app stream). The
@@ -1589,6 +1619,7 @@ fi
 echo "[Pivoted Root] App storage sweeper started..."
 
 
+echo "[Pivoted Root] time $($BB date +%T) netd"
 # Fresh netd for the guest. The DNS resolver lives in the host's netd and
 # hands IDnsResolver.getUnstableInterface() to AID_SYSTEM only once; One UI's
 # system_server took it at boot, so the guest's ConnectivityService died with
@@ -1607,6 +1638,7 @@ echo "[Pivoted Root] netd: $(getprop init.svc.netd), dnsresolver: $(service chec
 sleep 1
 
 
+echo "[Pivoted Root] time $($BB date +%T) gnss"
 # Fresh GNSS HAL for the guest. The One UI app com.qualcomm.location holds the
 # HAL A-GPS callback (vendor.qti.gnss ILocAidlAGnss.setCallbackExt), and libgnss
 # keeps the callback with the higher priority (GnssAdapter::initAgpsCommand,
@@ -1635,6 +1667,7 @@ else
     echo "[Pivoted Root] GNSS HAL not restarted (no gnss_service, or ONEOS_GUEST_GNSS_RESTART=0); GNSS services: ${gnss_svcs:-none}"
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) idmap2d"
 # OneOS: the guest's own idmap2d for the whole session (its overlay manager no
 # longer asks host init to start One UI's, which cannot see the guest's
 # partitions; switcher/patches/guest_own_idmap.py).
@@ -1645,6 +1678,7 @@ while [ $n -lt 25 ] && [ "$(dumpsys --pid idmap 2>/dev/null | tr -dc 0-9)" != "$
     n=$((n + 1)); sleep 0.2
 done
 echo "[Pivoted Root] idmap2d PID: $IDMAP_PID, servicemanager's idmap: $(dumpsys --pid idmap 2>/dev/null | tr -dc 0-9)"
+echo "[Pivoted Root] time $($BB date +%T) artd"
 # The guest's own artd (guest_prepare.sh: whenever the guest's ART payload is mounted).
 # artd is lazy: it exits when nothing holds it, so it runs again 0.2 s later,
 # before servicemanager would ask init for One UI's. The loop ends with the guest
@@ -1726,6 +1760,7 @@ else
     fi
 fi
 
+echo "[Pivoted Root] time $($BB date +%T) keepers"
 echo "[Pivoted Root] Cleaning stale sockets..."
 rm -f /dev/socket/zygote /dev/socket/usap_pool_primary 2>/dev/null || true
 
@@ -2330,6 +2365,7 @@ if [ -f /data/oneos_root/enabled ]; then
     setprop sys.boot_completed 0
     setprop dev.bootcomplete 0
 fi
+echo "[Pivoted Root] time $($BB date +%T) odrefresh"
 # The guest's own compiled framework for the jars OneOS binds over its own
 # (0.4.60). The image's boot image (/system/framework/arm64/boot*.oat) and
 # system_server odex files are built for the image's framework.jar,
@@ -2440,6 +2476,7 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
 else
     echo "[Pivoted Root] odrefresh: not run (ONEOS_GUEST_ODREFRESH=$ONEOS_GUEST_ODREFRESH, JIT zygote $ONEOS_GUEST_JIT_ZYGOTE)"
 fi
+echo "[Pivoted Root] time $($BB date +%T) odrefresh-done"
 # Bring apps (0.4.75): the owner chose user apps on One UI and `bring-collect`
 # copied each one's APKs and its One UI data into /data/oneos_bring. Only the
 # restore script is written here; the UI Activator (oneos_switch.sh) runs it
@@ -2819,6 +2856,7 @@ BRINGEOF
 else
     rm -f /data/oneos_bring_restore.sh
 fi
+echo "[Pivoted Root] time $($BB date +%T) systemui"
 # OneOS: the fingerprint-wave SystemUI. scripts/install-systemui-wave.sh
 # builds the patched APK once per SystemUI build and leaves it in the guest's
 # /data/local/tmp; this bind must run before zygote starts, because zygote and
@@ -2905,6 +2943,7 @@ sm_diag() {
         dmesg 2>/dev/null | grep -iE 'servicemanager|avc:|selinux|security_compute|context' | tail -n 40 | cut -c1-300
     } >> /data/oneos_sm_diag.log 2>&1
 }
+echo "[Pivoted Root] time $($BB date +%T) sm-diag"
 sm_diag "before zygote"
 ( sleep 45; sm_diag "45 s after zygote" ) &
 # Face: Samsung's face HAL (sec-biometrics-face-aidl) with One UI's
@@ -2925,6 +2964,7 @@ elif [ -f /data/oneos_facehal_moved ] || [ -d /data/system/users/0/oneos-face-ho
 else
     echo "[Pivoted Root] Face: Samsung's face HAL with One UI's enrollment"
 fi
+echo "[Pivoted Root] time $($BB date +%T) zygote"
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."
 if [ -f /data/oneos_root/enabled ]; then
     /system/bin/sh /data/oneos_runtime.sh pre || exit 3
