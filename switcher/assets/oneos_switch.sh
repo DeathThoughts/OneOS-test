@@ -2263,6 +2263,36 @@ fi
 UI_ACTIVATOR="
 BB=\"$BB\"
 [ -n \"\$BB\" ] || BB=\$(which busybox 2>/dev/null || echo /data/adb/ksu/bin/busybox)
+# This worker observes the resolved Home activity for one restart only. The
+# watchdog keeps its original signal independently of this acknowledgement.
+record_restart_home() {
+    case \"\$GEN\" in ''|0|*[!0-9]*) return ;; esac
+    ns=\$(cat $STAGE/guest_mntns 2>/dev/null)
+    [ -n \"\$ns\" ] && [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ] || return
+    home_component=\$(timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd package resolve-activity --user 0 --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
+    case \"\$home_component\" in *.*/*) ;; *) return ;; esac
+    i=0
+    while [ \$i -lt 6 ]; do
+        [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
+            [ \"\$ns\" = \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" ] &&
+            [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ] || return
+        if timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys activity activities 2>/dev/null |
+            awk -v component=\"\$home_component\" '/topResumedActivity=|mResumedActivity:/ { for (i = 1; i <= NF; i++) if (\$i == component && \$(i - 1) == \"u0\") found = 1 } END { exit !found }' &&
+            [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
+            [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ]; then
+            record=\$(mktemp $STAGE/tmp/restart-home.XXXXXX) || return
+            if printf '%s %s\n' \"\$GEN\" \"\$ns\" > \"\$record\" &&
+                mv -f \"\$record\" $STAGE/tmp/restart-home.\$GEN; then
+                echo \"[UI Activator] Home resumed for restart generation \$GEN\"
+            else
+                rm -f \"\$record\"
+            fi
+            return
+        fi
+        i=\$((i + 1))
+        sleep 2
+    done
+}
 GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=1; BRPID=''; SYSUI=''
 while true; do
 while true; do
@@ -3012,6 +3042,7 @@ while true; do
             fi
             echo \"[UI Activator] refresh: min \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system min_refresh_rate) peak \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system peak_refresh_rate); brightness \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system screen_brightness)\"
             echo '[UI Activator] Home activated!'
+            (record_restart_home) </dev/null &
             # ColorOS lock screen depth effect (0.4.60, owner; 0.4.59 A36 768c5a1d, S23
             # 77b9dfc0): SystemUI saves the cut-out subject as /data/oplus/os/deep_scenery_image*,
             # but that folder is system's and SystemUI runs as an app uid here (EACCES, \"can
@@ -3774,7 +3805,7 @@ done
 # A fresh file every session: rm -f takes a link at that path away (not what
 # it points to), and set -C refuses whatever appears there in between. A
 # running activator of an earlier session keeps reading its own, unlinked copy.
-rm -f "$STAGE/tmp/ui_activator.sh"
+rm -f "$STAGE/tmp/ui_activator.sh" "$STAGE"/tmp/restart-home.[0-9]*
 if (umask 077; set -C; $BB cat > "$STAGE/tmp/ui_activator.sh") 2>/dev/null <<UIACT
 # Written by oneos_switch.sh at every start (the UI activator); see there.
 $UI_ACTIVATOR
