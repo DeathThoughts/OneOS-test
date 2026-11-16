@@ -6,6 +6,8 @@ while cpu-1-3 read 88 C and policy0/policy3 stayed at their top clock. These
 tests render the loop's double-quoted `sh -c` string the way the switch's
 shell does, point /sys at a fake tree, stub the guest's thermal service, and
 run the real loop for a few rounds (each `sleep` moves to the next round).
+A CPU level goes up only on two readings running at or above its threshold
+(review by the mlcraze5 fork, 2026-11-16), so most cases read twice.
 """
 import os
 import subprocess
@@ -101,35 +103,64 @@ sleep() {{
             self.assertEqual(0, check.returncode, check.stderr)
 
     def test_cpu_76_is_level_1(self):
-        log = self.run_loop([(40.0, {'cpu-1-3': 76000})])
-        self.assertIn('skin 40.0 C, cpu 76.0 C (cpu-1-3), level 0 to 1: 80%', log[0])
-        self.assertIn('policy0=1612800/2016000', log[0])
+        log = self.run_loop([(40.0, {'cpu-1-3': 76000})] * 2)
+        self.assertIn('skin 40.0 C, cpu 76.0 C (cpu-1-3): no cap', log[0])
+        self.assertIn('skin 40.0 C, cpu 76.0 C (cpu-1-3), level 0 to 1: 80%', log[1])
+        self.assertIn('policy0=1612800/2016000', log[1])
+
+    def test_one_spike_does_not_cap(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 88000}), (40.0, {'cpu-1-3': 60000}),
+                             (40.0, {'cpu-1-3': 88000}), (40.0, {'cpu-1-3': 60000})])
+        self.assertEqual(['skin 40.0 C, cpu 88.0 C (cpu-1-3): no cap'], [l.split(' ', 1)[1] for l in log])
+        self.assertEqual('2016000', self.freq())
+
+    def test_two_readings_running_cap(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 60000}), (40.0, {'cpu-1-3': 88000}), (40.0, {'cpu-1-3': 88000})])
+        self.assertEqual(3, len(log), log)
+        self.assertIn('no cap', log[0])
+        self.assertIn('cpu 88.0 C (cpu-1-3), level 0 to 3: 50%', log[1])
+        self.assertIn('stopped: full clock', log[2])
+
+    def test_up_only_as_far_as_both_readings(self):
+        # 81 then 86: level 2 (both reach 80), then 3 once 85 is read twice
+        log = self.run_loop([(40.0, {'cpu-1-3': 81000}), (40.0, {'cpu-1-3': 86000}), (40.0, {'cpu-1-3': 86000})])
+        self.assertIn('cpu 86.0 C (cpu-1-3), level 0 to 2: 65%', log[1])
+        self.assertIn('cpu 86.0 C (cpu-1-3), level 2 to 3: 50%', log[2])
+
+    def test_leaving_takes_one_reading(self):
+        log = self.run_loop([(40.0, {'cpu-1-3': 86000})] * 2 + [(40.0, {'cpu-1-3': 81000})])
+        self.assertIn('level 0 to 3: 50%', log[1])
+        self.assertIn('cpu 81.0 C (cpu-1-3), level 3 to 2: 65%', log[2])
+
+    def test_skin_still_takes_one_reading(self):
+        log = self.run_loop([(47.5, {})])
+        self.assertIn('skin 47.5 C, cpu 40.0 C (cpu-0-0), level 0 to 2: 65%', log[0])
 
     def test_the_s23_report_caps_at_50(self):
-        log = self.run_loop([(44.6, {'cpu-1-3': 88000, 'cpuss-2': 79200, 'cpu-0-0': 84000})])
-        self.assertIn('skin 44.6 C, cpu 88.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
-        self.assertIn('policy0=1008000/2016000 policy3=1401600/2803200', log[0])
+        log = self.run_loop([(44.6, {'cpu-1-3': 88000, 'cpuss-2': 79200, 'cpu-0-0': 84000})] * 2)
+        self.assertIn('skin 44.6 C, cpu 88.0 C (cpu-1-3), level 0 to 3: 50%', log[1])
+        self.assertIn('policy0=1008000/2016000 policy3=1401600/2803200', log[1])
         self.assertIn('full clock', log[-1], 'the return gives the clocks back')
 
     def test_hysteresis(self):
-        log = self.run_loop([(40.0, {'cpu-1-3': 85000}), (40.0, {'cpu-1-3': 83000}), (40.0, {'cpu-1-3': 81000})])
-        self.assertIn('level 0 to 3: 50%', log[0])
-        self.assertIn('cpu 81.0 C (cpu-1-3), level 3 to 2: 65%', log[1])
-        self.assertEqual(3, len(log), log)
+        log = self.run_loop([(40.0, {'cpu-1-3': 85000})] * 2 + [(40.0, {'cpu-1-3': 83000}), (40.0, {'cpu-1-3': 81000})])
+        self.assertIn('level 0 to 3: 50%', log[1])
+        self.assertIn('cpu 81.0 C (cpu-1-3), level 3 to 2: 65%', log[2])
+        self.assertEqual(4, len(log), log)
 
     def test_skin_higher_than_cpu_wins(self):
         log = self.run_loop([(50.5, {'cpu-1-3': 76000})])
         self.assertIn('skin 50.5 C, cpu 76.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
 
     def test_no_skin_but_cpu_still_caps(self):
-        log = self.run_loop([(None, {'cpuss-2': 81000})])
-        self.assertIn('cpu 81.0 C (cpuss-2), level 0 to 2: 65%', log[0])
-        self.assertNotIn('skin', log[0])
-        self.assertIn('policy0=1310400/2016000', log[0])
+        log = self.run_loop([(None, {'cpuss-2': 81000})] * 2)
+        self.assertIn('cpu 81.0 C (cpuss-2), level 0 to 2: 65%', log[1])
+        self.assertNotIn('skin', log[1])
+        self.assertIn('policy0=1310400/2016000', log[1])
 
     def test_exynos_zone_names_count(self):
-        log = self.run_loop([(40.0, {'BIG': 80500})])
-        self.assertIn('cpu 80.5 C (BIG), level 0 to 2', log[0])
+        log = self.run_loop([(40.0, {'BIG': 80500})] * 2)
+        self.assertIn('cpu 80.5 C (BIG), level 0 to 2', log[1])
 
     def test_knob_off_ignores_the_cpu(self):
         log = self.run_loop([(44.6, {'cpu-1-3': 88000})], cpu='0')
@@ -151,7 +182,7 @@ sleep() {{
 
     def test_the_header_names_the_cpu_thresholds(self):
         self.run_loop([(40.0, {})])
-        self.assertIn('75, 80, 85 C on the hottest CPU thermal zone (3 C hysteresis)',
+        self.assertIn('75, 80, 85 C on the hottest CPU thermal zone (two readings running to go up, 3 C hysteresis)',
                       (self.stage / 'heat_cap.log').read_text())
 
 

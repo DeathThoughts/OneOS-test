@@ -3671,6 +3671,10 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # and cpuss-*, Exynos and Tensor's BIG, MID and LITTLE, any other *cpu*; never
 # a gpu, ddr, modem, npu, battery or skin zone) and keeps a CPU level of its
 # own: 1 from 75 C, 2 from 80, 3 from 85, each ending 3 C under where it began.
+# A higher CPU level is entered only on two readings running (20 s) at or
+# above its threshold, so a single spike (a compile, an app start) does not cap
+# the clocks for the minutes the hysteresis then holds them (review by the
+# mlcraze5 fork, 2026-11-16); the skin levels still take one reading.
 # The higher of the two levels is applied, with the same table; with no skin
 # reading the CPU level alone. The guest thermal status below stays on skin.
 # ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
@@ -3702,7 +3706,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     if [ $HEAT_CAP = 1 ]; then
         echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (2 C hysteresis)\" > \$F
         if [ $HEAT_CAP_CPU = 1 ]; then
-            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (3 C hysteresis); the higher level applies\" >> \$F
+            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (two readings running to go up, 3 C hysteresis); the higher level applies\" >> \$F
         else
             echo \"# CPU thermal zones not read (ONEOS_HEAT_CAP_CPU=0): skin only\" >> \$F
         fi
@@ -3774,7 +3778,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     lvl=0; first=1; tl=-1; lp=''
     # The level for the guest boost below: no boost while it is over 0.
     [ $HEAT_CAP = 1 ] && echo 0 > $STAGE/heat_cap.level
-    slvl=0; clvl=0
+    slvl=0; clvl=0; pct=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -3796,7 +3800,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 tl=\$nt
             fi
         fi
-        ct=''; cz=''
+        pct=\${ct:-0}; ct=''; cz=''
         [ $HEAT_CAP = 1 ] && cpu_temp
         if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
@@ -3805,7 +3809,8 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 new=\$slvl; why=\"skin \$sk C\"
             fi
             if [ -n \"\$ct\" ]; then
-                clvl=\$(awk -v s=\$ct -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; print l }')
+                # Up only as far as this reading and the one before both reach; down on this one.
+                clvl=\$(awk -v s=\$ct -v p=\$pct -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; while (l < 3 && s >= t[l + 1] && p >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; print l }')
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
