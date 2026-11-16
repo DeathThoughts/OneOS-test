@@ -22,21 +22,49 @@ echo "[Pivoted Root] time $($BB date +%T) start"
 echo "[Pivoted Root] Preparing pivot..."
 cd /data/local/tmp/oneos/rootfs
 oneos_media_enabled=0
-if "$BB" mount --make-rprivate /; then
-    # Deliberate, root-only opt-in for the disposable album across guest boots.
-    oneos_media_opt=/data/local/tmp/oneos-media-share-test
-    if [ -d "$oneos_media_opt" ] && [ ! -L "$oneos_media_opt" ] &&
-       [ "$("$BB" stat -c '%u:%a' "$oneos_media_opt")" = 0:700 ] &&
-       [ "$(pwd -P)" = /data/local/tmp/oneos/rootfs ] &&
-       [ ! -L ../.oneos_stage ] &&
-       "$BB" grep -q '^  "image": "coloros[^" ]*",$' ../.oneos_stage; then
+# Every failed media check sets oneos_media_why and the skip line prints it:
+# the S23 prototype test is a single phone run, so takeover.log alone has to
+# name the cause (the root manager's busybox may lack nosymfollow, say).
+# Never names a file inside the album.
+oneos_media_why=
+"$BB" mount --make-rprivate / || oneos_media_why="mount --make-rprivate / failed"
+# Deliberate, root-only opt-in for the disposable album across guest boots.
+# Without the marker nothing about the prototype is printed.
+oneos_media_opt=/data/local/tmp/oneos-media-share-test
+if [ -e "$oneos_media_opt" ] || [ -L "$oneos_media_opt" ]; then
+    if [ -n "$oneos_media_why" ]; then
+        :
+    elif [ -L "$oneos_media_opt" ]; then
+        oneos_media_why="opt-in marker $oneos_media_opt is a symlink"
+    elif [ ! -d "$oneos_media_opt" ]; then
+        oneos_media_why="opt-in marker $oneos_media_opt is not a directory"
+    elif oneos_media_mode=$("$BB" stat -c '%u:%a' "$oneos_media_opt");
+         [ "$oneos_media_mode" != 0:700 ]; then
+        oneos_media_why="opt-in marker is ${oneos_media_mode:-unreadable} (uid:mode), not root-owned 0700"
+    elif [ "$(pwd -P)" != /data/local/tmp/oneos/rootfs ]; then
+        oneos_media_why="rootfs is $(pwd -P), not /data/local/tmp/oneos/rootfs"
+    elif [ -L ../.oneos_stage ]; then
+        oneos_media_why="stage marker ../.oneos_stage is a symlink"
+    elif [ ! -f ../.oneos_stage ]; then
+        oneos_media_why="stage marker ../.oneos_stage is missing"
+    elif ! "$BB" grep -q '^  "image": "coloros[^" ]*",$' ../.oneos_stage; then
+        # Plain characters only: the id is printed, the marker's text is not.
+        oneos_media_image=$("$BB" sed -n 's/^  "image": "\([^"]*\)",$/\1/p' ../.oneos_stage 2>/dev/null |
+            "$BB" head -n 1 | "$BB" cut -c 1-64 | "$BB" tr -cd 'A-Za-z0-9._-')
+        oneos_media_why="image is not ColorOS (stage marker image '${oneos_media_image:-unreadable or missing}')"
+    else
         oneos_media_ns=$("$BB" readlink /proc/self/ns/mnt)
         oneos_media_host_ns=$("$BB" readlink /proc/1/ns/mnt)
-        if [ -n "$oneos_media_ns" ] && [ -n "$oneos_media_host_ns" ] &&
-           [ "$oneos_media_ns" != "$oneos_media_host_ns" ]; then
+        if [ -z "$oneos_media_ns" ] || [ -z "$oneos_media_host_ns" ]; then
+            oneos_media_why="mount namespace unreadable (self '$oneos_media_ns', pid 1 '$oneos_media_host_ns')"
+        elif [ "$oneos_media_ns" = "$oneos_media_host_ns" ]; then
+            oneos_media_why="not in a private mount namespace (same as pid 1: $oneos_media_ns)"
+        else
             oneos_media_enabled=1
         fi
     fi
+    [ "$oneos_media_enabled" = 1 ] ||
+        echo "[Pivoted Root] Media prototype off: ${oneos_media_why:-unknown reason}"
 fi
 if ! $BB pivot_root . postinstall; then
     echo "[Pivoted Root] Fallback: bind mounting rootfs onto itself..."
@@ -86,6 +114,23 @@ oneos_media_protected() {
         }' /proc/self/mountinfo
 }
 
+# For a skip line: the actual per-mount options (field 6) at $1 and which of
+# the wanted flags they lack. A busybox without nosymfollow support can
+# remount without it and still succeed, so the options are printed as found.
+oneos_media_missing_flags() {
+    "$BB" awk -v p="$1" -v wanted="$oneos_media_flags" '
+        $5 == p { n++; options = $6 }
+        END {
+            if (n == 0) { printf "no mount at %s", p; exit }
+            k = split(wanted, flags, ",")
+            for (i = 1; i <= k; i++)
+                if (!index("," options ",", "," flags[i] ","))
+                    missing = missing (missing == "" ? "" : ",") flags[i]
+            printf "%s%s has options %s, missing %s", (n > 1 ? n " mounts, top " : ""),
+                p, options, (missing == "" ? "none" : missing)
+        }' /proc/self/mountinfo
+}
+
 oneos_media_unmount() {
     oneos_media_absent "$1" && return 0
     "$BB" umount "$1" || return 1
@@ -93,47 +138,101 @@ oneos_media_unmount() {
 }
 
 oneos_media_fatal() {
-    echo "[Pivoted Root] FATAL: media prototype could not detach a mount. Not starting the guest."
+    echo "[Pivoted Root] FATAL: media prototype could not detach a mount ($1). Not starting the guest."
     exit 1
 }
 
 oneos_media_release_temp() {
     [ -n "$oneos_media_tmp" ] || return 0
-    oneos_media_unmount "$oneos_media_tmp/album" || oneos_media_fatal
-    oneos_media_unmount "$oneos_media_tmp/host" || oneos_media_fatal
+    oneos_media_unmount "$oneos_media_tmp/album" || oneos_media_fatal "$oneos_media_tmp/album"
+    oneos_media_unmount "$oneos_media_tmp/host" || oneos_media_fatal "$oneos_media_tmp/host"
     "$BB" rmdir "$oneos_media_tmp/album" "$oneos_media_tmp/host" "$oneos_media_tmp" 2>/dev/null || true
     oneos_media_tmp=
 }
 
 oneos_media_stage() {
-    [ ! -L /data ] && [ ! -L /postinstall/data ] || return 1
-    oneos_media_tmp=$("$BB" mktemp -d /data/oneos_media_hold.XXXXXX) || return 1
-    [ "$("$BB" stat -c '%u:%a' "$oneos_media_tmp")" = 0:700 ] || return 1
-    "$BB" mkdir "$oneos_media_tmp/host" "$oneos_media_tmp/album" || return 1
+    for oneos_media_path in /data /postinstall/data; do
+        [ ! -L "$oneos_media_path" ] ||
+            { oneos_media_why="$oneos_media_path is a symlink"; return 1; }
+    done
+    # A FATAL elsewhere between this stage and oneos_media_release_temp leaves
+    # an empty hold (with empty host and album) in the guest's /data. rmdir
+    # alone clears them: it refuses anything nonempty or still mounted.
+    oneos_media_left=0
+    for oneos_media_old in /data/oneos_media_hold.*; do
+        [ -d "$oneos_media_old" ] && [ ! -L "$oneos_media_old" ] || continue
+        for oneos_media_sub in album host; do
+            if [ -d "$oneos_media_old/$oneos_media_sub" ] && [ ! -L "$oneos_media_old/$oneos_media_sub" ]; then
+                "$BB" rmdir "$oneos_media_old/$oneos_media_sub" 2>/dev/null
+            fi
+        done
+        "$BB" rmdir "$oneos_media_old" 2>/dev/null && oneos_media_left=$((oneos_media_left + 1))
+    done
+    [ "$oneos_media_left" = 0 ] ||
+        echo "[Pivoted Root] Media prototype: removed $oneos_media_left empty hold dir(s) left by an earlier boot"
+    oneos_media_tmp=$("$BB" mktemp -d /data/oneos_media_hold.XXXXXX) ||
+        { oneos_media_why="mktemp -d /data/oneos_media_hold.XXXXXX failed"; return 1; }
+    oneos_media_mode=$("$BB" stat -c '%u:%a' "$oneos_media_tmp")
+    [ "$oneos_media_mode" = 0:700 ] ||
+        { oneos_media_why="hold dir is ${oneos_media_mode:-unreadable} (uid:mode), not root 0700"; return 1; }
+    "$BB" mkdir "$oneos_media_tmp/host" "$oneos_media_tmp/album" ||
+        { oneos_media_why="could not create host and album in the hold dir"; return 1; }
     # Non-recursive: do not copy OneOS's /data/media bridge into the view.
-    "$BB" mount --bind /postinstall/data "$oneos_media_tmp/host" || return 1
-    "$BB" mount -o "remount,bind,$oneos_media_flags" /postinstall/data "$oneos_media_tmp/host" || return 1
-    oneos_media_protected "$oneos_media_tmp/host" || return 1
-    host_media=$("$BB" stat -c '%d:%i' "$oneos_media_tmp/host/media") || return 1
-    guest_media=$("$BB" stat -c '%d:%i' /data/media) || return 1
-    [ "$host_media" != "$guest_media" ] || return 1
+    "$BB" mount --bind /postinstall/data "$oneos_media_tmp/host" ||
+        { oneos_media_why="bind of One UI's /postinstall/data onto the hold failed"; return 1; }
+    if ! oneos_media_err=$("$BB" mount -o "remount,bind,$oneos_media_flags" /postinstall/data "$oneos_media_tmp/host" 2>&1); then
+        oneos_media_err=$(printf '%s\n' "$oneos_media_err" | "$BB" head -n 1 | "$BB" cut -c 1-200)
+        oneos_media_why="remount of the hold with $oneos_media_flags failed: ${oneos_media_err:-no error text}"
+        return 1
+    fi
+    # Still in the log on success, as before the text was captured.
+    [ -z "$oneos_media_err" ] || printf '%s\n' "$oneos_media_err" >&2
+    oneos_media_protected "$oneos_media_tmp/host" ||
+        { oneos_media_why="hold mount lacks wanted flags: $(oneos_media_missing_flags "$oneos_media_tmp/host")"; return 1; }
+    host_media=$("$BB" stat -c '%d:%i' "$oneos_media_tmp/host/media") ||
+        { oneos_media_why="One UI's media is missing in the hold"; return 1; }
+    guest_media=$("$BB" stat -c '%d:%i' /data/media) ||
+        { oneos_media_why="cannot stat the guest's /data/media"; return 1; }
+    [ "$host_media" != "$guest_media" ] ||
+        { oneos_media_why="One UI's media is the guest's /data/media, the source is the bridge (One UI $host_media, guest $guest_media)"; return 1; }
     album="$oneos_media_tmp/host/media/0/$oneos_media_suffix"
     (
         # Pin the directory via cwd. The temporary parent mount refuses to
         # follow symlinks, including at any intermediate source component.
-        cd -P "$album" && [ "$(pwd -P)" = "$album" ] || exit 1
-        source_inode=$("$BB" stat -c '%d:%i' .) || exit 1
-        "$BB" mount --bind /proc/self/cwd "$oneos_media_tmp/album" &&
-            [ "$("$BB" stat -c '%d:%i' "$oneos_media_tmp/album")" = "$source_inode" ]
-    ) || return 1
-    oneos_media_protected "$oneos_media_tmp/album" || return 1
+        # Exit codes only: a subshell cannot set oneos_media_why.
+        cd -P "$album" && [ "$(pwd -P)" = "$album" ] || exit 2
+        source_inode=$("$BB" stat -c '%d:%i' .) || exit 3
+        "$BB" mount --bind /proc/self/cwd "$oneos_media_tmp/album" || exit 4
+        [ "$("$BB" stat -c '%d:%i' "$oneos_media_tmp/album")" = "$source_inode" ] || exit 5
+    )
+    oneos_media_rc=$?
+    case $oneos_media_rc in
+        0) ;;
+        2)
+            # The resolved path is not printed: it can be any user directory.
+            if [ -L "$album" ]; then
+                oneos_media_why="album media/0/$oneos_media_suffix in One UI is a symlink"
+            elif [ ! -e "$album" ]; then
+                oneos_media_why="album media/0/$oneos_media_suffix in One UI is missing or reachable only through a symlink"
+            else
+                oneos_media_why="album media/0/$oneos_media_suffix in One UI resolves elsewhere or is not a directory"
+            fi
+            return 1 ;;
+        3) oneos_media_why="cannot stat One UI's album media/0/$oneos_media_suffix"; return 1 ;;
+        4) oneos_media_why="bind of One UI's album onto the hold failed"; return 1 ;;
+        5) oneos_media_why="held album is not One UI's album directory (inode mismatch)"; return 1 ;;
+        *) oneos_media_why="pinning One UI's album failed (status $oneos_media_rc)"; return 1 ;;
+    esac
+    oneos_media_protected "$oneos_media_tmp/album" ||
+        { oneos_media_why="album mount lacks wanted flags: $(oneos_media_missing_flags "$oneos_media_tmp/album")"; return 1; }
     # After pinning the leaf, no process needs a view of the parent tree.
-    oneos_media_unmount "$oneos_media_tmp/host" || oneos_media_fatal
+    oneos_media_unmount "$oneos_media_tmp/host" || oneos_media_fatal "$oneos_media_tmp/host"
 }
 
 if [ "$oneos_media_enabled" = 1 ] && ! oneos_media_stage; then
+    # Printed before the release so a release FATAL still has the reason above it.
+    echo "[Pivoted Root] Media prototype skipped: source missing or protected mount unavailable: ${oneos_media_why:-unknown reason}"
     oneos_media_release_temp
-    echo "[Pivoted Root] Media prototype skipped: source missing or protected mount unavailable"
 fi
 
 # OneOS: pivot_root left the host's whole old root at /postinstall, including
@@ -198,8 +297,10 @@ $BB mount --bind /data/media/0 /mnt/user/0/emulated 2>/dev/null || true
 
 oneos_media_publish() {
     media_roots='/data/media/0 /storage/emulated/0 /mnt/user/0/emulated'
-    media_inode=$("$BB" stat -c '%d:%i' /data/media/0) || return 1
-    album_inode=$("$BB" stat -c '%d:%i' "$oneos_media_tmp/album") || return 1
+    media_inode=$("$BB" stat -c '%d:%i' /data/media/0) ||
+        { oneos_media_why="cannot stat the guest's /data/media/0"; return 1; }
+    album_inode=$("$BB" stat -c '%d:%i' "$oneos_media_tmp/album") ||
+        { oneos_media_why="cannot stat the held album"; return 1; }
     for media_view in installer androidwritable; do
         alias_root="/mnt/$media_view/0/emulated"
         if [ -e "$alias_root" ] || [ -L "$alias_root" ]; then
@@ -207,28 +308,43 @@ oneos_media_publish() {
         fi
     done
     for media_root in $media_roots; do
-        [ "$(cd -P "$media_root/DCIM" 2>/dev/null && pwd -P)" = "$media_root/DCIM" ] &&
-            [ "$("$BB" stat -c '%d:%i' "$media_root")" = "$media_inode" ] || return 1
+        [ "$(cd -P "$media_root/DCIM" 2>/dev/null && pwd -P)" = "$media_root/DCIM" ] ||
+            { oneos_media_why="alias $media_root: DCIM is missing or resolves elsewhere"; return 1; }
+        media_root_inode=$("$BB" stat -c '%d:%i' "$media_root")
+        [ "$media_root_inode" = "$media_inode" ] ||
+            { oneos_media_why="alias $media_root is ${media_root_inode:-unreadable}, not the guest's /data/media/0 ($media_inode)"; return 1; }
         media_target="$media_root/$oneos_media_suffix"
-        [ ! -L "$media_target" ] && oneos_media_absent "$media_target" || return 1
+        [ ! -L "$media_target" ] ||
+            { oneos_media_why="target $media_target is a symlink"; return 1; }
+        oneos_media_absent "$media_target" ||
+            { oneos_media_why="target $media_target is already a mount"; return 1; }
     done
     # All aliases showed the same underlying guest directory. An existing
     # nonempty album belongs to the guest and must never be covered.
     target="/data/media/0/$oneos_media_suffix"
     if [ -d "$target" ]; then
-        contents=$("$BB" ls -A "$target") || return 1
-        [ -z "$contents" ] || return 1
+        contents=$("$BB" ls -A "$target") ||
+            { oneos_media_why="cannot list the guest's own $target"; return 1; }
+        [ -z "$contents" ] ||
+            { oneos_media_why="the guest's own $target exists and is not empty"; return 1; }
     else
-        "$BB" mkdir -m 0777 "$target" || return 1
+        "$BB" mkdir -m 0777 "$target" ||
+            { oneos_media_why="mkdir $target failed"; return 1; }
     fi
     for media_root in $media_roots; do
         media_target="$media_root/$oneos_media_suffix"
         # A slave view can have received this mount from /mnt/user already.
         if oneos_media_absent "$media_target"; then
-            "$BB" mount --bind "$oneos_media_tmp/album" "$media_target" || break
+            "$BB" mount --bind "$oneos_media_tmp/album" "$media_target" ||
+                { oneos_media_why="bind onto alias $media_target failed"; break; }
         fi
-        if ! oneos_media_protected "$media_target" ||
-           [ "$("$BB" stat -c '%d:%i' "$media_target")" != "$album_inode" ]; then
+        if ! oneos_media_protected "$media_target"; then
+            oneos_media_why="alias lacks wanted flags: $(oneos_media_missing_flags "$media_target")"
+            break
+        fi
+        media_target_inode=$("$BB" stat -c '%d:%i' "$media_target")
+        if [ "$media_target_inode" != "$album_inode" ]; then
+            oneos_media_why="alias $media_target is ${media_target_inode:-unreadable}, not the held album ($album_inode)"
             break
         fi
         media_target=
@@ -237,8 +353,13 @@ oneos_media_publish() {
         # Check all aliases again after propagation from the last bind.
         for media_root in $media_roots; do
             media_target="$media_root/$oneos_media_suffix"
-            if ! oneos_media_protected "$media_target" ||
-               [ "$("$BB" stat -c '%d:%i' "$media_target")" != "$album_inode" ]; then
+            if ! oneos_media_protected "$media_target"; then
+                oneos_media_why="after propagation, alias lacks wanted flags: $(oneos_media_missing_flags "$media_target")"
+                break
+            fi
+            media_target_inode=$("$BB" stat -c '%d:%i' "$media_target")
+            if [ "$media_target_inode" != "$album_inode" ]; then
+                oneos_media_why="after propagation, alias $media_target is ${media_target_inode:-unreadable}, not the held album ($album_inode)"
                 break
             fi
             media_target=
@@ -246,19 +367,25 @@ oneos_media_publish() {
     fi
     if [ -n "$media_target" ]; then
         for media_root in $media_roots; do
-            oneos_media_unmount "$media_root/$oneos_media_suffix" || oneos_media_fatal
+            oneos_media_unmount "$media_root/$oneos_media_suffix" ||
+                oneos_media_fatal "$media_root/$oneos_media_suffix"
         done
         return 1
     fi
+    oneos_media_count=0
+    for media_root in $media_roots; do
+        oneos_media_count=$((oneos_media_count + 1))
+    done
 }
 
 if [ -n "$oneos_media_tmp" ]; then
     if oneos_media_publish; then
         oneos_media_release_temp
-        echo "[Pivoted Root] Media prototype: OneOSShareTest mounted read-only"
+        echo "[Pivoted Root] Media prototype: OneOSShareTest mounted read-only ($oneos_media_count aliases: $media_roots)"
     else
+        # Printed before the release so a release FATAL still has the reason above it.
+        echo "[Pivoted Root] Media prototype skipped: guest storage aliases could not be protected: ${oneos_media_why:-unknown reason}"
         oneos_media_release_temp
-        echo "[Pivoted Root] Media prototype skipped: guest storage aliases could not be protected"
     fi
 fi
 

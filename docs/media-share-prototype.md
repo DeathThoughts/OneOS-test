@@ -16,7 +16,10 @@ before reporting that result.
    guest album. Try editing, renaming, trashing, and deleting the test
    items as an ordinary Gallery user. The originals must stay intact.
 4. Inspect the current guest's takeover log for **Media prototype**. The
-   message says whether the boot mounted the album or skipped it. Check
+   message says whether the boot mounted the album (and onto how many
+   storage aliases) or why sharing was off or skipped: the failed check,
+   with the actual mount options and missing flags where protection was
+   the cause. It never names files inside the album. Check
    exact album mounts in the guest namespace with
    `su -c 'grep OneOSShareTest /proc/self/mountinfo'` when guest root is
    enabled. The per-mount flags before the separator should contain
