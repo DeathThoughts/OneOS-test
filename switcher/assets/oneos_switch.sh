@@ -3783,7 +3783,10 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     lvl=0; first=1; tl=-1; lp=''
     # The level for the guest boost below: no boost while it is over 0.
     [ $HEAT_CAP = 1 ] && echo 0 > $STAGE/heat_cap.level
-    slvl=0; clvl=0; pct=0
+    # cpu_prev: the CPU reading before this one (milli C), not the cap percent pct
+    # below, which the same loop sets (review of de66247 by the mlcraze5 fork,
+    # 2026-11-16).
+    slvl=0; clvl=0; cpu_prev=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -3805,7 +3808,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 tl=\$nt
             fi
         fi
-        pct=\${ct:-0}; ct=''; cz=''
+        cpu_prev=\${ct:-0}; ct=''; cz=''
         [ $HEAT_CAP = 1 ] && cpu_temp
         if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
@@ -3815,7 +3818,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             fi
             if [ -n \"\$ct\" ]; then
                 # Up only as far as this reading and the one before both reach; down on this one.
-                clvl=\$(awk -v s=\$ct -v p=\$pct -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; while (l < 3 && s >= t[l + 1] && p >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; print l }')
+                clvl=\$(awk -v s=\$ct -v p=\$cpu_prev -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; while (l < 3 && s >= t[l + 1] && p >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; print l }')
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
