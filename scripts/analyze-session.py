@@ -1083,6 +1083,8 @@ def section_cpu(session: Session) -> List[str]:
         if line.lstrip().startswith("#") or "|" not in line:
             continue
         left, right = line.split("|", 1)
+        # Desde bceaef29fb128e94 a linha termina com "| forks/s N ctxt/s N": não são processos.
+        right = right.split("|", 1)[0]
         ts = parse_hms(left)
         if ts is None:
             continue

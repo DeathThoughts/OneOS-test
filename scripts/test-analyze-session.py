@@ -53,8 +53,8 @@ ONEOS_GUEST_HIDE_GMS=0
 10:00:10 cpu  99% user 1% system | 90.0 dex2oat64 85.0 installd 80.0 artd 62.0 system_server 50.0 com.android.systemui 40.0 surfaceflinger
 10:02:10 cpu  98% user 2% system | 92.0 dex2oat64 84.0 installd 82.0 artd 60.0 system_server 48.0 com.android.systemui 38.0 surfaceflinger
 10:04:50 cpu  97% user 3% system | 94.0 dex2oat64 86.0 installd 78.0 artd 64.0 system_server 52.0 com.android.systemui 36.0 surfaceflinger
-10:05:10 cpu  70% user 30% system | 70.0 dex2oat64 65.0 installd 60.0 artd 30.0 system_server 20.0 com.android.systemui 15.0 com.android.phone
-10:07:10 cpu  68% user 32% system | 68.0 dex2oat64 63.0 installd 62.0 artd 32.0 system_server 18.0 com.android.systemui 12.0 com.android.phone
+10:05:10 cpu  70% user 30% system | 70.0 dex2oat64 65.0 installd 60.0 artd 30.0 system_server 20.0 com.android.systemui 15.0 com.android.phone | forks/s 123 ctxt/s 45678
+10:07:10 cpu  68% user 32% system | 68.0 dex2oat64 63.0 installd 62.0 artd 32.0 system_server 18.0 com.android.systemui 12.0 com.android.phone | forks/s - ctxt/s -
 """,
     "heat_cap.log": """\
 # 2026-11-15 OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock
@@ -230,6 +230,8 @@ class AnalyzeSessionTest(unittest.TestCase):
         self.assertLessEqual(len(first_entries), 5)
         self.assertLessEqual(len(rest_entries), 5)
         self.assertNotIn("dex2oat64", sec3)
+        # The sampler's "| forks/s N ctxt/s N" tail (bceaef29fb128e94) is not a process.
+        self.assertNotIn("ctxt", sec3)
         self.assertNotIn("installd", sec3)
         self.assertNotIn("artd", sec3)
 

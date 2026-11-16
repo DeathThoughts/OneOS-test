@@ -3640,11 +3640,21 @@ fi
 # $STAGE/cpu_top.log (collected with the stage's logs), the six busiest
 # processes over one second and the CPU totals (HyperOS run 11: 42-44 C skin
 # all session and nothing said which process kept the CPU busy).
+# Each cpu_top.log line ends with the new processes (forks) and context
+# switches per second since the line before, from /proc/stat's processes and
+# ctxt over /proc/uptime (one awk; "-" on the first line). S25 Ultra
+# bceaef29fb128e94 and S23 4d2e95c67f065941: 150-300% sys while nearly idle
+# (05:18:59: user 71%, sys 239%, idle 482%) with the six busiest adding up to
+# little and busybox, sh and top among them. Suspected, not proven:
+# short-lived processes forked by OneOS's own watchers, gone before top sees
+# them; the fork rate says whether that is so. Done in awk: ctxt passes 2^31
+# within a day, beyond mksh's 32-bit arithmetic.
 $BB sh -c "
     echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
     F=$STAGE/diag_series.txt
     T=$STAGE/cpu_top.log
-    echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core)\" > \$T
+    echo \"# \$(date) OneOS session sampler: every 30 s, CPU totals and the six busiest processes over 1 s (%CPU of one core), then forks/s and ctxt/s since the line before (/proc/stat processes, ctxt)\" > \$T
+    pc_prev=''
     echo \"# \$(date) OneOS session sampler, one line every 30 s: time, thermal status, skin C, policyN=scaling_max_freq/cpuinfo_max_freq kHz, mBlurEnabled, disable_window_blurs, battery %,status\" > \$F
     while true; do
         [ -f $STAGE/data/oneos_rec_stop ] && { echo \"# \$(date +%T) the return started: sampler stopped\" >> \$F; exit 0; }
@@ -3667,7 +3677,12 @@ $BB sh -c "
         bs=\$(cat /sys/class/power_supply/battery/status 2>/dev/null | tr ' ' _)
         echo \"\$(date +%T) thermal=\${st:--} skin=\${sk:--}\$c blur=\${bl:--} disable_window_blurs=\${dw:--} battery=\${bc:-?}%,\${bs:-?}\" >> \$F
         TOP=\$(timeout 10 top -b -n 1 -d 1 -m 6 -s 1 -o %CPU,PID,NAME 2>/dev/null)
-        echo \"\$(date +%T) \$(echo \"\$TOP\" | grep -m 1 'cpu ' | tr -s ' ') |\$(echo \"\$TOP\" | awk '\$1 ~ /^[0-9.]+\$/ && \$2 ~ /^[0-9]+\$/ { printf \" %s %s\", \$1, \$3 }')\" >> \$T
+        # pc: \"<uptime> <processes> <ctxt>,<rates>\", the first part kept for the next pass
+        # (a comma, not a pipe: mksh did not strip up to a bare pipe in the test).
+        pc=\$(awk -v p=\"\$pc_prev\" 'FNR == NR { u = \$1; next } \$1 == \"processes\" { f = \$2 } \$1 == \"ctxt\" { c = \$2 } END { n = split(p, a, \" \"); r = \"forks/s - ctxt/s -\"; if (n == 3 && u > a[1] && f != \"\" && c != \"\") r = sprintf(\"forks/s %.0f ctxt/s %.0f\", (f - a[2]) / (u - a[1]), (c - a[3]) / (u - a[1])); if (f == \"\" || c == \"\") printf \",%s\", r; else printf \"%s %.0f %.0f,%s\", u, f, c, r }' /proc/uptime /proc/stat 2>/dev/null)
+        [ -n \"\$pc\" ] || pc=',forks/s - ctxt/s -'
+        pc_prev=\${pc%%,*}
+        echo \"\$(date +%T) \$(echo \"\$TOP\" | grep -m 1 'cpu ' | tr -s ' ') |\$(echo \"\$TOP\" | awk '\$1 ~ /^[0-9.]+\$/ && \$2 ~ /^[0-9]+\$/ { printf \" %s %s\", \$1, \$3 }') | \${pc#*,}\" >> \$T
         s=\$((t0 + 30 - \$(date +%s))); [ \$s -gt 0 ] || s=1
         sleep \$s
     done
