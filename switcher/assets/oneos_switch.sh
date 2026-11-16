@@ -3794,6 +3794,12 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # have gone up but was held back is logged once ("held"), with the two before.
 # The higher of the two levels is applied, with the same table; with no skin
 # reading the CPU level alone. The guest thermal status below stays on skin.
+# Samsung's AP sensor (the whole application processor, mName=AP in the same
+# HAL block) is only logged beside skin and the CPU (", ap 49.6 C"), not used:
+# on the S25 Ultra single zones read 100-106 C for 20-30 s while AP read
+# 48-53 C (sessions bceaef29fb128e94, c2d30e95cde9775b, 2c804690b9171656), and
+# a CPU rule on AP needs more AP readings than the logs have to set its
+# thresholds.
 # ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
 # key): skin only, as before.
 # Guest thermal status (Pixel; owner's go, 2026-11-06). Samsung's thermal HAL
@@ -3907,8 +3913,12 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             exit 0
         fi
         P=\$(pidof system_server | awk '{print \$1}')
-        sk=''
-        [ -n \"\$P\" ] && sk=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null | sed -n '/^Current temperatures from HAL/,/^[^[:space:]]/p' | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=SKIN,.*/\1/p' | head -n 1)
+        th=''
+        [ -n \"\$P\" ] && th=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null | sed -n '/^Current temperatures from HAL/,/^[^[:space:]]/p')
+        sk=\$(echo \"\$th\" | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=SKIN,.*/\1/p' | head -n 1)
+        # ap: for the log only (see above); mName=AP exactly, not APU. ap_c: ', ap 49.6 C' or empty.
+        ap=\$(echo \"\$th\" | sed -n 's/.*mValue=\([-0-9.]*\), mType=[0-9]*, mName=AP,.*/\1/p' | head -n 1)
+        ap_c=\${ap:+, ap \$ap C}
         if [ -n \"\$sk\" ] && [ $GUEST_THERMAL_MAP = 1 ]; then
             [ \"\$P\" = \"\$lp\" ] || tl=-1
             lp=\$P
@@ -3916,7 +3926,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             if [ \"\$nt\" != \"\$tl\" ]; then
                 if [ \"\$nt\" = 4 ]; then a=reset; w=\"the HAL status again\"; else a=\"override-status \$nt\"; w=\$nt; fi
                 r=\$(timeout 10 $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd thermalservice \$a 2>&1 | head -n 2 | tr '\\n' ' ')
-                echo \"\$(date +%T) skin \$sk C: guest thermal status \$w (cmd thermalservice \$a: \${r:-ok})\" >> \$F
+                echo \"\$(date +%T) skin \$sk C\$ap_c: guest thermal status \$w (cmd thermalservice \$a: \${r:-ok})\" >> \$F
                 tl=\$nt
             fi
         fi
@@ -3928,6 +3938,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 slvl=\$(awk -v s=\"\$sk\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47; t[3] = 50; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 2) l--; print l }')
                 new=\$slvl; why=\"skin \$sk C\"
             fi
+            [ -n \"\$ap\" ] && why=\"\${why:+\$why, }ap \$ap C\"
             if [ -n \"\$ct\" ]; then
                 # Up only as far as this reading and the two before all reach; down on this one.
                 # h: where this reading alone would go; above l, it was held back, and the
@@ -3935,7 +3946,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; h = l; while (h < 3 && s >= t[h + 1]) h++; while (l < 3 && s >= t[l + 1] && p >= t[l + 1] && q >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; if (h > l) printf \"%d %d %d.%d, %d.%d\\n\", l, t[h] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
                 clvl=\${cr%% *}
                 case \"\$cr\" in
-                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz) held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
+                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\$ap_c held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
                 esac
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
