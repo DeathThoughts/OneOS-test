@@ -5943,13 +5943,24 @@ cat > "$STAGE/data/local/tmp/app_storage_loop.sh" <<'APPLOOP'
 # Watches for installs/removals, gives the new package its data dirs, and makes
 # the launcher re-query so the app actually shows up.
 last=""
+idle=0
 while true; do
     sleep 10
     case "$(getprop sys.boot_completed)" in 1) ;; *) continue ;; esac
     netout=$(/system/bin/sh /data/local/tmp/net_fix.sh 2>/dev/null)
     [ -n "$netout" ] && echo "$(date) $netout" >> /data/app_storage.log
     cur=$(md5sum /data/system/packages.list 2>/dev/null | cut -d' ' -f1)
-    out=$(/system/bin/sh /data/local/tmp/ensure_app_storage.sh 2>/dev/null)
+    # ensure_app_storage.sh stats every package's dirs (coloros native audit
+    # 2026-11-16, S25 Ultra: ~2,440 stat calls every 10 s with nothing
+    # installed). Install, uninstall and a reinstall with a new uid all rewrite
+    # packages.list, so run it on the first round, when the md5 changes or
+    # cannot be read, and every 30 rounds (5 min) for whatever else moves a dir.
+    idle=$((idle + 1))
+    out=""
+    if [ -z "$last" ] || [ -z "$cur" ] || [ "$cur" != "$last" ] || [ "$idle" -ge 30 ]; then
+        idle=0
+        out=$(/system/bin/sh /data/local/tmp/ensure_app_storage.sh 2>/dev/null)
+    fi
     if [ -n "$last" ] && { [ "$cur" != "$last" ] || [ -n "$out" ]; }; then
         # A package appeared or went away. LauncherApps caches the app list, so
         # something installed from Aurora or Play Store is missing from both the
