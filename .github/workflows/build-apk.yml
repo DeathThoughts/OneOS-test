@@ -189,8 +189,9 @@ jobs:
       - name: Verify signed guest startup patch format
         run: |
           classes=$(mktemp -d)
-          javac -d "$classes" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java" scripts/GuestStartPatchTest.java
+          javac -d "$classes" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/PatchDownload.java" scripts/GuestStartPatchTest.java "scripts/PatchDownloadTest.java"
           java -cp "$classes" GuestStartPatchTest
+          java -cp "$classes" com.fahadali.oneos.patch.PatchDownloadTest
 
       - name: Verify restart Home acknowledgement
         run: |
