@@ -2098,16 +2098,20 @@ protect_zygote_sockets() {
 protect_zygote_sockets </dev/null &
 # The size the guest runs the panel at, for the camera hole (guest_panel_fit.sh
 # above), as soon as the guest's window manager answers: SystemUI, which reads
-# the property, starts some seconds after it. Bar phones and flips with a
-# ColorOS hole property only. The guest is entered through the takeover pid
-# (its mount namespace is the guest's; no process is looked for), each call
-# bounded. It ends two minutes after the first answer, with the return or the
-# takeover process, or after ten minutes without a window manager. The UI
-# activator checks once more, also after a soft reboot of the guest.
+# the property, starts some seconds after it, so until that answer it is asked
+# every half second. After it, every 3 s is enough to follow a change of size
+# (ColorOS native audit 2026-11-16, S25 Ultra, F9: at 0.5 s for the whole two
+# minutes, about 300 calls and 2,500 program starts while the guest booted).
+# Bar phones and flips with a ColorOS hole property only. The guest is entered
+# through the takeover pid (its mount namespace is the guest's; no process is
+# looked for), each call bounded. It ends two minutes after the first answer,
+# with the return or the takeover process, or after ten minutes without a
+# window manager. The UI activator checks once more, also after a soft reboot
+# of the guest.
 fit_guest_panel() {
-    t0=$(date +%s) first="" last=""
+    t0=$(date +%s) first="" last="" nap=0.5
     while :; do
-        sleep 0.5
+        sleep $nap
         [ -s "$STAGE/guest_mntns" ] || return 0
         [ ! -f "$STAGE/data/oneos_rec_stop" ] || return 0
         [ -d "/proc/$TAKEOVER_PID" ] || return 0
@@ -2119,7 +2123,7 @@ fit_guest_panel() {
         fi
         s=$(timeout 10 $BB nsenter -t "$TAKEOVER_PID" -m /system/bin/sh /data/oneos_genv.sh /system/bin/wm size -d 0 2>/dev/null | sed -n 's/^Physical size: \([0-9]*\)x\([0-9]*\)$/\1 \2/p' | head -n 1)
         [ -n "$s" ] || continue
-        [ -n "$first" ] || first=$now
+        [ -n "$first" ] || first=$now nap=3
         [ "$s" != "$last" ] || continue
         last=$s
         /system/bin/sh "$STAGE/guest_panel_fit.sh" $s
