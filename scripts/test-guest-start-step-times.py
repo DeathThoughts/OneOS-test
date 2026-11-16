@@ -7,10 +7,11 @@ zygote (S25 Ultra session bceaef29fb128e94: 05:16:48 -> 05:17:09) could not be
 split into steps. The time lines are additions only: each has the one fixed
 form, they come in script order before the zygote is launched, the launch line
 stays the last one before the exec, no reader of takeover.log (analyze-session.py,
-oneos_switch.sh's greps) matches them, and against git HEAD no other line of
-the script changed.
+oneos_switch.sh's greps) matches them, none sits in a generated script or a
+continued command, and the script's other [Pivoted Root] lines are all still
+there. No git history is read: the clones are shallow and the test has to hold
+on later commits.
 """
-import difflib
 import importlib.util
 import re
 import shutil
@@ -101,26 +102,35 @@ class StepTimes(unittest.TestCase):
             for word in ('SurfaceFlinger PID:', 'HW overlays', 'GPU composition', 'Launching guest Zygote'):
                 self.assertNotIn(word, line)
 
-    def test_only_additions_against_head(self):
-        try:
-            head = subprocess.run(['git', '-C', str(ROOT), 'show', 'HEAD:switcher/assets/guest_start.sh'],
-                                  capture_output=True, text=True, check=True).stdout
-        except (OSError, subprocess.CalledProcessError) as e:
-            self.skipTest(f'no git HEAD: {e}')
-        old = head.split('\n')
-        # Lines are only added: time lines, and the comment that introduces them.
-        ops = difflib.SequenceMatcher(None, old, LINES, autojunk=False).get_opcodes()
-        for tag, i1, i2, j1, j2 in ops:
-            if tag == 'equal':
-                continue
-            self.assertEqual('insert', tag, f'HEAD {old[i1:i2]} became {LINES[j1:j2]}')
-            for line in LINES[j1:j2]:
-                self.assertTrue(SRC_RE.match(line) or line.startswith('# '), line)
-        def code(text):
-            return [l for l in text if '[Pivoted Root]' in l and not l.lstrip().startswith('#')]
-        old_pr = code(old)
-        new_pr = [l for l in code(LINES) if not SRC_RE.match(l)]
-        self.assertEqual(old_pr, new_pr)
+    def test_other_lines_kept(self):
+        # No git history here (shallow clones, later commits): the script's other
+        # [Pivoted Root] lines are counted instead. 122 source lines carried the
+        # prefix outside comments before F15 (ad37e9d); fewer means a time line
+        # took the place of one, or a step line was dropped with it.
+        other = [l for l in LINES if '[Pivoted Root]' in l
+                 and not l.lstrip().startswith('#') and not SRC_RE.match(l)]
+        self.assertGreaterEqual(len(other), 122)
+        # Each time line is a statement of its own next to the step it names.
+        found = dict((SRC_RE.match(l).group(1), i) for i, l in time_lines())
+        self.assertEqual('echo "[Pivoted Root] Preparing pivot..."', LINES[found['start'] + 1])
+        self.assertEqual(LAUNCH, LINES[found['zygote'] + 1])
+        for i, line in time_lines():
+            prev = LINES[i - 1].rstrip()
+            self.assertFalse(prev.endswith(('\\', '|', '&&', '||')), f'guest_start.sh:{i + 1} continues {prev!r}')
+
+    def test_not_in_a_generated_script(self):
+        # The heredocs (oneos_genv.sh, oneos_sf_kick.sh, the bring restore
+        # script...) are other scripts; a time line there would print from them.
+        bodies = []
+        for i, line in enumerate(LINES):
+            m = re.search(r"<<-?\s*'?\"?([A-Za-z_]+)'?\"?", line)
+            if m and not line.lstrip().startswith('#'):
+                end = next(j for j in range(i + 1, len(LINES)) if LINES[j].strip() == m.group(1))
+                bodies.append((i, end))
+        self.assertGreaterEqual(len(bodies), 4)
+        for i, _ in time_lines():
+            for a, b in bodies:
+                self.assertFalse(a < i < b, f'guest_start.sh:{i + 1} is inside the heredoc of line {a + 1}')
 
 
 if __name__ == '__main__':
