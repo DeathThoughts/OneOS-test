@@ -4454,6 +4454,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # by this watcher from \$! instead, a round that ended first
                     # would leave a stale pid that a reused pid keeps alive.
                     ( read -r dpid _ < /proc/self/stat && echo \$dpid > $STAGE/diag.pid
+                    # With the end line below, a round's length can be read from
+                    # the log (ColorOS native audit 2026-11-16, S25 Ultra session
+                    # bceaef29fb128e94: the 20 s round ran 45 s and pushed the 40 s
+                    # round out, which only the skip line showed).
+                    echo \"\$(date) display diagnostics \$dname started\" >> $STAGE/auto_return.log
                     mkdir -p \$D
                     # Who has the vold names now: One UI's vold keeps vold and
                     # android.system.vold.IVold/default, the guest's is gvld (run 44).
@@ -4511,8 +4516,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # Galaxy S24 family kernel panics in free_pipe_info (10 reports, 0.4.84-0.5.01, ColorOS IN,
                     # OriginOS and Pixel 9 Pro XL): the exiting thread is almost always named libtimer.so (else
                     # \"POSIX timer N\"), and no log tells whose it is. Record each such thread's process.
+                    # The name is read by the shell itself: a cat per thread of the whole
+                    # system was thousands of forks a round (audit 2026-11-16, S25 Ultra
+                    # bceaef29fb128e94). IFS= keeps the name whole, spaces included.
                     for tk in /proc/[0-9]*/task/[0-9]*; do
-                        c=\$(cat \$tk/comm 2>/dev/null)
+                        IFS= read -r c 2>/dev/null < \$tk/comm || continue
                         case \"\$c\" in
                             libtimer*|'POSIX timer'*)
                                 p=\${tk#/proc/}; p=\${p%%/*}
@@ -4522,29 +4530,52 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     # Did user 0 unlock, did the launcher get a window, and if not,
                     # where are the launcher and SystemUI main threads stuck?
                     if [ \$dname != 20 ]; then
+                        # debuggerd stops every thread of SystemUI and the launcher while it
+                        # dumps them (1.77 MB and 1.42 MB of native stacks), the fd scan
+                        # reads every process's fds and getevent holds the touchscreen 15 s:
+                        # in S25 Ultra sessions bceaef29fb128e94 and 4d2e95c67f065941
+                        # (ColorOS native audit 2026-11-16) the rounds froze the UI while it
+                        # booted, with Full session logs off, and touch_events.txt was empty.
+                        # They run when Full session logs are on, or when the home screen
+                        # has not come yet: then something is stuck and the stacks are the
+                        # point. SurfaceFlinger's own dump below keeps its condition (it
+                        # never registered, a stuck case already).
+                        heavy=1
+                        if [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$home = 1 ]; then
+                            heavy=0
+                            echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off and the home screen was up' > \$D/heavy_skipped.txt
+                        fi
+                        # Every thread's name, state and wait channel, from the kernel, read
+                        # by the shell itself (a cat, sed, cut and cat per thread before,
+                        # audit 2026-11-16). The state is the first field after the last
+                        # \") \" of stat: the name in parentheses may hold \") \" too.
+                        thread_list() {
+                            for tk in /proc/\$1/task/*; do
+                                IFS= read -r tc 2>/dev/null < \$tk/comm || continue
+                                ts=''; read -r ts 2>/dev/null < \$tk/stat; ts=\${ts##*') '}
+                                # wchan ends without a newline: read sets tw and fails.
+                                tw=''; IFS= read -r tw 2>/dev/null < \$tk/wchan
+                                echo \"\$tc \${ts%% *} \$tw\"
+                            done
+                        }
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/am get-started-user-state 0 > \$D/user0.txt 2>&1
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows > \$D/windows.txt 2>&1
                         for app in com.android.launcher com.android.systemui; do
                             ap=\$(pidof \$app | awk '{print \$1}')
                             [ -n \"\$ap\" ] || continue
-                            timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd -j \$ap > \$D/stack_\$app.txt 2>&1
+                            [ \$heavy = 1 ] && timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd -j \$ap > \$D/stack_\$app.txt 2>&1
                             timeout 5 cat /dev/binderfs/binder_logs/proc/\$ap > \$D/binder_\$app.txt 2>&1
-                            # From the kernel, in case ART's stack dump hangs too:
-                            # every thread's name, state and wait channel.
-                            for tk in /proc/\$ap/task/*; do
-                                echo \"\$(cat \$tk/comm) \$(sed 's/.*) //' \$tk/stat | cut -d' ' -f1) \$(cat \$tk/wchan)\"
-                            done > \$D/threads_\$app.txt 2>&1
+                            # From the kernel, in case ART's stack dump hangs too.
+                            thread_list \$ap > \$D/threads_\$app.txt 2>&1
                             cat /proc/\$ap/task/\$ap/stack >> \$D/threads_\$app.txt 2>&1
-                            timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd \$ap > \$D/native_\$app.txt 2>&1
+                            [ \$heavy = 1 ] && timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd \$ap > \$D/native_\$app.txt 2>&1
                         done
                         cp -r $STAGE/data/anr \$D/anr 2>/dev/null
                         # A guest SurfaceFlinger that never registered (A34 OxygenOS 16, 0.4.67
                         # deb8690c: stuck once its RenderEngine started, the framework then waited in
                         # SurfaceSession until its watchdog): its threads and native stacks.
                         if grep -q 'find service: SurfaceFlinger' \$D/surfaceflinger.txt 2>/dev/null; then
-                            for tk in /proc/\$SFP/task/*; do
-                                echo \"\$(cat \$tk/comm) \$(sed 's/.*) //' \$tk/stat | cut -d' ' -f1) \$(cat \$tk/wchan)\"
-                            done > \$D/threads_surfaceflinger.txt 2>&1
+                            thread_list \$SFP > \$D/threads_surfaceflinger.txt 2>&1
                             timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd \$SFP > \$D/native_surfaceflinger.txt 2>&1
                         fi
                         # Touch: where events go (guest input dispatcher state, focus),
@@ -4595,6 +4626,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             [ \"\$(cat \$e/device/name 2>/dev/null)\" = sec_touchscreen ] || continue
                             dev=/dev/input/\${e##*/}
                             echo \"\$dev enabled=\$(cat \$e/device/enabled 2>/dev/null)\" > \$D/touch_holders.txt
+                            [ \$heavy = 1 ] || continue
                             ls -l /proc/[0-9]*/fd/* 2>/dev/null | grep \" \$dev\$\" >> \$D/touch_holders.txt
                             timeout 15 getevent -lt \$dev > \$D/touch_events.txt 2>&1
                         done
