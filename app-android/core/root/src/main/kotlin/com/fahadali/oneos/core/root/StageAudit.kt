@@ -418,6 +418,9 @@ object StageAudit {
         "kill",
         // Build 156: oneui-media off removes its two empty marker folders, never with rm.
         "rmdir",
+        // The album picker: oneui-media writes its list of unticked albums with mktemp beside it, and
+        // prints each album's path in base64 (both checked below).
+        "mktemp", "base64",
     )
 
     private val WRITES = setOf("mkdir", "mv", "cp", "rm", "chown", "chmod", "rmdir")
@@ -534,6 +537,41 @@ object StageAudit {
     )
     private val ONEUI_MEDIA_SOURCE = Regex("""\$\{?(OMEDIA|OMEDIA_OLD)(?![A-Za-z0-9_])""")
 
+    /**
+     * The album picker (do_oneui_media too, the owner's choice of albums after Galaxy S25 Ultra
+     * session 92032e7ae892154c), a second documented write outside the stage: `$OMEDIA_X` is exactly
+     * `$OLD_PARENT/oneos-oneui-media-excluded`, the list of unticked albums guest_start.sh reads, and
+     * `$OMEDIA_XNEW` exactly the file `mktemp "$OMEDIA_X.XXXXXX"` makes beside it under umask 077
+     * (the script's only mktemp). The only writes that name them: the one redirection into
+     * `$OMEDIA_XNEW`, `rm -f "$OMEDIA_XNEW"` when that fails, `mv -f "$OMEDIA_XNEW" "$OMEDIA_X"`
+     * and `rm "$OMEDIA_X"` (nothing unticked).
+     */
+    private val ONEUI_X_VARS = setOf("OMEDIA_X", "OMEDIA_XNEW")
+    private const val OMEDIA_X_VALUE = "\"\$OLD_PARENT/oneos-oneui-media-excluded\""
+    private const val OMEDIA_XNEW_VALUE = "\$(umask 077; mktemp \"\$OMEDIA_X.XXXXXX\")"
+    private val ONEUI_X_MKTEMP = listOf("\"\$OMEDIA_X.XXXXXX\"")
+    private val ONEUI_X_WRITES = setOf(
+        "rm" to listOf("-f", "\"\$OMEDIA_XNEW\""),
+        "mv" to listOf("-f", "\"\$OMEDIA_XNEW\"", "\"\$OMEDIA_X\""),
+        "rm" to listOf("\"\$OMEDIA_X\""),
+    )
+    private val ONEUI_X_SOURCE = Regex("""\$\{?(OMEDIA_X|OMEDIA_XNEW)(?![A-Za-z0-9_])""")
+
+    /**
+     * The album picker's one read of One UI's user data, never a write: `$OMEDIA_ROOT` is exactly
+     * `$DATA/media/0`, set only in oneui_media_list, and only that function's tests (`[`), its one
+     * find (the album rule: names only, Android/, hidden and control-character names pruned) and the
+     * awk that takes the prefix off take it.
+     */
+    private const val ONEUI_LIST_FUNCTION = "oneui_media_list"
+    private const val OMEDIA_ROOT_VALUE = "\"\$DATA/media/0\""
+    private val OMEDIA_ROOT_SOURCE = Regex("""\$\{?OMEDIA_ROOT(?![A-Za-z0-9_])""")
+    private val ONEUI_FIND = listOf(
+        "\"\$OMEDIA_ROOT\"", "-mindepth", "1", "\\(", "-iname", ".nomedia", "-print", "-prune", "\\)", "-o",
+        "\\(", "\\(", "-iname", "android", "!", "-path", "\"\$OMEDIA_ROOT/*/*\"", "\\)", "-o", "-name", "'.*'",
+        "-o", "-name", "'*[[:cntrl:]]*'", "-o", "-name", "\"*\$onl*\"", "\\)", "-prune", "-o", "-type", "f", "-print",
+    )
+
     private const val PURGE_FUNCTION = "purge_one"
     private val PURGE_VARS = setOf("OLDDIR", "TRASH")
     private const val PURGE_RM = "rm -rf \"\$TRASH\""
@@ -580,6 +618,7 @@ object StageAudit {
         val v = Regex("""^\$\{?([A-Za-z_][A-Za-z0-9_]*|1)""").find(a)?.groupValues?.get(1) ?: return false
         if (v in PURGE_VARS) return function == PURGE_FUNCTION
         if (v in ONEUI_MEDIA_VARS) return function == ONEUI_MEDIA_FUNCTION
+        if (v in ONEUI_X_VARS) return function == ONEUI_MEDIA_FUNCTION
         if (v in RESTORE_VARS) return function == RESTORE_FUNCTION
         if (v in REMOVE_VARS) return function == REMOVE_FUNCTION
         if (v in MIGRATE_VARS) return function == MIGRATE_FUNCTION
@@ -638,6 +677,9 @@ object StageAudit {
                 "BFROM" -> p += "line ${a.line}: BFROM=${a.value} (only the loops set it)"
                 "OMEDIA" -> if (a.value != OMEDIA_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA=${a.value}"
                 "OMEDIA_OLD" -> if (a.value != OMEDIA_OLD_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_OLD=${a.value}"
+                "OMEDIA_X" -> if (a.value != OMEDIA_X_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_X=${a.value}"
+                "OMEDIA_XNEW" -> if (a.value != OMEDIA_XNEW_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_XNEW=${a.value}"
+                "OMEDIA_ROOT" -> if (a.value != OMEDIA_ROOT_VALUE || a.function != ONEUI_LIST_FUNCTION) p += "line ${a.line}: OMEDIA_ROOT=${a.value}"
                 "ref" -> if (a.value != BRING_REF_VALUE) p += "line ${a.line}: ref=${a.value}"
                 "OLD_PARENT" -> if (a.value != "\"\$DATA/local/tmp\"") p += "line ${a.line}: OLD_PARENT=${a.value}"
                 "OLDDIR" -> if (a.value != "\"\$OLD_PARENT/\$1\"" || a.function != PURGE_FUNCTION) p += "line ${a.line}: OLDDIR=${a.value}"
@@ -682,7 +724,9 @@ object StageAudit {
                 "sleep" -> if (args != listOf("1") || c.function != LAUNCH_WAIT_FUNCTION) p += "line ${c.line}: sleep ${args.joinToString(" ")}"
                 "exec" -> if (args.firstOrNull()?.endsWith("/system/bin/sh") != true && args.firstOrNull() != "@SH@") p += "line ${c.line}: exec ${args.firstOrNull()}"
                 "sed" -> if (args.any { it == "-i" || it.startsWith("-i") }) p += "line ${c.line}: sed -i"
-                "find" -> if (args != BRING_FIND) p += "line ${c.line}: find ${args.joinToString(" ")}"
+                "find" -> if (args != BRING_FIND && !(args == ONEUI_FIND && c.function == ONEUI_LIST_FUNCTION)) p += "line ${c.line}: find ${args.joinToString(" ")}"
+                "mktemp" -> if (args != ONEUI_X_MKTEMP) p += "line ${c.line}: mktemp ${args.joinToString(" ")}"
+                "base64" -> if (args.isNotEmpty()) p += "line ${c.line}: base64 ${args.joinToString(" ")}"
             }
             if (c.function == MIGRATE_FUNCTION && (n in WRITES || n in WRITE_HELPERS || n == "to_attic") &&
                 !(n == "mv" && args in MIGRATE_MOVES)
@@ -698,6 +742,14 @@ object StageAudit {
             if ((n in WRITES || n in WRITE_HELPERS || n == "to_attic") && args.any { ONEUI_MEDIA_SOURCE.containsMatchIn(it) } &&
                 !(c.function == ONEUI_MEDIA_FUNCTION && (n to args) in ONEUI_MEDIA_WRITES)
             ) p += "line ${c.line}: $n ${args.joinToString(" ")} writes a One UI photos marker (only its mkdir, chown -h and rmdirs may)"
+            // The list of unticked albums: only its own rm -f, mv -f and rm.
+            if ((n in WRITES || n in WRITE_HELPERS || n == "to_attic") && args.any { ONEUI_X_SOURCE.containsMatchIn(it) } &&
+                !(c.function == ONEUI_MEDIA_FUNCTION && (n to args) in ONEUI_X_WRITES)
+            ) p += "line ${c.line}: $n ${args.joinToString(" ")} writes the list of unticked albums (only its rm -f, mv -f and rm may)"
+            // One UI's media/0: read by the album rule's tests, find and awk, by nothing else.
+            if (args.any { OMEDIA_ROOT_SOURCE.containsMatchIn(it) } && !(c.function == ONEUI_LIST_FUNCTION && n in setOf("[", "find", "awk"))) {
+                p += "line ${c.line}: $n ${args.joinToString(" ")} takes One UI's media/0 (only $ONEUI_LIST_FUNCTION's tests, find and awk may)"
+            }
             if (n in WRITES) {
                 val paths = when (n) {
                     // Options first (chown -h): the owner or mode is the first word after them.
@@ -721,6 +773,15 @@ object StageAudit {
             // The marker folders stay empty: nothing is ever written into them.
             if (ONEUI_MEDIA_SOURCE.containsMatchIn(r.target)) {
                 p += "line ${r.line}: writes to ${r.target}, a One UI photos marker"
+                continue
+            }
+            if (OMEDIA_ROOT_SOURCE.containsMatchIn(r.target)) {
+                p += "line ${r.line}: writes to ${r.target}, One UI's media/0"
+                continue
+            }
+            // Only the new list, in do_oneui_media, before it is renamed in.
+            if (ONEUI_X_SOURCE.containsMatchIn(r.target)) {
+                if (r.target != "\"\$OMEDIA_XNEW\"" || r.function != ONEUI_MEDIA_FUNCTION) p += "line ${r.line}: writes to ${r.target}"
                 continue
             }
             val t = r.target

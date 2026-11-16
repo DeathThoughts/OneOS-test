@@ -236,6 +236,51 @@ class StageAuditTest {
         bad("chown -h 0:0 /data/system", "do_begin")
     }
 
+    /**
+     * The album picker (Galaxy S25 Ultra session 92032e7ae892154c): the list of unticked albums is
+     * written only by its own mktemp, redirection, rm -f, mv -f and rm in do_oneui_media, and One UI's
+     * media/0 is read only by oneui_media_list's tests, find and awk.
+     */
+    @Test
+    fun oneUiMediaAlbumListWritesOnlyItsFileAndOnlyReadsMedia() {
+        val f = "do_oneui_media"
+        val list = "oneui_media_list"
+        assertTrue(script.contains("$f() {") && script.contains("$list() {"))
+        val base = StageAudit.audit(script).toSet()
+        fun added(line: String, inFunction: String?): List<String> {
+            val text = if (inFunction != null) script.replace("\n$inFunction() {\n", "\n$inFunction() { $line\n") else "$script\n$line\n"
+            assertTrue("no $inFunction() in the script", text != script)
+            return StageAudit.audit(text).filter { it !in base }
+        }
+        fun bad(line: String, inFunction: String? = f) {
+            assertTrue("not caught: $line in ${inFunction ?: "main"}", added(line, inFunction).isNotEmpty())
+        }
+        for (fine in listOf("rm \"\$OMEDIA_X\"", "rm -f \"\$OMEDIA_XNEW\"", "mv -f \"\$OMEDIA_XNEW\" \"\$OMEDIA_X\"", "printf x > \"\$OMEDIA_XNEW\"")) {
+            assertEquals(fine, emptyList<String>(), added(fine, f))
+        }
+        assertEquals(emptyList<String>(), added("[ -d \"\$OMEDIA_ROOT\" ]", list))
+        bad("rm -f \"\$OMEDIA_X\"")
+        bad("mv -f \"\$OMEDIA_X\" \"\$OMEDIA_XNEW\"")
+        bad("cp \"\$OMEDIA_XNEW\" \"\$OMEDIA_X\"")
+        bad("chmod 0644 \"\$OMEDIA_X\"")
+        bad("printf x > \"\$OMEDIA_X\"")
+        bad("printf x >> \"\$OMEDIA_X.y\"")
+        bad("rm \"\$OMEDIA_X\"", "do_begin")
+        bad("printf x > \"\$OMEDIA_XNEW\"", "do_begin")
+        bad("OMEDIA_X=/data/system/x")
+        bad("OMEDIA_XNEW=/data/system/x")
+        bad("mktemp /data/system/x.XXXXXX")
+        bad("base64 -d")
+        bad("OMEDIA_ROOT=\"\$DATA/media/0\"", f)
+        bad("OMEDIA_ROOT=\"\$DATA/system\"", list)
+        bad("cat \"\$OMEDIA_ROOT/x\"", list)
+        bad("cp -a \"\$OMEDIA_ROOT\" \"\$STAGE/x\"", list)
+        bad("printf x > \"\$OMEDIA_ROOT/x\"", list)
+        bad("find \"\$OMEDIA_ROOT\" -type f", list)
+        bad("find \"\$OMEDIA_ROOT\" -delete", list)
+        bad("[ -d \"\$OMEDIA_ROOT\" ]", f)
+    }
+
     @Test
     fun auditChecksTheVerbs() {
         assertTrue(StageAudit.audit(script.replace("    recover) do_recover \"\$@\" ;;\n", "")).any { it.startsWith("verbs are") })

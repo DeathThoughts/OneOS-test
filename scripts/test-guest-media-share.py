@@ -36,6 +36,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 START = (ROOT / "switcher/assets/guest_start.sh").read_text()
+ROOT_SCRIPT = (ROOT / "app-android/app/src/full/assets/root/oneos_root.sh").read_text()
 FLAGS = "ro,nosuid,nodev,noexec,noatime,nosymfollow"
 SHELL = shlex.split(os.environ.get("MEDIA_TEST_SH", "sh"))
 DATA_ROOT = "/local/tmp/oneos/data"
@@ -1044,6 +1045,16 @@ class GuestMediaShareOrder(unittest.TestCase):
         self.assertTrue(calls and all(late < i < launch for i in calls), calls)
         self.assertNotIn("oneos-media-share-test\n", START)
         self.assertNotIn("/data/local/tmp/oneos-media-share-test", START)
+
+    def test_album_rule_matches_the_root_scripts(self):
+        # The app's picker (oneos_root.sh) and the guest must call the same directories albums.
+        guest = re.findall(r'^oneos_media_ext="([^"]*)"$', START, re.M)
+        app = re.findall(r'^OMEDIA_EXT="([^"]*)"$', ROOT_SCRIPT, re.M)
+        self.assertEqual(1, len(guest))
+        self.assertEqual(guest, app)
+        self.assertEqual("jpg jpeg png gif webp heic heif avif bmp dng mp4 m4v 3gp 3g2 mkv webm mov avi ts", guest[0])
+        self.assertIn('oneos_media_xname=local/tmp/oneos-oneui-media-excluded', START)
+        self.assertIn('"$OLD_PARENT/oneos-oneui-media-excluded"', ROOT_SCRIPT)
 
 
 if __name__ == "__main__":

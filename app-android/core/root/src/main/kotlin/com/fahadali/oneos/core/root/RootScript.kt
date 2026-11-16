@@ -168,7 +168,10 @@ object RootScript {
          * `/data/local/tmp/oneos-oneui-media` (root's, 0700) that guest_start.sh reads at every guest
          * boot, `off` removes it and the prototype's `oneos-media-share-test` with rmdir only, `status`
          * reads both. It may install the script first like guest-runtime, so the toggle works right
-         * after an app update without preparing again.
+         * after an app update without preparing again. `albums` lists One UI's albums by the rule
+         * guest_start.sh shares them by (read only); `exclude <id>...` replaces the list of unticked
+         * albums, `/data/local/tmp/oneos-oneui-media-excluded`, and prints the albums again (the
+         * owner's choice of albums, Galaxy S25 Ultra session 92032e7ae892154c).
          */
         ONEUI_MEDIA("oneui-media", Stdin.SCRIPT),
     }
@@ -195,6 +198,9 @@ object RootScript {
 
     /** Every name `receive` may get: the image, the scripts and the files of the built-in sets. */
     val RECEIVE_NAMES: Set<String> = (listOf(RAW_NAME) + SCRIPTS + PackageSets.ALL.flatMap { it.names }).toSet()
+
+    /** At most this many album ids in one `oneui-media exclude` (about 70 kB of command line). */
+    const val ONEUI_MEDIA_MAX_EXCLUDED = 4096
 
     private val TOKEN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     private val ID = Regex("^[a-z0-9][a-z0-9-]{0,31}$")
@@ -296,9 +302,18 @@ object RootScript {
                 }
                 else -> p += "tool-app: mode '${args.getOrNull(0)?.take(20)}'"
             }
-            Verb.ONEUI_MEDIA -> {
-                need(1)
-                args.getOrNull(0)?.let { if (it !in setOf("on", "off", "status")) p += "oneui-media: mode '${it.take(20)}'" }
+            Verb.ONEUI_MEDIA -> when (val mode = args.getOrNull(0)) {
+                "on", "off", "status", "albums" -> need(1)
+                // The unticked albums, by the ids `albums` printed: any number, none included (nothing unticked).
+                "exclude" -> {
+                    val ids = args.drop(1)
+                    if (ids.size > ONEUI_MEDIA_MAX_EXCLUDED) p += "oneui-media exclude takes at most $ONEUI_MEDIA_MAX_EXCLUDED albums, got ${ids.size}"
+                    ids.filterNot(HEX16::matches).take(3).forEach { p += "oneui-media exclude: '${it.take(20)}' is not an album id" }
+                }
+                else -> {
+                    need(1)
+                    if (mode != null) p += "oneui-media: mode '${mode.take(20)}'"
+                }
             }
             Verb.PURGE -> {
                 need(1)
