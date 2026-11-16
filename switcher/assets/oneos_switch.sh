@@ -47,14 +47,52 @@ root_only() {
 # here: the panic comes when its pipe is freed, so killing it would be the crash. The
 # app starts the tool again at boot (aee4e2df on 0.5.04: refused after two restarts), so
 # the message asks for the app to be uninstalled.
-for ex in /proc/[0-9]*/exe; do
-    t=$(readlink "$ex" 2>/dev/null) || continue
+#
+# Found with one ls and one awk, not a readlink fork per process: S25 Ultra
+# session c2d30e95cde9775b spent 9 s of its 15 s preflight here
+# ("oneos_switch.sh start 05:52:13", "process scan done 05:52:22") on ~1500
+# processes, as guest_runtime.sh's baseline did (c9e13b9). ls -l prints
+# "... $1/PID/exe -> TARGET" for each (kernel threads and vanished pids only
+# complain on stderr); the awk regex is the case pattern below
+# (/data/app/*/lib/*/libtimer.so, * across slashes too), and the first match
+# in /proc order is printed as "PID TARGET", as the old loop refused at the
+# first. A target with spaces stays whole after the first " -> ". $1 is the
+# proc root (tests pass a fixture). It prints "none" when it saw link lines and
+# no match, and nothing when ls gave no " -> " line for any pid (an ls that
+# followed the links or printed them another way): then the old readlink loop
+# below decides, slowly, so a refusal that keeps an S24's kernel alive never
+# goes missing because of the scan's shape.
+libtimer_exe() {
+    ls -l "$1"/[0-9]*/exe 2>/dev/null | awk -v root="$1/" '
+        { i = index($0, " -> "); if (i == 0) next
+          t = substr($0, i + 4); l = substr($0, 1, i - 1)
+          j = index(l, root); if (j == 0) next
+          p = substr(l, j + length(root)); sub(/\/exe$/, "", p)
+          if (p !~ /^[0-9]+$/) next
+          c++
+          if (t !~ /^\/data\/app\/.*\/lib\/.*\/libtimer\.so$/) next
+          if (!n++) m = p " " t }
+        END { if (n) print m; else if (c) print "none" }' || :
+}
+lt=$(libtimer_exe /proc)
+if [ -z "$lt" ]; then
+    echo "preflight: process scan fell back to readlink (ls gave no link targets)"
+    for ex in /proc/[0-9]*/exe; do
+        t=$(readlink "$ex" 2>/dev/null) || continue
+        case "$t" in
+            /data/app/*/lib/*/libtimer.so)
+                a=${t#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
+                refuse "the app $a runs a kernel tool (libtimer.so, pid $(echo "$ex" | cut -d/ -f3)) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
+        esac
+    done
+elif [ "$lt" != none ]; then
+    t=${lt#* }
     case "$t" in
         /data/app/*/lib/*/libtimer.so)
             a=${t#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
-            refuse "the app $a runs a kernel tool (libtimer.so, pid $(echo "$ex" | cut -d/ -f3)) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
+            refuse "the app $a runs a kernel tool (libtimer.so, pid ${lt%% *}) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
     esac
-done
+fi
 echo "preflight: process scan done $(date +%T)"
 
 # Root tools: the root manager's own busybox and resetprop (KernelSU, APatch,
