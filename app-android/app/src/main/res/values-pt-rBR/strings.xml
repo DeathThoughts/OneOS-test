@@ -8,7 +8,7 @@
     <string name="home_check_summary">Modelo, chip, One UI, telas, root e espaço livre, e se o OneOS pode rodar aqui</string>
     <string name="home_tests_title">Rodar testes</string>
     <string name="home_tests_summary">Testes somente leitura como root para a equipe do OneOS. Nada no celular muda.</string>
-    <string name="home_send_title">Enviar os resultados à equipe do OneOS</string>
+    <string name="home_send_title">Relatar resultados no GitHub</string>
     <string name="home_send_summary">Depois de Rodar testes, compartilhe o zip de resultados com a equipe para ela ver se o OneOS pode rodar neste celular.</string>
     <string name="home_cat_app">OneOS</string>
     <string name="home_about_summary">O que esta versão faz, segurança e créditos</string>
@@ -59,7 +59,7 @@
     <string name="findings_share_chooser">Enviar os resultados à equipe do OneOS</string>
     <string name="findings_share_subject">Resultados do OneOS</string>
     <string name="findings_cat_bundle">Resultados</string>
-    <string name="findings_send_title">Enviar os resultados à equipe do OneOS</string>
+    <string name="findings_send_title">Relatar resultados no GitHub</string>
     <string name="findings_send_summary">Compartilhar envia o zip abaixo. Os dados pessoais foram removidos; toque em qualquer arquivo para ver exatamente o que tem nele.</string>
     <string name="findings_cat_summary">Resumo</string>
     <string name="findings_cat_privacy">Dados pessoais removidos</string>
@@ -77,7 +77,7 @@
     <string name="logs_share_subject">Logs da sessão do OneOS</string>
     <string name="logs_share_chooser">Enviar os logs da sessão à equipe do OneOS</string>
     <string name="logs_cat_bundle">Logs da sessão</string>
-    <string name="logs_send_title">Enviar os logs à equipe do OneOS</string>
+    <string name="logs_send_title">Relatar logs no GitHub</string>
     <string name="logs_send_summary">Compartilhar envia o zip abaixo. Os dados pessoais foram removidos enquanto os logs eram lidos; toque em qualquer arquivo para ver exatamente o que tem nele.</string>
     <string name="logs_delete_title">Apagar estes logs deste celular</string>
     <string name="logs_delete_summary">Remove o zip e a pasta dele do armazenamento do OneOS. As cópias do próprio celular na pasta stage continuam.</string>
@@ -88,11 +88,11 @@
     <string name="about_what_summary">Roda outro sistema Android, montado no servidor do OneOS a partir de uma atualização do fabricante, ao lado da One UI num Samsung topo de linha com root, e volta para a One UI, normalmente sem reiniciar. Nada é flasheado.</string>
     <string name="about_version_scope_title">Esta versão</string>
     <string name="about_tested_title">Testado</string>
-    <string name="about_tested_summary">Testado no Z Fold (F8U), S26 Ultra, S25 Ultra e S25. Outros celulares não foram testados.</string>
+    <string name="about_tested_summary">Os patches deste fork foram testados apenas no Galaxy S23 base e no Galaxy S25 Ultra. Podem falhar em outros Galaxy S e A e em outros celulares. Prossiga com cuidado.</string>
     <string name="about_safety_title">Segurança</string>
     <string name="about_cat_credits">Créditos</string>
-    <string name="about_credit_oneos_title">OneOS</string>
-    <string name="about_credit_oneos_summary">O app, os patches do framework e o build no servidor. Os scripts de sessão começaram do projeto creditado abaixo.</string>
+    <string name="about_credit_oneos_title">OneOS original por Fahad Ali Javed</string>
+    <string name="about_credit_oneos_summary">Este fork independente usa como base o app OneOS, os patches de framework e os scripts de sessão de Fahad Ali Javed. Os colaboradores originais e as licenças estão creditados abaixo.</string>
     <string name="about_credit_onelineage_title">OneLineage</string>
     <string name="about_credit_fold8_title">Suporte ao Galaxy Z Fold8</string>
     <string name="about_credit_fold8_summary">Josh Skinner (thatjoshguy67): os sets do Fold8 e a dobradiça, com apps meio dobrados e as animações de dobra na ColorOS e no Pixel no Fold8 e no Fold8 Ultra.</string>
@@ -106,7 +106,7 @@
     <string name="about_cat_legal">Jurídico</string>
     <string name="about_legal_title">Sem afiliação</string>
     <string name="about_legal_summary">Sem afiliação com Samsung, OPPO, Google, Project Infinity-X ou LineageOS. Galaxy, One UI, ColorOS, Pixel e Android são marcas dos seus respectivos donos.</string>
-    <string name="send_title">Enviar à equipe do OneOS</string>
+    <string name="send_title">Relatar no GitHub</string>
     <string name="send_unavailable">O envio não está disponível neste build. Use Compartilhar.</string>
     <string name="send_cat_session">Relatório da sessão</string>
     <string name="send_cat_probe">Relatório do celular</string>
@@ -143,7 +143,7 @@
     <string name="usage_count_summary">Uma vez por dia, um ID aleatório, o modelo do celular, a versão do OneOS e os sistemas que você configurou, para contarmos os celulares ativos. Nenhuma conta, número, localização ou arquivo.</string>
     <string name="send_privacy_title">O que a equipe vê</string>
     <string name="send_privacy_summary">O mesmo arquivo que Compartilhar envia, já sem os dados pessoais, e as suas respostas. Os relatórios ficam guardados por 30 dias. A tabela pública de compatibilidade conta só as respostas: nunca sua observação, nome ou detalhes do celular.</string>
-    <string name="send_button">Enviar à equipe do OneOS</string>
+    <string name="send_button">Abrir issue no GitHub</string>
     <string name="send_button_summary">Usa dados móveis ou Wi-Fi</string>
     <string name="send_preparing">Preparando…</string>
     <string name="send_progress">Enviando… %1$d%% de %2$s</string>
@@ -160,7 +160,7 @@
     <string name="send_share_instead">Compartilhar em vez disso</string>
     <string name="send_share_instead_summary">Envie o arquivo você mesmo, por exemplo no grupo do Telegram</string>
     <string name="findings_send_team">Enviar à equipe do OneOS</string>
-    <string name="last_send_summary">Como foi e os logs, direto para a equipe</string>
+    <string name="last_send_summary">Prepare um relato e anexe todos os logs com dados pessoais removidos às issues deste fork</string>
     <string name="last_send_sent">Enviado, código do relatório %1$s. Toque para enviar de novo.</string>
     <string name="send_cat_telegram">Telegram</string>
     <string name="send_tg_sign_in">Entrar com o Telegram</string>
@@ -174,4 +174,16 @@
     <string name="send_tg_join_title">Entre no grupo do OneOS</string>
     <string name="send_tg_join_summary">Os relatórios são para membros do grupo do OneOS. Entre e depois envie de novo.</string>
     <string name="send_tg_no_app">Nenhum app conseguiu abrir o link</string>
+    <string name="github_report_destination">DeathThoughts/OneOS-test · Issues do GitHub</string>
+    <string name="github_report_instructions">1. Confira os logs.\n2. Salve o ZIP completo.\n3. Abra a issue, descreva o problema e anexe o ZIP.\n4. Revise e envie pelo GitHub.</string>
+    <string name="github_report_privacy">As issues do GitHub são públicas. O coletor remove dados pessoais, mas confira o conteúdo antes de compartilhar. Logs completos incluem tudo o que foi coletado. Logs desativados ou não capturados não podem ser recuperados.</string>
+    <string name="github_report_preview">Conferir os logs com dados pessoais removidos</string>
+    <string name="github_report_save">Salvar o ZIP completo dos logs</string>
+    <string name="github_report_save_summary">Escolha Downloads para poder anexar o ZIP no navegador.</string>
+    <string name="github_report_copy">Copiar os detalhes do relato</string>
+    <string name="github_report_copy_summary">Copia os detalhes do celular, o resultado da sessão e o resumo coletado com quebras de linha.</string>
+    <string name="github_report_open">Abrir issue no GitHub</string>
+    <string name="github_report_open_summary">Copia o relato detalhado e abre um rascunho curto. Cole os detalhes, anexe o ZIP salvo e envie quando estiver pronto. É necessária uma conta no GitHub.</string>
+    <string name="github_report_copied">Detalhes copiados. Cole na issue e anexe o ZIP salvo dos logs.</string>
+    <string name="github_report_prepare_failed">Não foi possível preparar o relato. Abra a prévia dos logs para salvar ou compartilhar o ZIP.</string>
 </resources>

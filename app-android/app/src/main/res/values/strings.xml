@@ -16,7 +16,7 @@
     <string name="home_check_summary">Model, chip, One UI, displays, root and free space, and whether OneOS can run here</string>
     <string name="home_tests_title">Run tests</string>
     <string name="home_tests_summary">Read-only tests as root for the OneOS team. Nothing on the phone changes.</string>
-    <string name="home_send_title">Send the findings to the OneOS team</string>
+    <string name="home_send_title">Report findings on GitHub</string>
     <string name="home_send_summary">After Run tests, share the findings zip with the team so they can check whether OneOS can run on this phone.</string>
     <string name="home_cat_app">OneOS</string>
     <string name="home_about_summary">What this version does, safety and credits</string>
@@ -73,7 +73,7 @@
     <string name="findings_share_chooser">Send the findings to the OneOS team</string>
     <string name="findings_share_subject">OneOS findings</string>
     <string name="findings_cat_bundle">Findings</string>
-    <string name="findings_send_title">Send the findings to the OneOS team</string>
+    <string name="findings_send_title">Report findings on GitHub</string>
     <string name="findings_send_summary">Share sends the zip below. Personal data was removed; tap any file to see exactly what is in it.</string>
     <string name="findings_cat_summary">Summary</string>
     <string name="findings_cat_privacy">Personal data removed</string>
@@ -93,7 +93,7 @@
     <string name="logs_share_subject">OneOS session logs</string>
     <string name="logs_share_chooser">Send the session logs to the OneOS team</string>
     <string name="logs_cat_bundle">Session logs</string>
-    <string name="logs_send_title">Send the logs to the OneOS team</string>
+    <string name="logs_send_title">Report logs on GitHub</string>
     <string name="logs_send_summary">Share sends the zip below. Personal data was removed as the logs were read; tap any file to see exactly what is in it.</string>
     <string name="logs_delete_title">Delete these logs from this phone</string>
     <string name="logs_delete_summary">Removes the zip and its folder from OneOS\'s storage. The phone\'s own copies in the stage folder stay.</string>
@@ -106,11 +106,11 @@
     <string name="about_what_summary">Runs another Android OS, built on the OneOS server from an OEM update, next to One UI on a rooted Samsung flagship, and goes back to One UI, usually without a restart. Nothing is flashed.</string>
     <string name="about_version_scope_title">This version</string>
     <string name="about_tested_title">Tested</string>
-    <string name="about_tested_summary">Tested on the Z Fold (F8U), S26 Ultra, S25 Ultra and S25. Other phones are untested.</string>
+    <string name="about_tested_summary">This fork’s patches have been tested only on the base Galaxy S23 and Galaxy S25 Ultra. Other Galaxy S and A models and other phones may fail. Proceed with caution.</string>
     <string name="about_safety_title">Safety</string>
     <string name="about_cat_credits">Credits</string>
-    <string name="about_credit_oneos_title">OneOS</string>
-    <string name="about_credit_oneos_summary">The app, the framework patches and the server build. The session scripts started from the project credited below.</string>
+    <string name="about_credit_oneos_title">Original OneOS by Fahad Ali Javed</string>
+    <string name="about_credit_oneos_summary">This independent fork builds on Fahad Ali Javed’s OneOS app, framework patches and session scripts. Original contributors and licenses are credited below.</string>
     <string name="about_credit_onelineage_title">OneLineage</string>
     <string name="about_credit_onelineage_url" translatable="false">https://github.com/WeWaffles/OneLineage</string>
     <string name="about_credit_fold8_title">Galaxy Z Fold8 support</string>
@@ -130,7 +130,7 @@
     <string name="about_legal_summary">Not affiliated with Samsung, OPPO, Google, Project Infinity-X or LineageOS. Galaxy, One UI, ColorOS, Pixel and Android are trademarks of their owners.</string>
 
     <!-- Send to the OneOS team (0.4.29): SendReportActivity. -->
-    <string name="send_title">Send to the OneOS team</string>
+    <string name="send_title">Report on GitHub</string>
     <string name="send_unavailable">Sending isn\'t available in this build. Use Share instead.</string>
     <string name="send_cat_session">Session report</string>
     <string name="send_cat_probe">Phone report</string>
@@ -167,7 +167,7 @@
     <string name="usage_count_summary">Once a day, a random ID, your phone model, OneOS version and the systems you set up, so we can count active phones. No account, number, location or files.</string>
     <string name="send_privacy_title">What the team sees</string>
     <string name="send_privacy_summary">The same file Share sends, with personal data already removed, and your answers. Reports are kept for 30 days. The public compatibility table counts only the answers: never your note, name or phone details.</string>
-    <string name="send_button">Send to the OneOS team</string>
+    <string name="send_button">Open GitHub issue</string>
     <string name="send_button_summary">Uses mobile data or Wi-Fi</string>
     <string name="send_preparing">Preparing…</string>
     <string name="send_progress">Sending… %1$d%% of %2$s</string>
@@ -184,7 +184,7 @@
     <string name="send_share_instead">Share instead</string>
     <string name="send_share_instead_summary">Send the file yourself, for example in the Telegram group</string>
     <string name="findings_send_team">Send to the OneOS team</string>
-    <string name="last_send_summary">How it went and the logs, straight to the team</string>
+    <string name="last_send_summary">Prepare a report and attach the full redacted logs to this fork’s issues</string>
     <string name="last_send_sent">Sent, report code %1$s. Tap to send again.</string>
     <!-- 0.5.16 (owner): reports only from group members -->
     <string name="send_cat_telegram">Telegram</string>
@@ -199,4 +199,16 @@
     <string name="send_tg_join_title">Join the OneOS group</string>
     <string name="send_tg_join_summary">Reports are for members of the OneOS group. Join, then send again.</string>
     <string name="send_tg_no_app">No app could open the link</string>
+    <string name="github_report_destination">DeathThoughts/OneOS-test · GitHub issues</string>
+    <string name="github_report_instructions">1. Preview the logs.\n2. Save the complete ZIP.\n3. Open the issue, describe the problem and attach the ZIP.\n4. Review and submit on GitHub.</string>
+    <string name="github_report_privacy">GitHub issues are public. Personal values are removed by the log collector, but review the contents before sharing. Full logs means everything that was collected. Logs that were disabled or not captured cannot be recovered.</string>
+    <string name="github_report_preview">Preview the redacted logs</string>
+    <string name="github_report_save">Save the complete log ZIP</string>
+    <string name="github_report_save_summary">Choose Downloads so you can attach this ZIP in the browser.</string>
+    <string name="github_report_copy">Copy report details</string>
+    <string name="github_report_copy_summary">Copy the device details, session outcome and collected summary with line breaks.</string>
+    <string name="github_report_open">Open GitHub issue</string>
+    <string name="github_report_open_summary">Copies the detailed report and opens a short draft. Paste the details, attach the saved ZIP and submit when ready. A GitHub account is required.</string>
+    <string name="github_report_copied">Report details copied. Paste into the issue and attach the saved log ZIP.</string>
+    <string name="github_report_prepare_failed">Could not prepare the report. Use the log preview to save or share the ZIP.</string>
 </resources>

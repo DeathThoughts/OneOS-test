@@ -2,7 +2,7 @@
 <resources>
     <string name="guest_updates_title">Atualizações do app no sistema</string>
     <string name="guest_updates_installed">Versão instalada · %1$s</string>
-    <string name="guest_updates_scope">Atualiza o app OneOS neste sistema. Os módulos também são aplicados ao reiniciar. Scripts da sessão e correções da imagem precisam ser preparados pela One UI.</string>
+    <string name="guest_updates_scope">Atualiza o app OneOS neste sistema. Os módulos também são aplicados ao reiniciar.</string>
     <string name="guest_updates_bootstrap">Atualize a sessão primeiro</string>
     <string name="guest_updates_bootstrap_detail">Instale o APK mais recente do OneOS na One UI e abra este sistema uma vez para ativar as atualizações agendadas.</string>
     <string name="guest_updates_checking">Verificando…</string>
@@ -20,4 +20,9 @@
     <string name="guest_updates_open">Verificar atualizações do app</string>
     <string name="guest_updates_entry">Baixe aqui e instale ao reiniciar este sistema.</string>
     <string name="guest_updates_root">Ative o root no OneOS antes de iniciar este sistema para instalar atualizações aqui.</string>
+    <string name="guest_patch_title">Correções assinadas do sistema</string>
+    <string name="guest_patch_check">Procurar correção</string>
+    <string name="guest_patch_failed">Não foi possível baixar uma correção compatível. Tente novamente mais tarde.</string>
+    <string name="guest_patch_stage">Preparar correção verificada</string>
+    <string name="guest_patch_staged">A correção está pronta. Reinicie o sistema convidado para testá-la.</string>
 </resources>

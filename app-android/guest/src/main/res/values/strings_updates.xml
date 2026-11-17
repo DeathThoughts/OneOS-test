@@ -2,7 +2,7 @@
 <resources>
     <string name="guest_updates_title">Guest app updates</string>
     <string name="guest_updates_installed">Installed · %1$s</string>
-    <string name="guest_updates_scope">Updates the OneOS app inside this guest. Guest modules also apply on restart. Session scripts and system image patches require preparation from One UI.</string>
+    <string name="guest_updates_scope">Updates the OneOS app inside this guest. Guest modules also apply on restart.</string>
     <string name="guest_updates_bootstrap">Update the session first</string>
     <string name="guest_updates_bootstrap_detail">Install the latest OneOS APK in One UI and start this guest once to enable queued updates.</string>
     <string name="guest_updates_checking">Checking…</string>
@@ -20,4 +20,9 @@
     <string name="guest_updates_open">Check guest app updates</string>
     <string name="guest_updates_entry">Download here and install on the next guest restart.</string>
     <string name="guest_updates_root">Enable guest root in OneOS before starting this guest to install updates here.</string>
+    <string name="guest_patch_title">Signed system patches</string>
+    <string name="guest_patch_check">Check for a patch</string>
+    <string name="guest_patch_failed">No compatible patch could be downloaded. Try again later.</string>
+    <string name="guest_patch_stage">Queue verified patch</string>
+    <string name="guest_patch_staged">The patch is queued. Restart the guest to try it.</string>
 </resources>

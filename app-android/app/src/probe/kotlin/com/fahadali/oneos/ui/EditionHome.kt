@@ -20,9 +20,6 @@ internal object EditionHome {
 
     fun createFragment(): Fragment = HomeFragment()
 
-    /** The probe edition sends no usage count. */
-    fun started(a: MainActivity) = Unit
-
     fun created(a: MainActivity) = Unit
 
     fun createMenu(a: MainActivity, menu: Menu): Boolean = false
