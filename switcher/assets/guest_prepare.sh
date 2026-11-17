@@ -7284,7 +7284,9 @@ GUEST_DEV=$(cat $S/guest_rootdev 2>/dev/null)
 HOST_DEV=$(stat -L -c %d /proc/1/root/ 2>/dev/null)
 [ "$GUEST_DEV" = "$HOST_DEV" ] && GUEST_DEV=""
 [ -n "$GUEST_NS" ] && [ "$GUEST_NS" != "$HOST_NS" ] || { echo "soft reboot: no guest namespace recorded"; exit 1; }
-[ -f $S/data/guest_start.sh ] && [ -f $S/data/zygote_exec ] || { echo "soft reboot: guest_start.sh or zygote_exec missing"; exit 1; }
+base_script="$S/guest_start.sh"
+[ -f "$base_script" ] && [ ! -L "$base_script" ] && [ "$(stat -c '%u:%g' "$base_script")" = 0:0 ] &&
+    [ -f "$S/data/zygote_exec" ] || { echo "soft reboot: guest_start.sh or zygote_exec missing"; exit 1; }
 if [ -f "$S/boot_status.sh" ]; then
     . "$S/boot_status.sh"
     oneos_boot_begin restart
@@ -7373,7 +7375,7 @@ setprop service.bootanim.exit 0
 command -v oneos_boot_event >/dev/null 2>&1 && oneos_boot_event 'Starting guest services'
 echo "$(date +%T) soft reboot: starting the guest again"
 echo "=== OneOS soft reboot $(date '+%F %T') ($1) ===" >> $S/data/takeover.log
-$BB unshare -m $BB sh $S/data/guest_start.sh </dev/null >>$S/data/takeover.log 2>&1 &
+$BB unshare -m $BB sh "$base_script" </dev/null >>$S/data/takeover.log 2>&1 &
 TP=$!
 sleep 0.5
 NEW_NS=$(readlink /proc/$TP/ns/mnt 2>/dev/null)

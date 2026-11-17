@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory() as directory:
         (8, "mnt:[12]", "com.example.launcher/.Home", False),
         (8, "mnt:[45]", "com.example.launcher/.HomeOther", False),
         (8, "mnt:[45]", "com.example.launcher/.Home", True),
+        (8, "mnt:[45]", "com.example.launcher/com.example.launcher.Home", True),
     ):
         subprocess.run(
             ["sh", "-c", mock + script + "\nGEN=$1; TEST_NS=$2; TEST_COMPONENT=$3; PID=123\nrecord_restart_home || :",
@@ -42,3 +43,4 @@ with tempfile.TemporaryDirectory() as directory:
         assert record.exists() == expected, (generation, namespace, component)
         if expected:
             assert record.read_text() == "8 mnt:[45]\n"
+            record.unlink()

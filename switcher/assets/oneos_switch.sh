@@ -2268,16 +2268,34 @@ BB=\"$BB\"
 record_restart_home() {
     case \"\$GEN\" in ''|0|*[!0-9]*) return ;; esac
     ns=\$(cat $STAGE/guest_mntns 2>/dev/null)
-    [ -n \"\$ns\" ] && [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ] || return
+    server_ns=\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)
+    if [ -z \"\$ns\" ] || [ \"\$ns\" != \"\$server_ns\" ]; then
+        echo \"[UI Activator] Restart Home generation \$GEN: guest and system_server mount namespaces differ (\${ns:-missing} vs \${server_ns:-missing})\"
+        return
+    fi
     home_component=\$(timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd package resolve-activity --user 0 --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
-    case \"\$home_component\" in *.*/*) ;; *) return ;; esac
+    case \"\$home_component\" in
+        *.*/*) ;;
+        *) echo \"[UI Activator] Restart Home generation \$GEN: no resolved Home component\"; return ;;
+    esac
     i=0
     while [ \$i -lt 6 ]; do
         [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
             [ \"\$ns\" = \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" ] &&
             [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ] || return
         if timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys activity activities 2>/dev/null |
-            awk -v component=\"\$home_component\" '/topResumedActivity=|mResumedActivity:/ { for (i = 1; i <= NF; i++) if (\$i == component && \$(i - 1) == \"u0\") found = 1 } END { exit !found }' &&
+            awk -v component=\"\$home_component\" '
+                function expand(value, parts) {
+                    split(value, parts, \"/\")
+                    if (parts[2] ~ /^[.]/) return parts[1] \"/\" parts[1] parts[2]
+                    return value
+                }
+                /topResumedActivity[=:]|mResumedActivity[=:]/ {
+                    for (i = 2; i <= NF; i++)
+                        if (\$(i - 1) == \"u0\" && expand(\$i) == expand(component)) found = 1
+                }
+                END { exit !found }
+            ' &&
             [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
             [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ]; then
             record=\$(mktemp $STAGE/tmp/restart-home.XXXXXX) || return
@@ -2286,12 +2304,14 @@ record_restart_home() {
                 echo \"[UI Activator] Home resumed for restart generation \$GEN\"
             else
                 rm -f \"\$record\"
+                echo \"[UI Activator] Restart Home generation \$GEN: could not save acknowledgement\"
             fi
             return
         fi
         i=\$((i + 1))
         sleep 2
     done
+    echo \"[UI Activator] Restart Home generation \$GEN: resumed Home not observed for \$home_component\"
 }
 GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=1; BRPID=''; SYSUI=''
 while true; do
