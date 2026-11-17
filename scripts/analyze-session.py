@@ -65,6 +65,11 @@ SKIN_RE = re.compile(r"\bskin=(-?\d+(?:[.,]\d+)?)")
 HMS_RE = re.compile(r"^#?\s*(\d{1,2}):(\d{2}):(\d{2})\b")
 
 EXCLUDED_PROC_RE = re.compile(r"^(?:dex2oat|installd|artd)", re.I)
+CPU_USER_RE = re.compile(r"(\d+(?:[.,]\d+)?)%\s*us(?:er|r)?\b", re.I)
+CPU_SYS_RE = re.compile(r"(\d+(?:[.,]\d+)?)%\s*sys(?:tem)?\b", re.I)
+CPU_IDLE_RE = re.compile(r"(\d+(?:[.,]\d+)?)%\s*id(?:le)?\b", re.I)
+FORKS_RATE_RE = re.compile(r"\bforks/s\s+(\d+(?:[.,]\d+)?)\b", re.I)
+CTXT_RATE_RE = re.compile(r"\bctxt/s\s+(\d+(?:[.,]\d+)?)\b", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +114,22 @@ def pct_str(value: int, top: int) -> str:
     if abs(pct - round(pct)) < 0.05:
         return f"{int(round(pct))}%"
     return f"{pct:.1f}%"
+
+
+def fmt_num(value: float) -> str:
+    if abs(value - round(value)) < 0.05:
+        return str(int(round(value)))
+    return f"{value:.1f}"
+
+
+def median_value(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
 def shorten(text: str, limit: int = 180) -> str:
@@ -1068,6 +1089,26 @@ def parse_throttle(session: Session, paths: Sequence[Path]) -> dict:
 # 3. top processos por CPU
 # ---------------------------------------------------------------------------
 
+def _parse_float_match(pattern: re.Pattern[str], text: str) -> Optional[float]:
+    m = pattern.search(text)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _stat_peak_str(
+    series: Sequence[Tuple[float, str, int]],
+    unit: str = "",
+) -> str:
+    values = [v for v, _, _ in series]
+    med = fmt_num(median_value(values))
+    peak_val, peak_ts, _ = max(series, key=lambda item: (item[0], -item[2]))
+    return f"mediana {med}{unit}, máx {fmt_num(peak_val)}{unit} em {peak_ts}"
+
+
 def section_cpu(session: Session) -> List[str]:
     lines = ["== 3. Top processos por CPU =="]
     path = session.pick("cpu_top.log")
@@ -1076,15 +1117,27 @@ def section_cpu(session: Session) -> List[str]:
         return lines
 
     samples = []
+    user_samples: List[Tuple[float, str, int]] = []
+    sys_samples: List[Tuple[float, str, int]] = []
+    idle_samples: List[Tuple[float, str, int]] = []
+    forks_samples: List[Tuple[float, str, int]] = []
+    ctxt_samples: List[Tuple[float, str, int]] = []
+    has_rate_tail = False
     day = 0
     last_abs: Optional[int] = None
     excluded = 0
     for line in read_text_lines(path):
         if line.lstrip().startswith("#") or "|" not in line:
             continue
-        left, right = line.split("|", 1)
-        # Desde bceaef29fb128e94 a linha termina com "| forks/s N ctxt/s N": não são processos.
-        right = right.split("|", 1)[0]
+        parts = line.split("|", 2)
+        left = parts[0]
+        # Desde d58d388 (sessões bceaef29fb128e94 no S25 Ultra e 4d2e95c67f065941
+        # no S23, onde o sys ficava em 150–300% com o aparelho quase ocioso e os
+        # 6 processos do top somavam pouco), cada linha termina com
+        # "| forks/s N ctxt/s N": fica fora da lista de processos e é resumido
+        # abaixo junto com os totais de CPU do cabeçalho do top.
+        right = parts[1]
+        tail = parts[2] if len(parts) > 2 else ""
         ts = parse_hms(left)
         if ts is None:
             continue
@@ -1092,7 +1145,27 @@ def section_cpu(session: Session) -> List[str]:
             day += 1
         abs_t = ts + day * 86400
         last_abs = abs_t
-        samples.append((abs_t, hms(ts), right))
+        ts_str = hms(ts)
+        samples.append((abs_t, ts_str, right))
+
+        u_val = _parse_float_match(CPU_USER_RE, left)
+        if u_val is not None:
+            user_samples.append((u_val, ts_str, abs_t))
+        s_val = _parse_float_match(CPU_SYS_RE, left)
+        if s_val is not None:
+            sys_samples.append((s_val, ts_str, abs_t))
+        i_val = _parse_float_match(CPU_IDLE_RE, left)
+        if i_val is not None:
+            idle_samples.append((i_val, ts_str, abs_t))
+
+        if tail and ("forks/s" in tail.lower() or "ctxt/s" in tail.lower()):
+            has_rate_tail = True
+            f_val = _parse_float_match(FORKS_RATE_RE, tail)
+            if f_val is not None:
+                forks_samples.append((f_val, ts_str, abs_t))
+            c_val = _parse_float_match(CTXT_RATE_RE, tail)
+            if c_val is not None:
+                ctxt_samples.append((c_val, ts_str, abs_t))
 
     if not samples:
         lines.append(f"cpu_top.log ({session.rel(path)}): sem linhas de amostra reconhecidas")
@@ -1123,6 +1196,32 @@ def section_cpu(session: Session) -> List[str]:
         f"cpu_top.log ({len(samples)} amostras; {first_samples} nos primeiros 5 min, "
         f"{rest_samples} no resto; %CPU de um núcleo):"
     )
+    if user_samples or sys_samples or idle_samples:
+        cpu_bits = []
+        if user_samples:
+            cpu_bits.append("user " + _stat_peak_str(user_samples, "%"))
+        if sys_samples:
+            high_sys = sum(1 for v, _, _ in sys_samples if v >= 150.0)
+            extra_sys = f" ({high_sys}x >=150%)" if high_sys else ""
+            cpu_bits.append("sys " + _stat_peak_str(sys_samples, "%") + extra_sys)
+        if idle_samples:
+            idle_med = fmt_num(median_value([v for v, _, _ in idle_samples]))
+            cpu_bits.append(f"idle mediana {idle_med}%")
+        lines.append("  totais de CPU: " + "; ".join(cpu_bits))
+
+    if forks_samples or ctxt_samples:
+        rate_count = max(len(forks_samples), len(ctxt_samples))
+        rate_bits = []
+        if forks_samples:
+            rate_bits.append("forks/s " + _stat_peak_str(forks_samples))
+        if ctxt_samples:
+            rate_bits.append("ctxt/s " + _stat_peak_str(ctxt_samples))
+        lines.append(
+            f"  forks/ctxt (/proc/stat, {rate_count} amostra(s)): "
+            + "; ".join(rate_bits)
+        )
+    elif has_rate_tail:
+        lines.append("  forks/ctxt (/proc/stat): sem leitura numérica (apenas '-')")
 
     def top_lines(window: str, title: str) -> None:
         entries = sorted(
@@ -1732,8 +1831,7 @@ def main(argv: Sequence[str]) -> int:
         except (tarfile.TarError, OSError, EOFError, ValueError) as exc:
             print(f"erro: não foi possível ler o tgz {tgz}: {exc}", file=sys.stderr)
             return 2
-        session = Session(Path(tmp))
-        if not session.files:
+        session = Session(Path(tmp))\n        if not session.files:
             print(f"erro: sessão vazia: nenhum arquivo extraído de {tgz}", file=sys.stderr)
             return 2
         logs = scan_logcat(session)
