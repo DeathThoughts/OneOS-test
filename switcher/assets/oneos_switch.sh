@@ -4778,14 +4778,23 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # in S25 Ultra sessions bceaef29fb128e94 and 4d2e95c67f065941
                         # (ColorOS native audit 2026-11-16) the rounds froze the UI while it
                         # booted, with Full session logs off, and touch_events.txt was empty.
-                        # They run when Full session logs are on, or when the home screen
-                        # has not come yet: then something is stuck and the stacks are the
-                        # point. SurfaceFlinger's own dump below keeps its condition (it
+                        # They run when Full session logs are on. With them off, only the
+                        # 90 s round takes them, and only if the home screen still has not
+                        # come: then something is stuck and the stacks are the point. At 40 s
+                        # a normal boot has no home screen yet (S25 Ultra sessions
+                        # db19aee410bd79ff and 75e538ac0ed725df, Full logs off: it came about
+                        # 86 s after the zygote launch), so that round dumped SystemUI (1.74 MB)
+                        # and the launcher (1.37 MB) and held the touchscreen 15 s, 03:15:53 to
+                        # 03:16:36, while ColorOS brought up its home screen and the owner
+                        # unlocked. SurfaceFlinger's own dump below keeps its condition (it
                         # never registered, a stuck case already).
                         heavy=1
                         if [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$home = 1 ]; then
                             heavy=0
                             echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off and the home screen was up' > \$D/heavy_skipped.txt
+                        elif [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$dname = 40 ]; then
+                            heavy=0
+                            echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off; a normal boot has no home screen yet at 40 s, the 90 s round takes them if it still has none' > \$D/heavy_skipped.txt
                         fi
                         # Every thread's name, state and wait channel, from the kernel, read
                         # by the shell itself (a cat, sed, cut and cat per thread before,
