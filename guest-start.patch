@@ -1,12 +1,12 @@
 ONEOS-GUEST-START-PATCH-1
 debug
-162
+163
 coloros17-findx9u-in-1105
 6c089f2d043d60f34b40dd58ad44f88621163163c1664121753311a115da8d7c
 c17aa38f894a4bfda61bc4aeb46f2a47558f6ee253ef5f63f56f28cfc7f06b1e
 1
 227443 cf621c50af1381f379cc0c0908450efe81c72d5df3cd17a1a9cf45f9b2cb49f6
-M¤/Ìç,eÔKßL"‚²ÖÂa$¹ÊÒ«ª K^©n54ff-aGˆäpõ…®¶9üÁälº‡ÕÉ=ct#!/system/bin/sh
+^·Dİ·Ow³ö6T$Ò|ÀpxŸB­#fÜÀE2Q†¡Ô›ÂÃ©ªîŞ.–—”<ªXş°üó1®Ş%Ø(a§õ#!/system/bin/sh
 echo '[OneOS patch] signed restart smoke test'
 # The root manager's own busybox (as oneos_switch.sh checked), never a
 # search of /data; after the pivot the guest's copy in its /data.
