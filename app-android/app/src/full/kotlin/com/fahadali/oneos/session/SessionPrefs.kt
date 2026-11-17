@@ -238,6 +238,9 @@ object SessionPrefs {
     fun autoGuestPatches(ctx: Context): Boolean = p(ctx).getBoolean("auto_guest_patches", false)
     fun setAutoGuestPatches(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("auto_guest_patches", enabled).apply() }
 
+    fun guestVulkan(ctx: Context): Boolean = p(ctx).getBoolean("guest_vulkan", false)
+    fun setGuestVulkan(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("guest_vulkan", enabled).apply() }
+
     /** Anonymous usage count (Settings / Advanced): on by default; off never sends the daily check-in. Kept by [UsageCheckIn]. */
     fun usageCount(ctx: Context): Boolean = UsageCheckIn.enabled(ctx)
     fun setUsageCount(ctx: Context, enabled: Boolean) = UsageCheckIn.setEnabled(ctx, enabled)

@@ -1732,8 +1732,16 @@ class StageScriptTest {
             refused(fr.run(RootScript.Verb.LAUNCH, *(launch + patchAuto).toTypedArray()),
                 "test root: every launch check passed")
         }
+        for (guestVulkan in listOf("0", "1")) {
+            refused(fr.run(RootScript.Verb.LAUNCH, *(launch + listOf("0", guestVulkan)).toTypedArray()),
+                "test root: every launch check passed")
+        }
+        val dry = listOf("dry") + launch.drop(1) + listOf("0", "1")
+        refused(fr.run(RootScript.Verb.LAUNCH, *dry.toTypedArray()),
+            "guest Vulkan requires a Galaxy S23 ColorOS 17 session")
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "2")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0")).isNotEmpty())
     }
 
     @Test

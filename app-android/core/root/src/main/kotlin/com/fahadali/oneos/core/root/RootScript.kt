@@ -268,7 +268,7 @@ object RootScript {
                 arg(3, DEC, "a versionCode")
             }
             Verb.LAUNCH -> {
-                if (args.size !in 7..10) need(10)
+                if (args.size !in 7..11) need(11)
                 args.getOrNull(0)?.let { if (it != "session" && it != "dry") p += "launch: mode '$it'" }
                 arg(1, DEC, "a versionCode")
                 arg(2, HEX16, "a session id")
@@ -279,6 +279,7 @@ object RootScript {
                 args.getOrNull(7)?.let { if (it != "0" && it != "1") p += "launch: verbose boot is not 0 or 1" }
                 args.getOrNull(8)?.let { if (it != "0" && it != "1") p += "launch: full session logs is not 0 or 1" }
                 args.getOrNull(9)?.let { if (it != "0" && it != "1") p += "launch: automatic patch downloads is not 0 or 1" }
+                args.getOrNull(10)?.let { if (it != "0" && it != "1") p += "launch: guest Vulkan is not 0 or 1" }
             }
             Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.REMOVE_SYSTEM, Verb.RESET_DATA, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
             Verb.BRING_COLLECT, Verb.BRING_CATALOG -> {

@@ -2062,6 +2062,20 @@ if ! /system/bin/sh "$STAGE/libsec-ril-patch.sh" apply; then
     echo "!!! inbound SMS: libsec-ril.so was not patched; the guest will not receive SMS"
 fi
 
+# These shared, non-persistent properties must be set before the guest
+# SurfaceFlinger and zygote start. The return script restores host debug.*.
+if [ "${ONEOS_GUEST_VULKAN:-0}" = 1 ]; then
+    if ! "$RP" -n debug.hwui.renderer skiavk ||
+       ! "$RP" -n debug.renderengine.backend skiavkthreaded ||
+       [ "$(getprop debug.hwui.renderer)" != skiavk ] ||
+       [ "$(getprop debug.renderengine.backend)" != skiavkthreaded ]; then
+        echo "Guest Vulkan: the renderer properties could not be set, returning to One UI."
+        /system/bin/sh "$STAGE/return_to_oneui.sh"
+        exit 1
+    fi
+    echo "Guest Vulkan: requested Skia Vulkan for HWUI and threaded Skia Vulkan for RenderEngine."
+fi
+
 # Launch takeover inside isolated mount namespace
 $BB unshare -m $BB sh "$STAGE/data/guest_start.sh" </dev/null >"$STAGE/data/takeover.log" 2>&1 &
 TAKEOVER_PID=$!

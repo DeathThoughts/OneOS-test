@@ -13,6 +13,7 @@ import com.fahadali.oneos.core.model.Images
 import com.fahadali.oneos.core.model.Level
 import com.fahadali.oneos.core.model.Plain
 import com.fahadali.oneos.core.model.PlainMessage
+import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.model.ScreenLockRule
 import com.fahadali.oneos.core.model.SwitchGates
 import com.fahadali.oneos.core.model.Units
@@ -241,6 +242,8 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
         )
         if (!dryRun) com.fahadali.oneos.report.UsageCheckIn.switchStarted(app)
         update(state.copy(detail = "Root is checking everything again and starting the switch…"))
+        val guestVulkan = BuildConfig.DEBUG && !dryRun && profile.id == Profiles.ID_S_8550 &&
+            image.id == Images.ID_FIND_X9U_IN_1105 && SessionPrefs.guestVulkan(app)
         val reply = RootVerbs.run(
             app, RootScript.Verb.LAUNCH,
             listOf(
@@ -248,6 +251,7 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 if (SessionPrefs.heatCap(app)) "1" else "0", if (secIms) "1" else "0", if (edmStub) "1" else "0",
                 if (SessionPrefs.verboseBoot(app)) "1" else "0", if (SessionPrefs.fullLogs(app)) "1" else "0",
                 if (SessionPrefs.autoGuestPatches(app)) "1" else "0",
+                if (guestVulkan) "1" else "0",
             ),
             silenceMs = 5 * 60_000L,
         )
