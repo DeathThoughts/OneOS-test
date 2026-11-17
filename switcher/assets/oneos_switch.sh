@@ -3992,11 +3992,22 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # override-status / reset; again after a guest system_server restart). The
 # kernel's thermal limits and the cap above stay. It runs without the cap too
 # (only the status then); ONEOS_GUEST_THERMAL_MAP=0 leaves the HAL's.
+# ColorOS too (owner's go, 2026-11-17). S25 Ultra, ColorOS 17
+# coloros17-findx9u-in-1105, session db19aee410bd79ff: Samsung's thermal HAL
+# (SKIN thresholds 38, 40, 42, 45...) gave the guest status 3 (SEVERE) from
+# 43.2 C skin (diag_series.txt 02:37:49 on). ColorOS then turned window blur
+# off (blur=false at 42.8 C, 02:41:49) and oneos_sysui_compile.sh postponed
+# every app compile ("thermal status 3 (severe or worse): app compile
+# postponed"; 75e538ac0ed725df too, at 44.2 C), so the one-time compiles never
+# finished.
 rm -f "$STAGE/heat_cap.active" "$STAGE/heat_cap.level"
 HEAT_CAP=0; [ "${ONEOS_HEAT_CAP:-1}" = 1 ] && HEAT_CAP=1
 HEAT_CAP_CPU=0; [ "${ONEOS_HEAT_CAP_CPU:-1}" = 1 ] && HEAT_CAP_CPU=1
 GUEST_THERMAL_MAP=0
-[ "${ONEOS_GUEST_THERMAL_MAP:-1}" = 1 ] && grep -q '^  "image": "pixel' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_THERMAL_MAP=1
+if [ "${ONEOS_GUEST_THERMAL_MAP:-1}" = 1 ]; then
+    [ $GUEST_OPLUS = 1 ] && GUEST_THERMAL_MAP=1
+    grep -q '^  "image": "pixel' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_THERMAL_MAP=1
+fi
 if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     [ $HEAT_CAP = 1 ] && : > "$STAGE/heat_cap.active"
     rm -f "$STAGE/cpufreq_max_limit.released"
