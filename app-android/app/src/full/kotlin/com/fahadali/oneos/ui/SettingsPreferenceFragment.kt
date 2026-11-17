@@ -9,6 +9,7 @@ import androidx.preference.SwitchPreferenceCompat
 import androidx.appcompat.app.AlertDialog
 import com.fahadali.oneos.session.RemoveJob
 import com.fahadali.oneos.R
+import com.fahadali.oneos.core.root.OneUiAlbum
 import com.fahadali.oneos.session.LogJob
 import com.fahadali.oneos.session.OneUiMedia
 import com.fahadali.oneos.session.SessionPrefs
@@ -22,6 +23,8 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
     private var unsubscribe: (() -> Unit)? = null
     private var unsubscribeMedia: (() -> Unit)? = null
     private var lastRemove: RemoveJob.Phase? = null
+    // The album picker opens once per list root gave for a tap, never for one from before this screen started.
+    private var shownPick = 0
     override fun onStart() {
         super.onStart()
         lastRemove = RemoveJob.state.phase
@@ -35,7 +38,15 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
             }
         }
         // One UI photos (build 156): root's marker folder is the only record, so it is read each time the screen opens.
-        unsubscribeMedia = OneUiMedia.observe { if (isAdded) onCreatePreferences(null, null) }
+        shownPick = OneUiMedia.state.pick
+        unsubscribeMedia = OneUiMedia.observe { st ->
+            if (!isAdded) return@observe
+            onCreatePreferences(null, null)
+            if (st.pick != shownPick) {
+                shownPick = st.pick
+                st.albums?.let(::showAlbumPicker)
+            }
+        }
         OneUiMedia.refresh(requireContext())
     }
     override fun onStop() {
@@ -102,6 +113,15 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
             isIconSpaceReserved = false; isPersistent = false; isChecked = media.media?.on == true; isEnabled = !media.busy
             setOnPreferenceChangeListener { _, next -> OneUiMedia.set(ctx, next as Boolean); false }
         })
+        // Which of One UI's albums ColorOS shows (owner's decision after the Galaxy S25 Ultra, session
+        // 92032e7ae892154c): root lists them on each tap, so a folder made in One UI since shows up; the
+        // choice is root's file, read at the next guest boot, and works with the switch on or off.
+        sessions.addDescribedPreference(Preference(ctx).apply {
+            key = "setting_${R.string.oneui_media_albums_title}"
+            setTitle(R.string.oneui_media_albums_title); summary = albumsSummary(media)
+            isIconSpaceReserved = false; isEnabled = !media.busy
+            setOnPreferenceClickListener { OneUiMedia.choose(ctx); true }
+        })
         val experimental = category(R.string.settings_experimental)
         toggle(experimental, R.string.advanced_sec_ims_title, R.string.advanced_sec_ims_summary, SessionPrefs.secIms(ctx)) { SessionPrefs.setSecIms(ctx, it) }
         toggle(experimental, R.string.advanced_edm_stub_title, R.string.advanced_edm_stub_summary, SessionPrefs.edmStub(ctx)) { SessionPrefs.setEdmStub(ctx, it) }
@@ -146,7 +166,7 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
     /** The switch's text, then what root said when it read or changed nothing, or what is at the marker's path. */
     private fun mediaSummary(st: OneUiMedia.State): String {
         val base = getString(R.string.oneui_media_summary)
-        val problem = st.problem
+        val problem = st.problem.takeUnless { st.problemOnAlbums }
         val why = st.media?.why
         val note = when {
             st.busy -> getString(R.string.oneui_media_asking)
@@ -155,5 +175,44 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
             else -> return base
         }
         return "$base\n\n$note"
+    }
+
+    /** "N of M albums shown" once root listed them ("All albums" before), then what went wrong, as root said it. */
+    private fun albumsSummary(st: OneUiMedia.State): String {
+        val albums = st.albums
+        val base = if (albums == null) getString(R.string.oneui_media_albums_all)
+        else getString(R.string.oneui_media_albums_count, albums.count { !it.excluded }, albums.size)
+        val problem = st.problem.takeIf { st.problemOnAlbums }
+        val why = st.exclusionsWhy
+        val notes = listOfNotNull(
+            if (st.busy) getString(R.string.oneui_media_asking) else null,
+            problem?.let { getString(if (st.problemOnRead) R.string.oneui_media_unread else R.string.oneui_media_problem, it) },
+            why?.let { getString(R.string.oneui_media_albums_bad_list, it) },
+            st.albumsLeftOut.takeIf { it > 0 }?.let { getString(R.string.oneui_media_albums_left_out, it) },
+        )
+        return if (notes.isEmpty()) base else base + "\n\n" + notes.joinToString("\n")
+    }
+
+    /** One row per album, ticked when ColorOS shows it; Save sends the unticked ones to root. */
+    private fun showAlbumPicker(albums: List<OneUiAlbum>) {
+        val ctx = requireContext()
+        if (albums.isEmpty()) {
+            AlertDialog.Builder(ctx).setTitle(R.string.oneui_media_albums_title).setMessage(R.string.oneui_media_albums_none)
+                .setPositiveButton(android.R.string.ok, null).show()
+            return
+        }
+        val top = getString(R.string.oneui_media_album_top)
+        val labels = Array<CharSequence>(albums.size) { i ->
+            val a = albums[i]
+            getString(R.string.oneui_media_album_row, a.leaf, a.parent.ifEmpty { top }, a.files)
+        }
+        val shown = BooleanArray(albums.size) { !albums[it].excluded }
+        AlertDialog.Builder(ctx).setTitle(R.string.oneui_media_albums_title)
+            .setMultiChoiceItems(labels, shown) { _, which, checked -> shown[which] = checked }
+            .setPositiveButton(R.string.oneui_media_albums_save) { _, _ ->
+                OneUiMedia.saveExcluded(ctx.applicationContext, albums.filterIndexed { i, _ -> !shown[i] }.map { it.id })
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 }
