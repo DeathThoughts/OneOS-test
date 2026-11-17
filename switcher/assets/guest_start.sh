@@ -1150,12 +1150,42 @@ $BB mount --bind /data/misc/profiles/cur /data_mirror/cur_profiles 2>/dev/null |
 $BB mount --bind /data/misc/profiles/ref /data_mirror/ref_profiles 2>/dev/null || true
 
 echo "[Pivoted Root] Setting up /data/media and emulated storage..."
-# The recursive chown and chmod below must never reach One UI's albums: they
-# are bound only later, in the background after the zygote launch (and are
-# read-only), never before these lines.
+# The recursive chown and chmod below must never reach One UI's albums
+# (/data/media/0/OneUI, bound only later in the background after the zygote
+# launch, read-only, never before these lines) or per-app external storage
+# under /data/media/0/Android/{data,media,obb}/<pkg>. Recursive /data/media
+# here overwrote ensure_app_storage.sh's <uid>:1078 0770 owners on every boot
+# (S25 Ultra, coloros17-findx9u-in-1105, sessions db19aee410bd79ff and
+# 75e538ac0ed725df: guest/app_storage.log "realigned 1485 to new uids"),
+# leaving those folders 0777 for ~80 s and spawning ~4,000 chown processes to
+# repair them.
 mkdir -p /data/media/0/Android /data/media/0/Pictures/Screenshots /data/media/0/Download /data/media/0/DCIM /data/media/0/Documents
-chown -R 1023:1023 /data/media 2>/dev/null || true
-chmod -R 777 /data/media 2>/dev/null || true
+if [ -d /data/media ] && [ ! -L /data/media ]; then
+    chown 1023:1023 /data/media 2>/dev/null || true
+    chmod 777 /data/media 2>/dev/null || true
+    if [ -d /data/media/0 ] && [ ! -L /data/media/0 ]; then
+        chown 1023:1023 /data/media/0 2>/dev/null || true
+        chmod 777 /data/media/0 2>/dev/null || true
+        if [ -d /data/media/0/Android ] && [ ! -L /data/media/0/Android ]; then
+            for d in /data/media/0/Android /data/media/0/Android/data /data/media/0/Android/media /data/media/0/Android/obb; do
+                [ -d "$d" ] && [ ! -L "$d" ] || continue
+                chown 1023:1023 "$d" 2>/dev/null || true
+                chmod 777 "$d" 2>/dev/null || true
+            done
+        fi
+    fi
+    for m in /data/media /data/media/0; do
+        [ -d "$m" ] && [ ! -L "$m" ] || continue
+        for d in "$m"/* "$m"/.*; do
+            case "$d" in
+                */.|*/..|/data/media/0|/data/media/0/Android|/data/media/0/OneUI) continue ;;
+            esac
+            [ ! -L "$d" ] && [ -e "$d" ] || continue
+            chown -R 1023:1023 "$d" 2>/dev/null || true
+            chmod -R 777 "$d" 2>/dev/null || true
+        done
+    done
+fi
 $BB mount -t tmpfs tmpfs /storage 2>/dev/null || true
 mkdir -p /storage/emulated/0
 $BB mount --bind /data/media/0 /storage/emulated/0 2>/dev/null || true
