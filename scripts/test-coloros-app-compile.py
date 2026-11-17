@@ -19,6 +19,7 @@ This runs the real heredoc with stubs for pm, cmd, getprop, dumpsys, sha256sum,
 sleep and timeout, under a temporary root for /data and /system.
 """
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -36,7 +37,8 @@ APPS = {
 }
 
 # The ColorOS apps after the three above, in the script's order (session
-# bffd23abac05cd7c). Not installed in the other tests, so those see them skipped.
+# bffd23abac05cd7c, plus daily and resident apps from sessions db19aee410bd79ff
+# and 75e538ac0ed725df). Not installed in the other tests, so those see them skipped.
 EXTRA = {
     'com.android.incallui': '/system/system_ext/app/InCallUI/InCallUI.apk',
     'com.android.contacts': '/system/system_ext/priv-app/Contacts/Contacts.apk',
@@ -45,6 +47,14 @@ EXTRA = {
     'com.coloros.filemanager': '/system/product/app/FileManager/FileManager.apk',
     'com.coloros.alarmclock': '/system/product/app/Clock/Clock.apk',
     'com.coloros.weather2': '/system/product/app/Weather/Weather.apk',
+    'com.google.android.inputmethod.latin': '/data/app/~~k/com.google.android.inputmethod.latin-a/base.apk',
+    'com.sec.android.app.camera': '/data/app/~~c/com.sec.android.app.camera-b/base.apk',
+    'com.google.android.dialer': '/data/app/~~d/com.google.android.dialer-c/base.apk',
+    'com.google.android.apps.messaging': '/data/app/~~m/com.google.android.apps.messaging-d/base.apk',
+    'com.oplus.wallpapers': '/system/system_ext/app/OplusWallpapers/OplusWallpapers.apk',
+    'com.oplus.notificationmanager': '/system/system_ext/priv-app/OplusNotificationManager/OplusNotificationManager.apk',
+    'com.coloros.smartsidebar': '/system/system_ext/priv-app/SmartSideBar/SmartSideBar.apk',
+    'com.oplus.blur': '/system/system_ext/app/OplusBlur/OplusBlur.apk',
 }
 
 STUBS = {
@@ -275,6 +285,7 @@ class AppCompile(unittest.TestCase):
                 self.assertIn(f'{p}: not installed: skipped', log)
                 self.assertNotIn(f'{p} ', g.amark())
             self.assertIn('com.coloros.weather2 apk=sha-com.coloros.weather2 boot=image filter=speed', g.amark())
+            self.assertIn('com.oplus.blur apk=sha-com.oplus.blur boot=image filter=speed', g.amark())
 
     def test_thermal_postpones_mid_list(self):
         # the gate runs before each app: hot after Contacts, the rest wait
@@ -361,6 +372,27 @@ class AppCompile(unittest.TestCase):
             self.assertEqual((g.root / 'data/oneos_sysui_compiled').read_text(),
                              'apk=sha-com.android.systemui boot=image\n')
             self.assertNotIn('systemui', g.amark())
+
+    def test_apps_list_order_and_summary(self):
+        m = re.search(r'^APPS="([^"]+)"$', SCRIPT, re.M)
+        self.assertIsNotNone(m)
+        pkgs = m.group(1).split()
+        self.assertEqual(pkgs, ['com.android.launcher', 'com.android.settings', '$PC'] + list(EXTRA))
+        for forbidden in ('com.android.phone', 'com.sec.imsservice'):
+            self.assertNotIn(forbidden, pkgs)
+            self.assertNotIn(forbidden, SCRIPT)
+        summary_lines = [l for l in SOURCE.splitlines() if 'ColorOS SystemUI compile: checked 60 s' in l]
+        self.assertEqual(len(summary_lines), 1)
+        for label in (
+            'Gboard',
+            'Samsung Camera',
+            'Google Phone',
+            'Google Messages',
+            'Wallpapers',
+            'Notification Manager',
+            'Smart Sidebar and Blur',
+        ):
+            self.assertIn(label, summary_lines[0])
 
 
 if __name__ == '__main__':

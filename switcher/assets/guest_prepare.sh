@@ -4482,12 +4482,17 @@ PC=com.google.android.permissioncontroller
 [ -L "$AMARK" ] && rm -f "$AMARK"
 # Home, Settings and the permission dialogs first, then the ColorOS apps opened
 # most (S25 Ultra, Find X9 Ultra IN image, session bffd23abac05cd7c: seen in
-# its logs, except alarmclock and weather2, which are assumed; a missing one
-# is skipped and the next is tried).
+# its logs, except alarmclock and weather2, which are assumed) plus the daily
+# and resident packages still running at verify/JIT on S25 Ultra,
+# coloros17-findx9u-in-1105, sessions db19aee410bd79ff and 75e538ac0ed725df
+# (Gboard, Samsung Camera, Google Phone, Google Messages, Wallpapers,
+# Notification Manager, Smart Sidebar and Blur; a missing one is skipped and
+# the next is tried).
 APPS="com.android.launcher com.android.settings $PC
 com.android.incallui com.android.contacts com.android.mms
 com.coloros.gallery3d com.coloros.filemanager
-com.coloros.alarmclock com.coloros.weather2"
+com.coloros.alarmclock com.coloros.weather2
+com.google.android.inputmethod.latin com.sec.android.app.camera com.google.android.dialer com.google.android.apps.messaging com.oplus.wallpapers com.oplus.notificationmanager com.coloros.smartsidebar com.oplus.blur"
 for p in $APPS; do
     h=$(thermal)
     if [ -n "$h" ] && [ "$h" -ge 3 ]; then
@@ -4499,7 +4504,7 @@ done
 SYSUI
     chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
-    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings, PermissionController, InCallUI, Contacts, Messages, Gallery, File Manager, Clock and Weather (speed, once per APK; oneos_sysui_compile.log in the guest data)"
+    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings, PermissionController, InCallUI, Contacts, Messages, Gallery, File Manager, Clock, Weather, Gboard, Samsung Camera, Google Phone, Google Messages, Wallpapers, Notification Manager, Smart Sidebar and Blur (speed, once per APK; oneos_sysui_compile.log in the guest data)"
 else
     echo "ColorOS SystemUI compile: not a ColorOS guest"
 fi
