@@ -18,8 +18,9 @@ bind is a mount of its own), a cover shows an empty directory, and a plain
 umount of a mount with mounts below it fails (EBUSY). The storage views alias
 the guest's /data/media/0: the fake's mkdir and rmdir there act on every view
 too, and a stat of a view outside any mount is a stat of /data/media/0.
-find, awk and sort run through the installed busybox when there is one, like
-the guest's.
+find, awk, sort and tr run through the installed busybox when there is one,
+like the guest's (a BusyBox tr without character classes garbled the media
+log lines: S25 Ultra sessions db19aee410bd79ff, 75e538ac0ed725df).
 
 MEDIA_TEST_SH picks the shell (default sh); run the suite under dash,
 busybox sh and mksh where they are installed.
@@ -214,10 +215,10 @@ def vold():
                                 "ino": "", "shadow": None, "dev": dev, "root": root_field, "fs": fs, "view": True})
 
 def passthrough():
-    # The album listing's tools as the guest's busybox has them (its tr may
-    # lack character classes: the rest runs as installed).
+    # The album listing's tools and tr as the guest's busybox has them (its tr
+    # may lack character classes): the rest runs as installed.
     bb = shutil.which("busybox")
-    if bb and cmd in ("find", "awk", "sort"):
+    if bb and cmd in ("find", "awk", "sort", "tr"):
         os.execv(bb, ["busybox", cmd] + args)
     os.execvp(cmd, [cmd] + args)
 
@@ -593,6 +594,25 @@ class GuestMediaAlbums(Base):
         self.assertIn("Media prototype: MediaStore lists 2 item(s) under OneUI/ 30 s after the scan request\n", out)
         self.assertEqual(2 * ["query --uri content://media/external/file --projection _id --where relative_path LIKE 'OneUI/%'"],
                          (self.work / "content.log").read_text().splitlines())
+
+    def test_content_and_am_output_is_logged_as_they_printed_it(self):
+        # S25 Ultra sessions db19aee410bd79ff, 75e538ac0ed725df: "tr -cd '[:print:]'" in the guest's
+        # BusyBox tr (no character classes) logged "(rtn)" and "rtpt:rt" for these lines.
+        self.assertNotIn("tr -cd '[:print:]'", START)
+        self.assertNotRegex(START, r"tr -c?d '\[:[a-z]+:\]'")
+        self.script(self.work / "system/bin/content", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/content.log"\n'
+                    'printf "No result found.\\r\\n"\n')
+        self.script(self.work / "system/bin/am", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/am.log"\n'
+                    'echo "Broadcasting: Intent { act=$4 dat=$6 }"\nprintf "Broadcast completed: \\033result=0\\r\\n"\n')
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        out = result.stdout
+        self.assertIn("Media prototype: MediaStore lists 0 item(s) under OneUI/ before the scan request "
+                      "(No result found.)\n", out)
+        self.assertRegex(out, r"Media prototype: scan of OneUI asked \d+ s after the zygote "
+                         r"launch \(am status 0, \d+ s\): Broadcast completed: result=0\n")
+        self.assertIn("Media prototype: MediaStore lists 0 item(s) under OneUI/ 30 s after the scan request "
+                      "(No result found.)\n", out)
 
     def test_nothing_under_android_is_ever_listed_or_mounted(self):
         self.photo("Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images", SECRETS[4])

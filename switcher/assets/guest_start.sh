@@ -750,8 +750,12 @@ oneos_media_rows() {
     oneos_media_rows=$(printf '%s\n' "$oneos_media_out" | "$BB" grep -c '^Row: ')
     oneos_media_line=
     # No row: content's own first line ("No result found." or the error).
+    # Printable ASCII is kept as the range ' -~': the guest's BusyBox tr has
+    # no character classes, and '[:print:]' kept only the characters of
+    # "[:print:]" itself
+    # (S25 Ultra sessions db19aee410bd79ff, 75e538ac0ed725df: "(rtn)").
     [ "$((oneos_media_rows))" != 0 ] ||
-        oneos_media_line=" ($(printf '%s\n' "$oneos_media_out" | "$BB" grep . | "$BB" head -n 1 | "$BB" tr -cd '[:print:]' | "$BB" cut -c 1-120))"
+        oneos_media_line=" ($(printf '%s\n' "$oneos_media_out" | "$BB" grep . | "$BB" head -n 1 | "$BB" tr -cd ' -~' | "$BB" cut -c 1-120))"
     echo "[Pivoted Root] Media prototype: MediaStore lists $((oneos_media_rows)) item(s) under OneUI/ $1$oneos_media_line"
 }
 
@@ -949,7 +953,8 @@ oneos_media_late() {
     oneos_media_rc=$?
     oneos_media_line=$(printf '%s\n' "$oneos_media_out" | "$BB" grep 'Broadcast completed' | "$BB" tail -n 1)
     [ -n "$oneos_media_line" ] || oneos_media_line=$(printf '%s\n' "$oneos_media_out" | "$BB" grep . | "$BB" head -n 1)
-    oneos_media_line=$(printf '%s' "$oneos_media_line" | "$BB" tr -cd '[:print:]' | "$BB" cut -c 1-160)
+    # Printable ASCII as a range, not '[:print:]' (BusyBox tr, see oneos_media_rows).
+    oneos_media_line=$(printf '%s' "$oneos_media_line" | "$BB" tr -cd ' -~' | "$BB" cut -c 1-160)
     echo "[Pivoted Root] Media prototype: scan of OneUI asked $(( oneos_media_s - oneos_media_t0 )) s after the zygote launch (am status $oneos_media_rc, $(( $("$BB" date +%s) - oneos_media_s )) s): ${oneos_media_line:-no output}"
     # What MediaStore lists after the scan had time to run: counts only.
     "$BB" sleep 30
