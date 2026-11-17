@@ -7,7 +7,7 @@ WindowManager's lock, a big Java dump for one flag that rarely changes) and
 `settings get global disable_window_blurs`. Both are now read on the first pass
 with a guest system_server and every 10th after it, and on a new
 system_server; the lines in between keep the last values, so
-diag_series.txt's line format is the same. These tests render the sampler's
+each diag_series.txt line still has the blur fields. These tests render the sampler's
 double-quoted `sh -c` string the way the switch's shell does, stub pidof,
 timeout (the guest calls and top) and sleep (each one moves to the next pass),
 and run the real loop for a number of passes, under every shell here.
@@ -36,7 +36,7 @@ THERMAL = '''Thermal Status: 1
 Current temperatures from HAL:
 \tTemperature{mValue=38.5, mType=3, mName=SKIN, mStatus=0}
 '''
-LINE = re.compile(r'^\d\d:\d\d:\d\d thermal=(\S+) skin=(\S+)( policy\S+)* blur=(\S+) disable_window_blurs=(\S+) battery=\S+%,\S+$')
+LINE = re.compile(r'^\d\d:\d\d:\d\d thermal=(\S+) skin=(\S+)( policy\S+)* blur=(\S+) disable_window_blurs=(\S+) battery=\S+%,\S+ gpu_hz=(\S+) gpu_cap_mhz=(\S+)$')
 
 
 def sampler_block():
@@ -63,7 +63,9 @@ class SessionSamplerBlurTest(unittest.TestCase):
                                 env={**os.environ, 'BB': 'busybox', 'STAGE': str(self.stage)},
                                 capture_output=True, text=True)
         self.assertEqual(0, render.returncode, render.stderr)
-        return render.stdout
+        return (render.stdout
+                .replace('/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq', str(self.r / 'gpu_hz'))
+                .replace('/sys/kernel/gpu/gpu_max_clock', str(self.r / 'gpu_cap_mhz')))
 
     def run_loop(self, passes, changes, shell='sh'):
         """changes: {pass: {'pid': ..., 'blur': ..., 'dw': ...}} applied before that pass; '' for no system_server."""
@@ -106,6 +108,16 @@ sleep() {{
             self.assertIsNotNone(m, l)
             got.append((m.group(4), m.group(5)))
         return text, got, calls('window_calls'), calls('settings_calls'), calls('thermal_calls')
+
+    def test_gpu_values_are_read_when_available(self):
+        (self.r / 'gpu_hz').write_text('719000000\n')
+        (self.r / 'gpu_cap_mhz').write_text('680\n')
+        log, *_ = self.run_loop(1, {1: {'pid': ''}})
+        self.assertIn('gpu_hz=719000000 gpu_cap_mhz=680\n', log)
+
+    def test_unavailable_gpu_values_are_marked_missing(self):
+        log, *_ = self.run_loop(1, {1: {'pid': ''}})
+        self.assertIn('gpu_hz=- gpu_cap_mhz=-\n', log)
 
     def test_the_rendered_sampler_is_valid_shell(self):
         loop = self.render()

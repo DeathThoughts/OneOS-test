@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="oneui_media_title">Фото One UI в ColorOS</string>
+    <string name="oneui_media_summary">Показывает альбомы One UI в ColorOS, каждый отдельным альбомом, только для чтения: ColorOS не может их изменить или удалить. Ничего из папки Android One UI не передаётся. Применяется при следующем переключении или перезапуске гостевой системы.</string>
+    <string name="oneui_media_asking">Запрос к root…</string>
+    <string name="oneui_media_problem">Ничего не изменено: %1$s</string>
+    <string name="oneui_media_unread">Не прочитано: %1$s</string>
+    <string name="oneui_media_not_marker">Выключено: %1$s. Удалите это из root-оболочки, затем включите снова.</string>
+    <!-- The album picker (owner's decision after the Galaxy S25 Ultra, session 92032e7ae892154c). -->
+    <string name="oneui_media_albums_title">Выбрать альбомы</string>
+    <string name="oneui_media_albums_all">Все альбомы</string>
+    <string name="oneui_media_albums_count">Показано альбомов: %1$d из %2$d</string>
+    <string name="oneui_media_albums_none">В One UI нет альбомов с фото или видео. Папки в Android никогда не передаются.</string>
+    <string name="oneui_media_album_row">%1$s · %2$s · %3$d</string>
+    <string name="oneui_media_album_top">Внутренняя память</string>
+    <string name="oneui_media_albums_save">Сохранить</string>
+    <string name="oneui_media_albums_bad_list">ColorOS не показывает ни одного альбома: список скрытых альбомов %1$s. Сохранение выбора заменит неверный файл; ссылку или папку там сначала удалите из root-оболочки.</string>
+    <string name="oneui_media_albums_left_out">Альбомов с очень длинным путём, которых нет в списке: %1$d; ColorOS их показывает.</string>
+</resources>

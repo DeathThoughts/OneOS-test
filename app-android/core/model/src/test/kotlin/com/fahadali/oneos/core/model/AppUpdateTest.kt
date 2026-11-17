@@ -9,7 +9,7 @@ class AppUpdateTest {
     private fun json(
         code: String = "58",
         name: String = "\"0.4.42\"",
-        apk: String = "\"https://github.com/fahadalijaved/OneOS/releases/download/v0.4.42/OneOS-0.4.42.apk\"",
+        apk: String = "\"https://github.com/DeathThoughts/OneOS-test/releases/download/oneos-build-123/OneOS-release.apk\"",
         bytes: String = "52428800",
         sha256: String = "\"$sha\"",
     ) = """{"versionCode": $code, "versionName": $name, "apk": $apk, "bytes": $bytes, "sha256": $sha256}"""
@@ -17,7 +17,7 @@ class AppUpdateTest {
     @Test
     fun readsTheReleasesUpdate() {
         val u = AppUpdate.parse(json()).getOrThrow()
-        assertEquals(AppUpdate(58, "0.4.42", "https://github.com/fahadalijaved/OneOS/releases/download/v0.4.42/OneOS-0.4.42.apk", 52428800L, sha), u)
+        assertEquals(AppUpdate(58, "0.4.42", "https://github.com/DeathThoughts/OneOS-test/releases/download/oneos-build-123/OneOS-release.apk", 52428800L, sha), u)
         assertTrue(u.newerThan(57))
         assertTrue(!u.newerThan(58))
     }
@@ -44,6 +44,19 @@ class AppUpdateTest {
         assertTrue(AppUpdate.parse(json(apk = "\"https://drive.usercontent.google.com/download?id=x&export=download&confirm=t\""), test = true).isFailure)
         assertTrue(AppUpdate.parse(json(apk = "\"https://evil.example/download?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345&export=download&confirm=t\""), test = true).isFailure)
         assertTrue(AppUpdate.parse(json(), test = true).isSuccess)
+    }
+
+    @Test
+    fun isolatesGuestAndDebugChannels() {
+        val hostDebug = json(name = "\"0.5.17-s23.5-teste.1\"",
+            apk = "\"${AppUpdate.APK_PREFIX}oneos-build-123/OneOS-debug.apk\"")
+        val guestDebug = hostDebug.replace("OneOS-debug.apk", "OneOSGuest-debug.apk")
+        assertTrue(AppUpdate.parse(hostDebug).isFailure)
+        assertTrue(AppUpdate.parse(hostDebug, debug = true).isSuccess)
+        assertTrue(AppUpdate.parse(guestDebug, debug = true).isFailure)
+        assertTrue(AppUpdate.parse(guestDebug, guest = true, debug = true).isSuccess)
+        assertTrue(AppUpdate.parse(guestDebug, guest = true).isFailure)
+        assertTrue(AppUpdate.manifestUrl(debug = true, guest = true).endsWith("/download/oneos-debug/guest-update-debug.json"))
     }
 
     @Test

@@ -50,6 +50,13 @@ read-only there, and the guest now has its own), **no more boot failures from fa
 **ColorOS lock screen depth effect** (0.4.60 gave its files to the wrong app; OPPO's AI engine from the
 Find X9 Ultra's own firmware is in ColorOS too), and the **Samsung Camera on the A56** (its sensor crop).
 
+New in 0.5.19: Nothing OS on the Galaxy S23s, Turn it off that lasts.
+- **Nothing OS on the Galaxy S23, S23+ and S23 Ultra**, untested: it **might not boot**. If it does not, the phone
+  comes back to One UI by itself; please send a report either way (with Record full logs from now on if it starts).
+- **Turn it off keeps the timer app's kernel tool off**, also after a restart: its program file can no longer be
+  started while the app is off (until now only uninstalling the app helped). Turning the app back on in OneOS gives
+  it back as it was.
+
 New in 0.5.17: Record full logs from inside a system, Nothing OS's Essential key on Volume Down.
 - **Groundwork for fingerprint unlock with One UI's fingerprints** (off for now: the in-display sensor still needs
   its touch signals from Nothing's lock screen). Nothing OS can never delete a fingerprint from the phone, and Settings no

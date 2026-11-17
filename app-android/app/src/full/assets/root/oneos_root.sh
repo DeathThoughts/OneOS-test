@@ -63,6 +63,22 @@
 #   bring-status                      read only (build 104): each brought app,
 #                                     what became of it in the guest, and
 #                                     whether One UI's app or data is newer
+#   oneui-media <on|off|status>       One UI photos in ColorOS (build 156):
+#                                     on makes the marker folder
+#                                     /data/local/tmp/oneos-oneui-media
+#                                     (root's, 0700) that guest_start.sh reads
+#                                     at every guest boot; off removes it and
+#                                     the prototype's oneos-media-share-test,
+#                                     with rmdir only; status reads both
+#   oneui-media albums                read only: One UI's albums (the rule
+#                                     guest_start.sh shares them by), each
+#                                     with its id, file count and whether the
+#                                     owner unticked it
+#   oneui-media exclude [id...]       the unticked albums (16-hex ids from
+#                                     albums, at most 4096): replaces
+#                                     /data/local/tmp/oneos-oneui-media-excluded
+#                                     (root's 0600 file, their paths), or
+#                                     removes it when none is given
 #
 # Writes: only under $STAGE. Documented exceptions, nothing else:
 #   - begin aside renames $STAGE to its sibling $STAGE.old-<epoch>;
@@ -92,12 +108,23 @@
 #   - bring-collect and bring-clear rename the last brought apps
 #     ($STAGE/data/oneos_bring, nothing else) to $STAGE.old-<epoch> and purge
 #     it, after purge's checks.
+#   - oneui-media on makes $DATA/local/tmp/oneos-oneui-media (mkdir under
+#     umask 077, chown -h); off removes it and
+#     $DATA/local/tmp/oneos-media-share-test, each with rmdir and only while it
+#     is an empty real folder. oneui-media exclude writes
+#     $DATA/local/tmp/oneos-oneui-media-excluded: mktemp beside it under umask
+#     077, then mv over it, or rm of it when nothing is unticked, and only
+#     while it is absent or a regular file, never a link. Nothing else outside
+#     the stage, and nothing in it.
 # Reads of One UI's user data, never written: selfupdate reads the app's own
 # downloaded update; bring-collect reads the data folders of the packages the
-# owner chose (through /proc/1/root) and copies them into the stage.
+# owner chose (through /proc/1/root) and copies them into the stage;
+# oneui-media albums and exclude list the folders and file names of One UI's
+# media/0 (find), and print only album paths, counts and ids.
 # Apart from purge (and remove and bring, through it), nothing is ever deleted except this script's own files: incoming/*.part,
 # incoming/plan and incoming/received, and an old system.raw that a new one
-# replaces (an image, never user data). Everything else that is in the way is
+# replaces (an image, never user data), oneui-media off's two empty
+# marker folders (rmdir) and exclude's own list of unticked albums. Everything else that is in the way is
 # moved to $STAGE/attic/<epoch>/. Every refusal comes before the first change
 # of its verb (`@@REFUSED <why>`, exit 2); bad arguments exit 3, a failed
 # write exits 4 (`@@FAILED <what>`). The renames of migrate_legacy are no
@@ -556,6 +583,12 @@ profile_set() {
         "s-plus-9945 lineage24-infiniti") echo lineage ;;
         "s-plus-9945 hyperos-lhasa") echo hyper-f8u ;;
         "s-plus-9945 nothingos5-metroid") echo nothing-f8u ;;
+        # 0.5.19: Nothing OS on the S23, S23+ and S23 Ultra (owner, untested).
+        "s-8550 nothingos5-metroid") echo nothing-f8u ;;
+        "s-plus-8550 nothingos5-metroid") echo nothing-f8u ;;
+        "s-ultra-8550 nothingos5-metroid") echo nothing-f8u ;;
+        "s-ultra-8550-jp nothingos5-metroid") echo nothing-f8u ;;
+        "s-8550-jp nothingos5-metroid") echo nothing-f8u ;;
         "s-plus-9945 originos7-pd2609ma") echo originos ;;
         # 0.4.92: the au Galaxy S23 Ultra (SCG20): the S23 Ultra's rows, untested.
         "s-ultra-8550-jp coloros17-findx9u-in-1105") echo x9u-in-1105-sultra ;;
@@ -1746,6 +1779,12 @@ tool_pids() { # <pkg>: the pids whose program is its libtimer.so
         case "$t" in "/data/app/"*"/$1-"*"/lib/"*"/libtimer.so") p=${ex%/exe}; echo "${p##*/}" ;; esac
     done
 }
+tool_files() { # <pkg>: the libtimer.so files its running tools were started from, once each
+    for ex in "$PROC"/[0-9]*/exe; do
+        t=$(ls -l "$ex" 2>/dev/null | sed -n 's/.* -> //p')
+        case "$t" in "/data/app/"*"/$1-"*"/lib/"*"/libtimer.so") echo "$t" ;; esac
+    done | sort -u
+}
 do_tool_app() {
     case "${1:-}" in
         list)
@@ -1768,8 +1807,24 @@ do_tool_app() {
         tool_running "$2" || refuse "$2 runs no kernel tool now; nothing was changed"
         { [ -f "$STAGE/tool_apps" ] && grep -v -x -F "$2" "$STAGE/tool_apps"; echo "$2"; } > "$part" && own "$part" 0644 && mv -f "$part" "$STAGE/tool_apps" ||
             die "could not record $2"
+        files=$(tool_files "$2")
         step "disable $2"
         pm disable-user --user 0 "$2" > /dev/null 2>&1 || die "pm could not turn $2 off"
+        # 0.5.19 (owner: it "keeps coming back ... even after they manually disable the app", "works only if
+        # they uninstall"): the tool is a program in the app's lib folder, started by something outside the
+        # app (it runs as the shell user), so a disabled app's tool still started at the next boot. Its
+        # libtimer.so loses its execute bits while the app is off (nothing can start it, as after an
+        # uninstall; the app and its data stay); tool-app on gives the recorded mode back.
+        for f in $files; do
+            [ -f "$T$f" ] && [ ! -L "$T$f" ] || continue
+            m=$(stat -c %a "$T$f" 2>/dev/null) || continue
+            { [ -f "$STAGE/tool_app_files" ] && awk -v f="$f" '$3 != f' "$STAGE/tool_app_files"; echo "$2 $m $f"; } > "$STAGE/.tool_app_files.new" &&
+                own "$STAGE/.tool_app_files.new" 0644 && mv -f "$STAGE/.tool_app_files.new" "$STAGE/tool_app_files" ||
+                die "could not record $f"
+            TOOLF="$T$f"
+            chmod 0 "$TOOLF" || die "could not take the execute bits off $f"
+            step "no exec ${f##*/} ($m -> 0)"
+        done
         # 0.5.17 (owner: Turn it off "is just bringing them back to start"): the app's tool runs as root,
         # outside the app's own processes, so pm's force-stop leaves it running and the next switch is
         # refused again (a tester: "su -c 'pm disable com.roottimer.app' didn't work"). Stop it too, only
@@ -1784,6 +1839,17 @@ do_tool_app() {
         [ -f "$STAGE/tool_apps" ] && grep -q -x -F "$2" "$STAGE/tool_apps" || refuse "OneOS did not turn $2 off; nothing was changed"
         step "enable $2"
         pm enable --user 0 "$2" > /dev/null 2>&1 || die "pm could not turn $2 on"
+        if [ -f "$STAGE/tool_app_files" ] && mine "$STAGE/tool_app_files"; then
+            while read -r rp rm rf; do
+                [ "$rp" = "$2" ] || continue
+                case "$rm" in [0-7][0-7][0-7]) ;; *) continue ;; esac
+                case "$rf" in "/data/app/"*"/$2-"*"/lib/"*"/libtimer.so") ;; *) continue ;; esac
+                TOOLF="$T$rf"
+                [ -f "$TOOLF" ] && [ ! -L "$TOOLF" ] && chmod "$rm" "$TOOLF" && step "exec ${rf##*/} back ($rm)"
+            done < "$STAGE/tool_app_files"
+            { awk -v p="$2" '$1 != p' "$STAGE/tool_app_files"; true; } > "$STAGE/.tool_app_files.new" && own "$STAGE/.tool_app_files.new" 0644 &&
+                mv -f "$STAGE/.tool_app_files.new" "$STAGE/tool_app_files" || die "could not update the file record"
+        fi
         { grep -v -x -F "$2" "$STAGE/tool_apps"; true; } > "$part" && own "$part" 0644 && mv -f "$part" "$STAGE/tool_apps" || die "could not update the record"
         say "@@OK tool-app on $2"
     fi
@@ -2528,6 +2594,214 @@ do_bring_clear() {
     say "@@OK bring-clear"
 }
 
+# --- One UI photos in ColorOS (build 156) ------------------------------------
+# The owner turned the sharing of One UI's camera and screenshot folders on by
+# hand, with mkdir from a root shell (Termux), and did not want to (Galaxy
+# S25 Ultra session 9a5159cc76ee3748, 2026-11-16). guest_start.sh shares them
+# read-only only while $OMEDIA is a real folder of root's (uid 0, gid 0)
+# with mode 0700, and reads it at every guest boot and guest restart: this
+# verb only makes or removes that folder, and nothing in the stage. Off
+# removes the S23 prototype's test-only marker $OMEDIA_OLD as well; on never
+# makes it. Both are emptied by nobody, so only rmdir removes them: a folder
+# with something in it, a link or a file is refused and left as it is.
+oneui_media_why() { # <path>: why it is not the marker (a real root:root 0700 folder); nothing when it is
+    if [ -L "$1" ]; then say "is a symlink"; return 0; fi
+    if [ ! -d "$1" ]; then say "is not a folder"; return 0; fi
+    # %g too: the contract is root's group as well, and guest_start.sh reads %u:%a.
+    mg=$(stat -c '%u:%g %a' "$1" 2>/dev/null)
+    [ "$mg" = "$ROOT_OWNER 700" ] || say "is ${mg:-unreadable} (uid:gid mode), not root's 0700 folder"
+}
+oneui_media_status() {
+    if [ -e "$OMEDIA" ] || [ -L "$OMEDIA" ]; then
+        mw=$(oneui_media_why "$OMEDIA")
+        if [ -z "$mw" ]; then
+            say "@@RESULT oneui-media on"
+        else
+            say "@@RESULT oneui-media off"
+            say "@@RESULT oneui-media-why ${OMEDIA#$T} $mw"
+        fi
+    else
+        say "@@RESULT oneui-media off"
+    fi
+    if [ -e "$OMEDIA_OLD" ] || [ -L "$OMEDIA_OLD" ]; then say "@@RESULT oneui-media-legacy ${OMEDIA_OLD#$T}"; fi
+}
+oneui_media_removable() { # <path>: refuses unless it is absent or an empty real folder
+    [ -e "$1" ] || [ -L "$1" ] || return 0
+    [ ! -L "$1" ] || refuse "${1#$T} is a symlink: it was not followed or removed; nothing was changed"
+    [ -d "$1" ] || refuse "${1#$T} is not a folder: it was not removed; nothing was changed"
+    [ -z "$(ls -A "$1" 2>/dev/null | head -n 1)" ] || refuse "${1#$T} is not empty: it was not removed; nothing was changed"
+}
+# Every One UI album in ColorOS, each its own album in Gallery, and the owner
+# unticks here the ones not to share (owner's decision after the Galaxy S25
+# Ultra, session 92032e7ae892154c, showed the camera and screenshots there
+# read-only). `albums` lists them by the rule guest_start.sh publishes them
+# by; `exclude` writes the unticked ones to $OMEDIA_X, one album path per
+# line, which guest_start.sh reads through its read-only view of One UI's
+# /data at every guest boot. It is a list of what not to share, so an album
+# made later in One UI is shared until it is unticked; off keeps it, so the
+# choice outlives off and on. An album is a directory of One UI's media/0
+# that directly holds a file with one of these extensions (any case);
+# guest_start.sh's oneos_media_ext must be the same list (StageScriptTest
+# compares them). Never an album, never descended into: Android/ and all of
+# it (owner's decision: not even Android/media), a hidden component, a
+# directory with a .nomedia and everything below it, and the storage root
+# itself; a path with a control character is skipped.
+OMEDIA_EXT="jpg jpeg png gif webp heic heif avif bmp dng mp4 m4v 3gp 3g2 mkv webm mov avi ts"
+OTAB=$(printf '\t')
+# Read only: "<path> TAB <media files>" per album of One UI's media/0, in path order (LC_ALL=C).
+oneui_media_list() {
+    OMEDIA_ROOT="$DATA/media/0"
+    [ -d "$OMEDIA_ROOT" ] && [ ! -L "$OMEDIA_ROOT" ] || return 0
+    onl='
+'
+    LC_ALL=C find "$OMEDIA_ROOT" -mindepth 1 \( -iname .nomedia -print -prune \) -o \
+        \( \( -iname android ! -path "$OMEDIA_ROOT/*/*" \) -o -name '.*' -o -name '*[[:cntrl:]]*' -o -name "*$onl*" \) \
+        -prune -o -type f -print 2>/dev/null |
+        LC_ALL=C awk -v pre="$OMEDIA_ROOT/" -v ext="$OMEDIA_EXT" '
+            BEGIN { n = split(ext, e, " "); for (i = 1; i <= n; i++) want[e[i]] = 1; lp = length(pre) }
+            substr($0, 1, lp) != pre { next }
+            {
+                k = split(substr($0, lp + 1), c, "/")
+                d = ""
+                for (i = 1; i < k; i++) d = (i == 1 ? c[1] : d "/" c[i])
+                if (tolower(c[k]) == ".nomedia") { hide[d] = 1; next }
+                if ($0 ~ /[[:cntrl:]]/ || tolower(c[1]) == "android") next
+                for (i = 1; i <= k; i++) if (c[i] == "" || substr(c[i], 1, 1) == ".") next
+                if (!index(c[k], ".")) next
+                x = tolower(c[k]); sub(/^.*\./, "", x)
+                if (x in want) count[d]++
+            }
+            END {
+                for (d in count) {
+                    if (d == "") continue
+                    h = ("" in hide); a = ""
+                    k = split(d, c, "/")
+                    for (i = 1; i <= k && !h; i++) { a = (i == 1 ? c[1] : a "/" c[i]); if (a in hide) h = 1 }
+                    if (!h) print d "\t" count[d]
+                }
+            }' | LC_ALL=C sort
+}
+oneui_media_map() { # read only: "<id> TAB <media files> TAB <path>" per album; id: the first 16 hex of the path's SHA-256
+    oneui_media_list | while IFS="$OTAB" read -r mp mc; do
+        printf '%s\t%s\t%s\n' "$(printf '%s' "$mp" | sha256sum | cut -c1-16)" "$mc" "$mp"
+    done
+}
+oneui_media_x_why() { # why $OMEDIA_X is not a list guest_start.sh honours (it shares nothing then); nothing when it is, or is absent
+    [ -e "$OMEDIA_X" ] || [ -L "$OMEDIA_X" ] || return 0
+    if [ -L "$OMEDIA_X" ]; then say "is a symlink"; return 0; fi
+    if [ ! -f "$OMEDIA_X" ]; then say "is not a regular file"; return 0; fi
+    mg=$(stat -c '%u:%g %a' "$OMEDIA_X" 2>/dev/null)
+    [ "$mg" = "$ROOT_OWNER 600" ] || { say "is ${mg:-unreadable} (uid:gid mode), not root's 0600 file"; return 0; }
+    ge 262144 "$(stat -c %s "$OMEDIA_X" 2>/dev/null)" || say "is larger than 262144 bytes"
+}
+# One result line per album, its path in base64 (any bytes but a control
+# character, without newlines), unticked 1; a line that would not fit in 500
+# characters is left out and counted. The app shows them; ids name them in
+# `exclude`.
+oneui_media_albums() {
+    xw=$(oneui_media_x_why)
+    xf=""
+    if [ -n "$xw" ]; then
+        say "@@RESULT oneui-media-exclusions-why ${OMEDIA_X#$T} $xw"
+    elif [ -f "$OMEDIA_X" ]; then
+        xf=$OMEDIA_X
+    fi
+    oneui_media_map | awk -F "$OTAB" -v xf="$xf" '
+        BEGIN { if (xf != "") { while ((getline l < xf) > 0) ex[l] = 1; close(xf) } }
+        { print $1 "\t" $2 "\t" (($3 in ex) ? 1 : 0) "\t" $3 }' | {
+        n=0
+        long=0
+        while IFS="$OTAB" read -r mi mc mx mp; do
+            line="@@RESULT oneui-media-album $mi $mc $mx $(printf '%s' "$mp" | base64 | tr -d '\n')"
+            if [ ${#line} -gt 500 ]; then
+                long=$((long + 1))
+                continue
+            fi
+            say "$line"
+            n=$((n + 1))
+        done
+        say "@@RESULT oneui-media-albums $n $long"
+    }
+}
+do_oneui_media() {
+    [ $# -ge 1 ] || usage "oneui-media <on|off|status|albums|exclude [id...]>"
+    [ "$1" = exclude ] || [ $# -eq 1 ] || usage "oneui-media <on|off|status|albums|exclude [id...]>"
+    OMEDIA="$OLD_PARENT/oneos-oneui-media"
+    OMEDIA_OLD="$OLD_PARENT/oneos-media-share-test"
+    OMEDIA_X="$OLD_PARENT/oneos-oneui-media-excluded"
+    mode=$1
+    case "$mode" in
+        status|albums) ;;
+        on)
+            if [ -e "$OMEDIA" ] || [ -L "$OMEDIA" ]; then
+                mw=$(oneui_media_why "$OMEDIA")
+                [ -z "$mw" ] || refuse "${OMEDIA#$T} $mw: it was left as it is; nothing was changed"
+            else
+                step "share One UI's photos"
+                # Made 0700 by mkdir itself and chowned with -h, never chmod or a plain chown: /data/local/tmp
+                # is the shell user's, which could swap the new folder for a link, and those follow links.
+                ( umask 077; mkdir "$OMEDIA" ) || die "could not make ${OMEDIA#$T}"
+                chown -h "$ROOT_OWNER" "$OMEDIA" || die "could not make ${OMEDIA#$T} root's"
+                mw=$(oneui_media_why "$OMEDIA")
+                [ -z "$mw" ] || die "${OMEDIA#$T} $mw after it was made"
+            fi ;;
+        off)
+            # Both checked before either goes: a refusal changes nothing. The album choice ($OMEDIA_X) stays.
+            oneui_media_removable "$OMEDIA"
+            oneui_media_removable "$OMEDIA_OLD"
+            if [ -e "$OMEDIA" ]; then
+                step "stop sharing One UI's photos"
+                rmdir "$OMEDIA" || die "could not remove ${OMEDIA#$T}"
+            fi
+            if [ -e "$OMEDIA_OLD" ]; then
+                rmdir "$OMEDIA_OLD" || die "could not remove ${OMEDIA_OLD#$T}"
+            fi ;;
+        exclude)
+            shift
+            [ $# -le 4096 ] || usage "oneui-media exclude takes at most 4096 albums"
+            for xi in "$@"; do
+                case "$xi" in *[!0-9a-f]*) usage "oneui-media exclude '$xi'" ;; esac
+                [ ${#xi} -eq 16 ] || usage "oneui-media exclude '$xi'"
+            done
+            # Every check before the first change: a refusal changes nothing.
+            if [ -L "$OMEDIA_X" ]; then refuse "${OMEDIA_X#$T} is a symlink: it was not followed or replaced; nothing was changed"; fi
+            if [ -e "$OMEDIA_X" ] && [ ! -f "$OMEDIA_X" ]; then refuse "${OMEDIA_X#$T} is not a regular file: it was left as it is; nothing was changed"; fi
+            xmap=$(oneui_media_map)
+            xbad=$(printf '%s\n' "$xmap" | awk -F "$OTAB" -v ids="$*" '
+                { have[$1] = 1 }
+                END { n = split(ids, w, " "); for (i = 1; i <= n; i++) if (!(w[i] in have)) { print w[i]; exit } }')
+            [ -z "$xbad" ] || refuse "album $xbad is not one of One UI's albums now (list them again); nothing was changed"
+            xpaths=$(printf '%s\n' "$xmap" | awk -F "$OTAB" -v ids="$*" '
+                BEGIN { n = split(ids, w, " "); for (i = 1; i <= n; i++) want[w[i]] = 1 }
+                $1 in want { print $3 }')
+            step "save the albums not to share"
+            if [ -z "$xpaths" ]; then
+                if [ -e "$OMEDIA_X" ]; then
+                    rm "$OMEDIA_X" || die "could not remove ${OMEDIA_X#$T}"
+                fi
+            else
+                # A new file beside it, root's 0600 from the start (mktemp), renamed over it: the guest
+                # never reads half a list, and the old one stays if anything here fails.
+                OMEDIA_XNEW=$(umask 077; mktemp "$OMEDIA_X.XXXXXX") || die "could not make a new ${OMEDIA_X#$T}"
+                printf '%s\n' "$xpaths" > "$OMEDIA_XNEW" || { rm -f "$OMEDIA_XNEW"; die "could not write ${OMEDIA_X#$T}"; }
+                xmg=$(stat -c '%u:%g %a' "$OMEDIA_XNEW" 2>/dev/null)
+                if [ -L "$OMEDIA_XNEW" ] || [ ! -f "$OMEDIA_XNEW" ] || [ "$xmg" != "$ROOT_OWNER 600" ]; then
+                    rm -f "$OMEDIA_XNEW"
+                    die "the new ${OMEDIA_X#$T} is ${xmg:-unreadable}, not root's 0600 file"
+                fi
+                if [ -L "$OMEDIA_X" ] || { [ -e "$OMEDIA_X" ] && [ ! -f "$OMEDIA_X" ]; }; then
+                    rm -f "$OMEDIA_XNEW"
+                    refuse "${OMEDIA_X#$T} changed while it was written; nothing was changed"
+                fi
+                mv -f "$OMEDIA_XNEW" "$OMEDIA_X" || { rm -f "$OMEDIA_XNEW"; die "could not put ${OMEDIA_X#$T} in place"; }
+            fi ;;
+        *) usage "oneui-media <on|off|status|albums|exclude [id...]>" ;;
+    esac
+    oneui_media_status
+    case "$mode" in albums|exclude) oneui_media_albums ;; esac
+    say "@@OK oneui-media $mode"
+}
+
 # --- Main ---------------------------------------------------------------------
 [ -n "$T" ] || [ "$(id -u)" = 0 ] || refuse "not root"
 verb=$1
@@ -2568,5 +2842,6 @@ case "$verb" in
     bring-forget) do_bring_forget "$@" ;;
     bring-catalog) do_bring_catalog "$@" ;;
     bring-add) do_bring_add "$@" ;;
+    oneui-media) do_oneui_media "$@" ;;
     *) usage "unknown verb '$verb'" ;;
 esac

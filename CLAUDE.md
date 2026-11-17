@@ -4,11 +4,23 @@ Standing rules from the fork's owner. They apply to every session.
 
 ## Roles
 
-- The main session plans, investigates, reviews and orchestrates. It does not
-  write the code changes itself.
-- Every actual code change is implemented by an Opus 5.5 subagent, briefed with
-  a self-contained task; the main session reviews the result before it is
-  committed.
+Owner's rule, revised 2026-11-17: the main session does the thinking, a
+subagent does the hands-on work.
+
+- The main session plans, investigates, designs and reviews. Research, root
+  causes, the design of a fix and every decision stay with it.
+- Every file change is made by a subagent, briefed with a self-contained,
+  precise task that already carries the design: code, tests, scripts,
+  version bumps, comments, docs and CLAUDE.md itself. The owner picks the
+  subagents' model in the session.
+- The main session reviews every result before it is committed: a full
+  review for anything in the guest's boot path (guest_start.sh,
+  guest_prepare.sh, oneos_switch.sh, return_to_oneui.sh), safety,
+  biometrics or the root script's writes; a quick review for mechanical
+  changes. It runs the relevant tests or checks that the subagent did.
+- Git and GitHub operations with no file edit (commit, push, opening and
+  merging a PR, fetching a log) are done by the main session directly: a
+  brief would cost more than the command.
 
 ## Biometrics in the guest (fingerprint and face)
 
@@ -36,9 +48,22 @@ Standing rules from the fork's owner. They apply to every session.
 
 ## Repository
 
-- Work lands in DeathThoughts/OneOS-test, branch s23-fixes-0515, through pull
-  requests (from the mlcraze5 fork too). Never push straight to
-  s23-fixes-0515 from the fork; never push to vdcoolok/OneOS or its upstream.
+- Work lands in DeathThoughts/OneOS-test through pull requests (from the
+  mlcraze5 fork too). Never push to vdcoolok/OneOS or its upstream.
+- Two long-lived branches:
+  - `debug`: every PR lands here first. Its APK (debug signing) is what the
+    owner tries on the phone.
+  - `release`: what users get. A change reaches it only after it was tried on
+    a phone from `debug`. Promotion is a PR that merges `debug` into a branch
+    made from `release`, plus the release build bump. Right after it is
+    merged, `release` is merged back into `debug`: build-apk.yml checks that
+    `debug` is based on `release`.
+- Settings that must differ between the test channel and users (the relaxed
+  battery gates, for example) belong to the build type, not to different code
+  on the two branches, so promotion stays a plain merge. Until a setting is
+  moved there, the promotion PR restores release's value and says so.
+- The mlcraze5/OneOS-build fork builds APKs from its own `debug` and
+  `release` branches; pushing there is only for test builds.
 - Follow the repository's own style: comments say why and name the phone or
   report the fix came from; one logical change per commit.
 
@@ -57,33 +82,5 @@ and before any subagent is briefed:
   available to read).
 - Separate the owner's own settings (One UI or guest settings) from OneOS
   bugs; settings are reported, not "fixed" in code.
-- Check this list of known dead ends and add to it whenever a new one is
-  found.
-
-### Known dead ends (do not plan these again)
-
-- ColorOS ORMS / screen-on CPU boost: ScreenOnCpuBoostHelper tries "orms core
-  service" (`Orms_ManagerInner: cannot connect to orms core service!`), then
-  UAH `urcc` (`Urcc is not declared`). Both are OPPO vendor-side; Samsung has
-  neither (session 25b4785c4206828f). Any boost must come from OneOS's side
-  (kernel nodes or Samsung's HYPER-HAL), measured first.
-- Other OPPO vendor HALs missing on Samsung, same reason:
-  `vendor.oplus.hardware.performance.IPerformance` (audioserver retries every
-  5 s, AudioBoost rt boost ret -1), `cryptoeng.ICryptoeng` (system_server main
-  thread waits 5 s at boot), `touch.IOplusTouch`, `displaypanelfeature`,
-  `mmdisplayfeature`, `rpmh`, `charger`.
-- CPU held at about 2.4 GHz all session: One UI's power saving
-  (`settings global low_power=1`) sets `cpufreq_max_limit`; the heat cap
-  respects it on purpose. Owner's setting, not a bug. One UI's framework
-  stops for the guest, but the limit it wrote stays in the kernel; with power
-  saving off the heat cap clears One UI's leftover limit and the guest runs at
-  full clock (session 4d2e95c67f065941: 2246400 -> -1, 3.53/4.47 GHz).
-- Samsung's lazy artd started by init during a guest session aborts with
-  `Got callback on service which we did not register: ...IArtd`; the guest's
-  own artd serves the compiles. Seen in every session, harmless.
-- ColorOS face unlock that needs a swipe: the guest's
-  `oplus_customize_face_unlock_remain_unlock_switch` (stay on lock screen) is
-  on. Owner's setting.
-- Face match time (0.8-2 s): Samsung's face HAL loads its TA on every
-  authenticate (about 0.35 s) and needs several frames in low light. Inside
-  Samsung's HAL; not touched.
+- Read the known dead ends in docs/dead-ends.md (do not plan those again) and
+  add to it whenever a new one is found.
