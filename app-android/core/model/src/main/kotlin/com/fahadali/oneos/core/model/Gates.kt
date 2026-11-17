@@ -260,8 +260,30 @@ object SwitchGates {
     const val R_LOGS = "not-collected"
     const val R_ZYGISK_OLD = "zygisk-next-old"
 
-    const val BATTERY_MIN_PERCENT = 5
-    const val BATTERY_MAX_C = 50f
+    /** What a release build requires, and what any process that never set its limits uses (fail safe). */
+    const val STRICT_BATTERY_MIN_PERCENT = 30
+    const val STRICT_BATTERY_MAX_TENTHS_C = 420
+
+    // Owner's decision, 2026-11-17: the build type decides the battery limits, not the code, so debug and
+    // release carry identical sources and promoting is a plain merge. Strict until the app sets them.
+    @Volatile private var minPercent = STRICT_BATTERY_MIN_PERCENT
+    @Volatile private var maxTenths = STRICT_BATTERY_MAX_TENTHS_C
+
+    val BATTERY_MIN_PERCENT: Int get() = minPercent
+    val BATTERY_MAX_C: Float get() = maxTenths / 10f
+
+    /** The same limit in tenths of a degree, the unit root's launch takes, so the app and root always agree. */
+    val BATTERY_MAX_TENTHS_C: Int get() = maxTenths
+
+    /**
+     * Sets the limits from the build type (BuildConfig). A value outside 5..100 % or 30.0..50.0 °C is a
+     * wrong build, not a wish: both limits go back to the strict ones.
+     */
+    fun setBatteryLimits(minPercent: Int, maxTenthsC: Int) {
+        val ok = minPercent in 5..100 && maxTenthsC in 300..500
+        this.minPercent = if (ok) minPercent else STRICT_BATTERY_MIN_PERCENT
+        this.maxTenths = if (ok) maxTenthsC else STRICT_BATTERY_MAX_TENTHS_C
+    }
 
     /**
      * The tick text for an untested (profile, image) pair, naming the system
