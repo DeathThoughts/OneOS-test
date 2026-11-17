@@ -4,19 +4,23 @@ Standing rules from the fork's owner. They apply to every session.
 
 ## Roles
 
-Owner's rule, revised 2026-11-17: design work goes to a subagent, mechanical
-work does not.
+Owner's rule, revised 2026-11-17: the main session does the thinking, a
+subagent does the hands-on work.
 
-- The main session plans, investigates, reviews and orchestrates.
-- A change that needs design or judgement is implemented by a subagent,
-  briefed with a self-contained task: a new feature, a bug fix, anything in
-  the guest's boot path (guest_start.sh, guest_prepare.sh, oneos_switch.sh,
-  return_to_oneui.sh) and anything touching safety, biometrics or the root
-  script's writes. The main session reviews the result before it is
-  committed. The owner picks the subagents' model in the session.
-- The main session makes mechanical changes itself: version bumps, merges and
-  syncs between branches, reverting a known commit, comments, docs and
-  CLAUDE.md. It still runs the relevant tests and says what changed.
+- The main session plans, investigates, designs and reviews. Research, root
+  causes, the design of a fix and every decision stay with it.
+- Every file change is made by a subagent, briefed with a self-contained,
+  precise task that already carries the design: code, tests, scripts,
+  version bumps, comments, docs and CLAUDE.md itself. The owner picks the
+  subagents' model in the session.
+- The main session reviews every result before it is committed: a full
+  review for anything in the guest's boot path (guest_start.sh,
+  guest_prepare.sh, oneos_switch.sh, return_to_oneui.sh), safety,
+  biometrics or the root script's writes; a quick review for mechanical
+  changes. It runs the relevant tests or checks that the subagent did.
+- Git and GitHub operations with no file edit (commit, push, opening and
+  merging a PR, fetching a log) are done by the main session directly: a
+  brief would cost more than the command.
 
 ## Biometrics in the guest (fingerprint and face)
 
