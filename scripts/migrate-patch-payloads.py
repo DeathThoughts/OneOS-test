@@ -18,7 +18,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = 'DeathThoughts/OneOS-test'
 TAG = 'fork-payloads-v1'
-CHANNEL_TAG = 'fork-fold8-experimental'
+CHANNEL_TAG = 'fork-fold8-experimental-v1'
 PIN = re.compile(r'[0-9a-f]{64}')
 
 
