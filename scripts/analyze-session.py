@@ -1831,7 +1831,8 @@ def main(argv: Sequence[str]) -> int:
         except (tarfile.TarError, OSError, EOFError, ValueError) as exc:
             print(f"erro: não foi possível ler o tgz {tgz}: {exc}", file=sys.stderr)
             return 2
-        session = Session(Path(tmp))\n        if not session.files:
+        session = Session(Path(tmp))
+        if not session.files:
             print(f"erro: sessão vazia: nenhum arquivo extraído de {tgz}", file=sys.stderr)
             return 2
         logs = scan_logcat(session)
