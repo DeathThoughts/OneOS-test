@@ -3736,6 +3736,12 @@ while true; do
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_panoramic_aod.sh >\"$STAGE/panoramic_aod.log\" 2>&1 || echo '[UI Activator] Wallpaper AOD setup failed; see panoramic_aod.log'
             fi
 
+            # ColorOS: OPPO's trace/log uploaders off (or back on), 2026-11-17; guest_prepare.sh wrote the script.
+            if [ -f \"$STAGE/data/oneos_oplus_telemetry.sh\" ]; then
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_oplus_telemetry.sh >\"$STAGE/oplus_telemetry.log\" 2>&1 </dev/null &
+                echo '[UI Activator] OPPO telemetry apps: started (oplus_telemetry.log)'
+            fi
+
             # ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN, session 146de99d: it ran
             # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it runs
             # in the background, so Home is never held up, and saves its marker and log in the guest data

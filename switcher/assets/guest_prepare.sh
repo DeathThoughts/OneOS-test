@@ -83,7 +83,7 @@ for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetoot
          vendor_de/0/fpdata \
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
-         oneos_sysui_compile.sh; do
+         oneos_sysui_compile.sh oneos_oplus_telemetry.sh; do
     no_symlink "$s"
 done
 # The framework jars must be the ones built with the storage, installd and
@@ -3165,6 +3165,66 @@ PANO
         rm -f "$STAGE/data/oplus/os/config/sys_global_uni_render_list.xml" 2>/dev/null
         echo "ColorOS UniRender: off on this $(getprop ro.soc.manufacturer) phone (${UR:+bound over$UR}${UR:-no switch list in the image})"
     fi
+fi
+# OPPO's trace and log uploaders turned off in ColorOS guests (owner, 2026-11-17).
+# S25 Ultra, coloros17-findx9u-in-1105, sessions db19aee410bd79ff and
+# 75e538ac0ed725df: incident_helper plus a second top ran at 40-100% CPU for
+# 30-60 s several times a session around com.oplus.onetrace activity. On a port
+# com.oplus.onetrace and com.oplus.olc (LogCoreService) have nothing to report
+# to OPPO, so oneos_oplus_telemetry.sh disables them for user 0 once the guest's
+# package manager answers (the UI activator starts it) and lists what it
+# disabled in /data/oneos_oplus_telemetry_off; a package the owner had disabled
+# is never listed or touched. com.oplus.midas is left alone.
+# ONEOS_GUEST_OPLUS_TELEMETRY=1 turns back on only what OneOS turned off.
+rm -f "$STAGE/data/oneos_oplus_telemetry.sh"
+if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
+    if [ "${ONEOS_GUEST_OPLUS_TELEMETRY:-0}" = 1 ]; then TELE_MODE=keep; else TELE_MODE=off; fi
+    { echo "MODE=$TELE_MODE"; cat <<'TELE'
+PKGS="com.oplus.onetrace com.oplus.olc"
+REC=/data/oneos_oplus_telemetry_off
+log() { echo "$(date +%T) $*"; }
+if [ -L "$REC" ]; then
+    rm -f "$REC"
+    log "$REC was a symlink; removed, not used"
+fi
+ok=0; bad=0
+if [ "$MODE" = off ]; then
+    dis=$(timeout 30 pm list packages -d 2>/dev/null </dev/null)
+    for p in $PKGS; do
+        if [ -z "$(timeout 30 pm path "$p" 2>/dev/null </dev/null)" ]; then
+            log "$p: not installed"
+        elif echo "$dis" | grep -qx "package:$p"; then
+            # off already: listed only if OneOS put it there before
+            log "$p: already off"
+        elif out=$(timeout 30 pm disable-user --user 0 "$p" 2>&1 </dev/null); then
+            if ! { [ -f "$REC" ] && grep -qx "$p" "$REC"; }; then echo "$p" >> "$REC"; fi
+            ok=$((ok + 1)); log "$p: turned off"
+        else
+            bad=$((bad + 1)); log "$p: pm disable-user failed: $out"
+        fi
+    done
+    log "OPPO telemetry apps: $ok turned off, $bad failed"
+else
+    if [ -f "$REC" ]; then
+        while read -r p; do
+            # pm is cmd, which forwards stdin: </dev/null keeps it from eating the rest of the record
+            case " $PKGS " in *" $p "*) ;; *) continue ;; esac
+            if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
+                ok=$((ok + 1)); log "$p: turned back on"
+            else
+                bad=$((bad + 1)); log "$p: pm enable failed: $out"
+            fi
+        done < "$REC"
+        [ "$bad" = 0 ] && rm -f "$REC"
+    fi
+    log "OPPO telemetry apps: kept, $ok turned back on, $bad failed"
+fi
+exit 0
+TELE
+    } > "$STAGE/data/oneos_oplus_telemetry.sh"
+    chmod 644 "$STAGE/data/oneos_oplus_telemetry.sh"
+    $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_oplus_telemetry.sh" 2>/dev/null || true
+    echo "ColorOS OPPO telemetry apps (onetrace, olc): $TELE_MODE (ONEOS_GUEST_OPLUS_TELEMETRY=${ONEOS_GUEST_OPLUS_TELEMETRY:-0}; oplus_telemetry.log)"
 fi
 # The guest's /oem, built in $STAGE/oem and bound over the image's. /oem is
 # empty in the images (ColorOS and Pixel) and scanned by the guest's
