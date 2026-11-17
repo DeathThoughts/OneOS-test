@@ -1851,6 +1851,81 @@ elif $BB mount --rbind /mnt "$ROOTFS/mnt"; then
     $BB mount --make-rslave "$ROOTFS/mnt" 2>/dev/null || true
     echo "Guest /mnt: One UI's, a recursive bind (ONEOS_GUEST_OWN_MNT=${ONEOS_GUEST_OWN_MNT:-1})"
 fi
+# Stock copies of the jars OneOS covers, for guest_start.sh's profile rebuild.
+# ART keys a binary profile by dex checksum, and the patched jars have other
+# checksums than the image's: odrefresh's speed-profile compile of the boot
+# image and system server found no profile data for them and left the framework
+# interpreted (S25 Ultra, ColorOS 17 coloros17-findx9u-in-1105, sessions
+# db19aee410bd79ff and 75e538ac0ed725df: SystemUI's Looper/MessageQueue frames in
+# boot.vdex under nterp_helper, one android.* method in boot.oat). profman needs
+# the stock jars to read the image's profiles, and the binds below hide them, so
+# they are copied out first, only when the jars, the profiles or the scheme
+# changed. Nothing of the image is changed. ONEOS_GUEST_BOOT_PROFILE=0 skips it.
+PF_DIR="$STAGE/data/oneos_prof"
+if [ "${ONEOS_GUEST_BOOT_PROFILE:-1}" = 0 ]; then
+    echo "Boot profiles: off (ONEOS_GUEST_BOOT_PROFILE=0)"
+else
+    PF_KEY=""; PF_ITEMS=""; PF_LIST=""; PF_N=0
+    for pj in "$STAGE"/*_patched.jar; do
+        [ -f "$pj" ] && [ ! -L "$pj" ] || continue
+        pn=${pj##*/}; pn=${pn%_patched.jar}
+        pc=0; ps=""
+        for pd in "$ROOTFS/system/framework" "$GUEST_SYSTEM_EXT/framework" "$GUEST_PRODUCT/framework"; do
+            if [ -f "$pd/$pn.jar" ] && [ ! -L "$pd/$pn.jar" ]; then pc=$((pc + 1)); ps="$pd/$pn.jar"; fi
+        done
+        if [ "$pc" != 1 ]; then echo "Boot profiles: $pn.jar has no single stock jar ($pc found); skipped"; continue; fi
+        if [ "$(stat -c %d:%i "$ps" 2>/dev/null)" = "$(stat -c %d:%i "$pj" 2>/dev/null)" ]; then
+            echo "Boot profiles: $pn.jar is still covered; skipped"; continue
+        fi
+        PF_KEY="$PF_KEY $pn $(stat -c '%s %Y' "$pj" 2>/dev/null) $(stat -c '%s %Y' "$ps" 2>/dev/null) $(stat -c '%s %Y' "$ps.prof" 2>/dev/null || echo none)"
+        PF_ITEMS="$PF_ITEMS $pn:$ps"
+        PF_LIST="$PF_LIST$pn.jar ${ps#$ROOTFS}
+"
+        PF_N=$((PF_N + 1))
+    done
+    if [ "$PF_N" = 0 ]; then
+        echo "Boot profiles: no patched jar with a stock jar to read; nothing to do"
+    else
+        PF_KEY="$PF_KEY $(stat -c '%s %Y' "$ROOTFS/system/etc/boot-image.prof" 2>/dev/null || echo none) v1"
+        PF_K=$(printf '%s' "$PF_KEY" | cksum 2>/dev/null | awk '{ print $1 "-" $2 }')
+        no_symlink oneos_prof
+        no_symlink oneos_prof/key
+        PF_CUR=$(cat "$PF_DIR/key" 2>/dev/null)
+        if [ "$PF_CUR" = "$PF_K ok" ] || [ "$PF_CUR" = "$PF_K failed" ]; then
+            no_symlink oneos_prof/stock
+            rm -rf "$PF_DIR/stock" "$PF_DIR/stock.list" "$PF_DIR/pending"
+            case "$PF_CUR" in
+                *" ok") echo "Boot profiles: current for $PF_N jars ($PF_K)" ;;
+                *) echo "Boot profiles: failed before for these $PF_N jars ($PF_K); not retried" ;;
+            esac
+        else
+            mkdir -p "$PF_DIR" && chmod 700 "$PF_DIR" && chown 0:0 "$PF_DIR" 2>/dev/null
+            no_symlink oneos_prof/stock
+            no_symlink oneos_prof/out
+            rm -rf "$PF_DIR/stock" "$PF_DIR/out" "$PF_DIR/stock.list" "$PF_DIR/pending"
+            PF_OK=1
+            mkdir -p "$PF_DIR/stock" && chmod 700 "$PF_DIR/stock" || PF_OK=0
+            for it in $PF_ITEMS; do
+                [ "$PF_OK" = 1 ] || break
+                pn=${it%%:*}; ps=${it#*:}
+                cp "$ps" "$PF_DIR/stock/$pn.jar" 2>/dev/null &&
+                    [ "$(stat -c %s "$PF_DIR/stock/$pn.jar")" = "$(stat -c %s "$ps")" ] || PF_OK=0
+            done
+            if [ "$PF_OK" = 1 ]; then
+                printf '%s' "$PF_LIST" > "$PF_DIR/stock.list" &&
+                    printf '%s\n' "$PF_K" > "$PF_DIR/pending" || PF_OK=0
+            fi
+            if [ "$PF_OK" = 1 ]; then
+                chmod 644 "$PF_DIR/stock.list" "$PF_DIR/pending" "$PF_DIR/stock"/*.jar 2>/dev/null
+                chown 0:0 "$PF_DIR/stock.list" "$PF_DIR/pending" "$PF_DIR/stock" "$PF_DIR/stock"/*.jar 2>/dev/null
+                echo "Boot profiles: $PF_N stock jars copied for the profile rebuild ($PF_K)"
+            else
+                rm -rf "$PF_DIR/stock" "$PF_DIR/stock.list" "$PF_DIR/pending"
+                echo "Boot profiles: copying the stock jars failed; the image's profiles stay"
+            fi
+        fi
+    fi
+fi
 if [ -f "$STAGE/services_patched.jar" ]; then
     $BB umount -l "$ROOTFS/system/framework/services.jar" 2>/dev/null || true
     $BB mount --bind "$STAGE/services_patched.jar" "$ROOTFS/system/framework/services.jar"

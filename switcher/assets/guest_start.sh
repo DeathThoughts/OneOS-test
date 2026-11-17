@@ -3480,8 +3480,133 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
     JARS=$(for j in $(printf '%s:%s:%s' "${BOOTCLASSPATH:-}" "${SYSTEMSERVERCLASSPATH:-}" "${STANDALONE_SYSTEMSERVER_JARS:-}" | tr ':' ' '); do
                ls -lnL "$j" 2>/dev/null | awk '{ print $5, $6, $7, $NF }'
            done | cksum 2>/dev/null | awk '{ print $1 "-" $2 }')
+    # Profiles for the patched jars (S25 Ultra, ColorOS 17 coloros17-findx9u-in-1105,
+    # sessions db19aee410bd79ff and 75e538ac0ed725df: SystemUI's Looper/MessageQueue
+    # frames ran from boot.vdex under nterp_helper, one android.* method in boot.oat).
+    # odrefresh compiles the boot image and system server with speed-profile from
+    # /system/etc/boot-image.prof and <jar>.prof; ART keys a profile by dex checksum,
+    # so the patched jars got no profile data and nothing of them was compiled.
+    # guest_prepare.sh left the stock jars in /data/oneos_prof/stock; the guest's own
+    # profman writes profiles with the patched checksums, bound read-only over the
+    # image's (this mount namespace only; the image is not changed). odrefresh does not
+    # look at profiles when it decides the artifacts are current, so it compiles once
+    # with --force-compile. Any failure: the image's profiles, as before.
+    # ONEOS_GUEST_BOOT_PROFILE=0 skips all of it.
+    P=/data/oneos_prof
+    PLOG=/data/oneos_prof.log
+    PROFMAN=/apex/com.android.art/bin/profman
+    PROF_BOUND=0; PROF_KEY=""; PROF_MNTS=""; PSUM=""
+    plog() { echo "$($BB date +%T) $*" >> "$PLOG"; }
+    prof_patched() { # <class path entry>: a jar OneOS covers, with its stock copy kept
+        [ -f "$P/stock/${1##*/}" ] && awk -v b="${1##*/}" '$1 == b { f = 1 } END { exit !f }' "$P/stock.list" 2>/dev/null
+    }
+    prof_count() { awk 'END { print NR }'; }
+    prof_make() { # <name> <boot|app> <the image's profile> <stock jar args> <patched jar args>
+        pm_n=$1; pm_o=$3; pm_s=$4; pm_p=$5; pm_ty=""
+        [ "$2" = boot ] && pm_ty="--output-profile-type=boot"
+        timeout 120 "$PROFMAN" --dump-classes-and-methods --profile-file="$pm_o" $pm_s > "$P/out/$pm_n.txt" 2>> "$PLOG"; pm_rc=$?
+        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.txt" ]; then plog "$pm_n.prof: dump with the stock jars failed (exit $pm_rc)"; return 1; fi
+        timeout 120 "$PROFMAN" $pm_ty --create-profile-from="$P/out/$pm_n.txt" $pm_p --reference-profile-file="$P/out/$pm_n.prof" >> "$PLOG" 2>&1; pm_rc=$?
+        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.prof" ]; then plog "$pm_n.prof: create with the patched jars failed (exit $pm_rc)"; return 1; fi
+        pm_c1=$(prof_count < "$P/out/$pm_n.txt")
+        pm_c2=$(timeout 60 "$PROFMAN" --dump-classes-and-methods --profile-file="$pm_o" $pm_p 2>/dev/null | prof_count)
+        pm_c3=$(timeout 60 "$PROFMAN" --dump-classes-and-methods --profile-file="$P/out/$pm_n.prof" $pm_p 2>/dev/null | prof_count)
+        plog "$pm_n.prof: $pm_c1 entries with the image's own jars, $pm_c2 with OneOS's jars as they are (what ART used so far), $pm_c3 in the rebuilt profile"
+        return 0
+    }
+    prof_bind() { # <file> <target>
+        if [ ! -s "$1" ] || [ ! -f "$2" ]; then plog "bind $1 -> $2: missing; skipped"; return 1; fi
+        chmod 644 "$1"; $BB chcon u:object_r:system_file:s0 "$1" 2>/dev/null
+        $BB mount --bind "$1" "$2" 2>> "$PLOG" || { plog "bind $1 -> $2 failed"; return 1; }
+        $BB mount -o remount,bind,ro "$2" 2>> "$PLOG" || plog "remount ro of $2 failed (bound, writable)"
+        if [ "$($BB stat -c %d:%i "$2" 2>/dev/null)" != "$($BB stat -c %d:%i "$1" 2>/dev/null)" ]; then
+            plog "bind $1 -> $2: the target is not the file; undone"; $BB umount -l "$2" 2>/dev/null; return 1
+        fi
+        plog "bound $1 -> $2"; PROF_MNTS="$PROF_MNTS $2"; return 0
+    }
+    BCP=$(printf '%s' "${BOOTCLASSPATH:-}" | tr ':' ' ')
+    SSCP=$(printf '%s:%s' "${SYSTEMSERVERCLASSPATH:-}" "${STANDALONE_SYSTEMSERVER_JARS:-}" | tr ':' ' ')
+    : > /data/odrefresh.log
+    if [ "${ONEOS_GUEST_BOOT_PROFILE:-1}" != 0 ]; then
+        # B1: build the profiles, once per key from guest_prepare.sh. Without a profman the
+        # key is closed as failed too: guest_prepare.sh would copy the stock jars again on every
+        # switch while pending stays. After a success only the .prof files are kept (the text
+        # dumps are just the way from the stock jars to the patched ones).
+        if [ -f "$P/pending" ] && [ ! -L "$P/pending" ] && [ ! -x "$PROFMAN" ]; then
+            echo "$(cat "$P/pending" 2>/dev/null) failed" > "$P/key"
+            rm -rf "$P/stock" "$P/stock.list" "$P/pending" "$P/out"
+            plog "no profman at $PROFMAN: the image's profiles stay"
+        fi
+        if [ -f "$P/pending" ] && [ ! -L "$P/pending" ] && [ -x "$PROFMAN" ]; then
+            PT0=$(date +%s)
+            PK=$(cat "$P/pending" 2>/dev/null)
+            plog "building profiles for $PK"
+            rm -rf "$P/out"; mkdir -p "$P/out"
+            PFAIL=0; PMADE=0
+            if [ -f /system/etc/boot-image.prof ]; then
+                PA_S=""; PA_P=""; PN=0
+                for e in $BCP; do
+                    if prof_patched "$e"; then PA_S="$PA_S --apk=$P/stock/${e##*/} --dex-location=$e"; PN=$((PN + 1))
+                    else PA_S="$PA_S --apk=$e --dex-location=$e"; fi
+                    PA_P="$PA_P --apk=$e --dex-location=$e"
+                done
+                if [ "$PN" -gt 0 ]; then
+                    if prof_make boot-image boot /system/etc/boot-image.prof "$PA_S" "$PA_P"; then PMADE=$((PMADE + 1)); else PFAIL=1; fi
+                fi
+            fi
+            for e in $SSCP; do
+                prof_patched "$e" && [ -f "$e.prof" ] || continue
+                [ -s "$P/out/${e##*/}.prof" ] && continue
+                if prof_make "${e##*/}" app "$e.prof" "--apk=$P/stock/${e##*/} --dex-location=$e" "--apk=$e --dex-location=$e"; then PMADE=$((PMADE + 1)); else PFAIL=1; fi
+            done
+            if [ "$PFAIL" = 0 ] && [ "$PMADE" -gt 0 ]; then
+                echo "$PK ok" > "$P/key"; PRES=ok; rm -f "$P/out"/*.txt
+            else
+                echo "$PK failed" > "$P/key"; rm -rf "$P/out"; PRES=failed
+            fi
+            rm -rf "$P/stock" "$P/stock.list" "$P/pending"
+            plog "profiles $PRES ($PMADE made) in $(( $(date +%s) - PT0 )) s"
+            PSUM="$PMADE profiles $PRES in $(( $(date +%s) - PT0 )) s"
+        fi
+        # B2: bind them, every boot
+        PKL=$(cat "$P/key" 2>/dev/null)
+        case "$PKL" in
+            *" ok")
+                PROF_KEY=${PKL% ok}
+                [ -s "$P/out/boot-image.prof" ] && prof_bind "$P/out/boot-image.prof" /system/etc/boot-image.prof && PROF_BOUND=1
+                for e in $SSCP; do
+                    [ -s "$P/out/${e##*/}.prof" ] && prof_bind "$P/out/${e##*/}.prof" "$e.prof" && PROF_BOUND=1
+                done ;;
+        esac
+    fi
+    # B3: one compile with them
+    if [ "$PROF_BOUND" = 1 ]; then
+        if [ "$(cat "$ADC/oneos_prof" 2>/dev/null)" != "$PROF_KEY" ]; then
+            echo "--- rebuilt profiles ($PROF_KEY): --force-compile" >> /data/odrefresh.log
+            PT1=$(date +%s)
+            timeout 200 "$ODR" --force-compile >> /data/odrefresh.log 2>&1; rc=$?
+            case "$rc" in 0|80) [ -f "$ADC/dalvik-cache/arm64/boot.art" ] && PFC=ok || PFC=bad ;; *) PFC=bad ;; esac
+            if [ "$PFC" = ok ]; then
+                echo "$PROF_KEY" > "$ADC/oneos_prof"
+                plog "force-compile with the rebuilt profiles: exit $rc in $(( $(date +%s) - PT1 )) s"
+                PSUM="$PSUM; bound, compiled in $(( $(date +%s) - PT1 )) s"
+            else
+                for t in $PROF_MNTS; do $BB umount -l "$t" 2>/dev/null; done
+                echo "$PROF_KEY failed" > "$P/key"; rm -rf "$P/out"
+                plog "!!! force-compile with the rebuilt profiles failed (exit $rc); back to the image's profiles"
+                echo "--- !!! force-compile with the rebuilt profiles failed (exit $rc); back to the image's profiles" >> /data/odrefresh.log
+                PROF_BOUND=0
+                PSUM="$PSUM; force-compile failed (exit $rc), the image's profiles"
+            fi
+        else
+            PSUM="$PSUM; bound, artifacts already made with them"
+        fi
+    else
+        rm -f "$ADC/oneos_prof"
+    fi
+    if [ -n "$PSUM" ]; then echo "[Pivoted Root] odrefresh: boot profiles: $PSUM ($PLOG)"; fi
     t0=$(date +%s)
-    timeout 300 "$ODR" --compile > /data/odrefresh.log 2>&1; rc=$?
+    timeout 300 "$ODR" --compile >> /data/odrefresh.log 2>&1; rc=$?
     # odrefresh takes the image's own primary boot image as usable and compiles only
     # the mainline extension on top of it, which dex2oat cannot load (OneOS's
     # framework.jar), and aborts in no time (thirteenth run: 0 files). Without a boot
@@ -3529,6 +3654,7 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
     # 80 compiled, 81 compilation failed, 82 cleanup failed.
     case "$rc" in 0) w="current" ;; 79) w="compilation needed" ;; 80) w="compiled" ;; 81) w="compilation failed" ;; 82) w="cleanup failed" ;; 124) w="timed out" ;; *) w="exit $rc" ;; esac
     echo "[Pivoted Root] odrefresh: $w in $(( $(date +%s) - t0 )) s ($(ls "$ADC/dalvik-cache/arm64" 2>/dev/null | wc -l) files in $ADC/dalvik-cache/arm64, concurrent-copying ${CCHAVE:-none}, the zygote's $CCWANT; /data/odrefresh.log)"
+    echo "[Pivoted Root] odrefresh: boot.oat $(( $(stat -c %s "$ADC/dalvik-cache/arm64/boot.oat" 2>/dev/null || echo 0) / 1024 )) KB, boot.vdex $(( $(stat -c %s "$ADC/dalvik-cache/arm64/boot.vdex" 2>/dev/null || echo 0) / 1024 )) KB"
 else
     echo "[Pivoted Root] odrefresh: not run (ONEOS_GUEST_ODREFRESH=$ONEOS_GUEST_ODREFRESH, JIT zygote $ONEOS_GUEST_JIT_ZYGOTE)"
 fi
