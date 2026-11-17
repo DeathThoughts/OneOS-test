@@ -78,10 +78,12 @@ java -cp "$work/classes" SignGuestStartPatch debug "$build" "$image" "$image_sha
   "$sequence" "$base" "$work/guest_start.sh" "$PATCH_KEYS" "$work/guest-start.patch"
 ```
 
-Publish only the signed `guest-start.patch` at the root of the
-`oneos-patch-feed-debug` branch. Release uses `oneos-patch-feed-release`.
-The v1 feed carries one target at a time. Keep the debug marker separate from
-release and leave Gallery and audio changes out of this test.
+For debug build 165 and later, publish the signed file as
+`<host build>/<image ID>/guest-start.patch` on the `oneos-patch-feed-debug`
+branch. Earlier debug builds read `guest-start.patch` at the branch root.
+Release reads `guest-start.patch` at the root of `oneos-patch-feed-release`.
+Keep the debug marker separate from release and leave Gallery and audio
+changes out of this test.
 
 In the guest, check for a patch and queue it. Choose **Restart guest** and
 wait for Home. After returning to One UI, inspect the startup marker and the

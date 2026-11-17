@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""ColorOS's Bluetooth on a Helio G99 phone runs with the stack's own "Android's original behaviour" switch
-(guest_props.sh add): OPPO's quality report parser reads past the MediaTek controller's 48-byte events and
-the Bluetooth process dies again and again (A16 4G, reports c6e0068a and 049d5675)."""
+"""The ColorOS Bluetooth override is opt-in, including on the Galaxy A55."""
 from pathlib import Path
 import os
 import subprocess
@@ -13,7 +11,7 @@ SOURCE = (ROOT / 'switcher/assets/guest_props.sh').read_text()
 START = '    BTO=persist.sys.oplus.bt.use_origin\n'
 CODE = START + SOURCE.split(START, 1)[1].split('    # Power key stall (run 32:', 1)[0]
 KEY = 'persist.sys.oplus.bt.use_origin'
-G99 = "MT6789: OPPO's quality report parser reads past this controller's 48-byte events"
+OPT_IN = {'ONEOS_GUEST_BT_ORIGIN': '1'}
 
 
 class OplusBtOrigin(unittest.TestCase):
@@ -35,21 +33,13 @@ class OplusBtOrigin(unittest.TestCase):
             now = {p.name: p.read_text() for p in store.iterdir() if p.name != 'ro.soc.model'}
             return out.stdout, (root / 'new').read_text(), ovr, now
 
-    def test_the_block_is_there(self):
-        self.assertIn('auto:MT6789*)', CODE)
-        self.assertLess(len(CODE), 1500)
-
-    def test_a_helio_g99_phone_gets_the_switch_for_the_session(self):
+    def test_a_helio_g99_phone_also_requires_opt_in(self):
         for soc in ('MT6789', 'MT6789V/CD'):
             with self.subTest(soc):
-                out, new, ovr, now = self.run_case(soc=soc)
-                self.assertEqual(f'ro.build.id=X\n{KEY}=true\n', new)
-                self.assertEqual(f'guest_props: {KEY}=true for the session ({G99.replace("MT6789", soc)})\n', out)
-                # Nothing of One UI's is touched: the name goes the way of the image's own props.
-                self.assertEqual(('', {}), (ovr, now))
+                self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(soc=soc))
 
     def test_the_images_own_value_is_replaced_not_doubled(self):
-        out, new, ovr, now = self.run_case(new=f'a=1\n{KEY}=false\npersist.sys.oplus.bt.use_originX=1\nb=2\n')
+        _, new, _, _ = self.run_case(env=OPT_IN, new=f'a=1\n{KEY}=false\npersist.sys.oplus.bt.use_originX=1\nb=2\n')
         self.assertEqual(f'a=1\npersist.sys.oplus.bt.use_originX=1\nb=2\n{KEY}=true\n', new)
 
     def test_other_phones_and_other_systems_are_left_alone(self):
@@ -60,20 +50,22 @@ class OplusBtOrigin(unittest.TestCase):
                 self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(**kw))
 
     def test_the_override_sets_it_on_any_phone_with_a_coloros_guest(self):
-        out, new, ovr, now = self.run_case(soc='SM8850', env={'ONEOS_GUEST_BT_ORIGIN': '1'})
-        self.assertEqual((f'guest_props: {KEY}=true for the session (ONEOS_GUEST_BT_ORIGIN=1)\n', f'ro.build.id=X\n{KEY}=true\n'),
-                         (out, new))
-        self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(soc='SM8850', oplus=0, env={'ONEOS_GUEST_BT_ORIGIN': '1'}))
+        for soc in ('SM8850', 's5e8845', 'MT6789'):
+            with self.subTest(soc):
+                out, new, ovr, now = self.run_case(soc=soc, env=OPT_IN)
+                self.assertEqual((f'guest_props: {KEY}=true for the session (ONEOS_GUEST_BT_ORIGIN=1)\n',
+                                  f'ro.build.id=X\n{KEY}=true\n', '', {}), (out, new, ovr, now))
+        self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(soc='s5e8845', oplus=0, env=OPT_IN))
 
     def test_a_name_one_ui_holds_is_overridden_and_restorable(self):
         # Left behind by a session that never returned: then it is One UI's to get back.
         host = f'ro.soc.model\n{KEY}\n'
-        out, new, ovr, now = self.run_case(host=host, props={KEY: 'false'})
-        self.assertEqual((f'guest_props: {KEY}=false overridden to true for the session ({G99})\n', 'ro.build.id=X\n',
+        out, new, ovr, now = self.run_case(host=host, env=OPT_IN, props={KEY: 'false'})
+        self.assertEqual((f'guest_props: {KEY}=false overridden to true for the session (ONEOS_GUEST_BT_ORIGIN=1)\n', 'ro.build.id=X\n',
                           f'{KEY}=false\n', {KEY: 'true'}), (out, new, ovr, now))
         # Already true, or a write that fails: nothing recorded, nothing said.
-        self.assertEqual(('', 'ro.build.id=X\n', '', {KEY: 'true'}), self.run_case(host=host, props={KEY: 'true'}))
-        self.assertEqual(('', 'ro.build.id=X\n', '', {KEY: 'false'}), self.run_case(host=host, props={KEY: 'false'}, rp_fails=True))
+        self.assertEqual(('', 'ro.build.id=X\n', '', {KEY: 'true'}), self.run_case(host=host, env=OPT_IN, props={KEY: 'true'}))
+        self.assertEqual(('', 'ro.build.id=X\n', '', {KEY: 'false'}), self.run_case(host=host, env=OPT_IN, props={KEY: 'false'}, rp_fails=True))
 
 
 if __name__ == '__main__':

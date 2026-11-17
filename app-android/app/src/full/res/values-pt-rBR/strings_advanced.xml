@@ -452,7 +452,7 @@
     <string name="guest_patch_auto_title">Baixar correções do convidado automaticamente</string>
     <string name="guest_patch_auto_summary">Verifica ao abrir o OneOS no convidado. Para aplicar, reinicie o sistema convidado.</string>
     <string name="guest_vulkan_title">Renderização Vulkan (experimental)</string>
-    <string name="guest_vulkan_summary">Usa Vulkan na interface do ColorOS 17 e na composição por GPU em uma thread dedicada no Galaxy S23. Entra em vigor ao iniciar pela One UI.</string>
+    <string name="guest_vulkan_summary">Usa Vulkan na interface do ColorOS 17 e na composição por GPU em uma thread dedicada. Entra em vigor ao iniciar pela One UI.</string>
     <string name="guest_vulkan_warning">O Vulkan pode causar falhas gráficas, travamentos de apps ou tela preta. Se isso acontecer, volte à One UI e desative a opção antes de iniciar o ColorOS novamente. Em caso de tela preta, segure os dois botões de volume por 3 segundos para voltar.</string>
     <string name="guest_vulkan_enable">Ativar Vulkan</string>
 </resources>

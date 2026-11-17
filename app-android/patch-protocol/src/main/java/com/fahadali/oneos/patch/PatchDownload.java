@@ -23,9 +23,11 @@ public final class PatchDownload {
             this.branch = branch;
         }
 
-        URL url() throws IOException {
+        URL url(GuestStartPatch.Compatibility compatibility) throws IOException {
+            // Debug candidates must coexist with the previous phone test.
+            String folder = this == DEBUG ? compatibility.hostBuild() + "/" + compatibility.imageId() + "/" : "";
             return new URL("https://raw.githubusercontent.com/DeathThoughts/OneOS-test/"
-                    + branch + "/guest-start.patch");
+                    + branch + "/" + folder + "guest-start.patch");
         }
     }
 
@@ -67,7 +69,7 @@ public final class PatchDownload {
             byte[] envelope = null;
             HttpURLConnection connection = null;
             try {
-                connection = network.connect(channel.url());
+                connection = network.connect(channel.url(compatibility));
                 connection.setInstanceFollowRedirects(false);
                 connection.setUseCaches(false);
                 int requestTimeout = Math.min(REQUEST_TIMEOUT_MS, remainingMillis(start));
