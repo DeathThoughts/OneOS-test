@@ -239,11 +239,11 @@ class StageScriptTest {
             assertEquals("$min $max: $r", RootScript.EXIT_USAGE, r.exit)
             assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf(min, max)).isNotEmpty())
         }
-        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + "0").exit)
+        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + listOf("0", "0")).exit)
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(10)))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf("100", "300")))
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + "0").isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + listOf("0", "0")).isNotEmpty())
     }
 
     @Test
@@ -1753,6 +1753,24 @@ class StageScriptTest {
         assertEquals(before, env.readText())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "2")).isNotEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0")).isEmpty())
+    }
+
+    @Test
+    fun patchAutoLaunchArgumentReachesRootChecks() = eachShell { fr ->
+        val profile = Profiles.S_8550
+        fr.props["ro.product.model"] = "SM-S911B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val s = Stager(fr, profile)
+        s.prepare()
+        val launch = listOf("session", s.code, "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500")
+        for (patchAuto in listOf("0", "1")) {
+            refused(fr.run(RootScript.Verb.LAUNCH, *(launch + patchAuto).toTypedArray()),
+                "test root: every launch check passed")
+        }
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0")).isNotEmpty())
     }
 
     @Test

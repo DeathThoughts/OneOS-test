@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.KeyPairGenerator;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.List;
 
@@ -37,13 +39,29 @@ public final class PatchDownloadTest {
             throw new AssertionError("missing rate limit");
         }
         refuses(new PatchDownload(network), debug, throttle, "patch feed is rate limited");
-        if (responses.size() != 4 || debug.url().equals(release.url())) {
+        if (responses.size() != 4 || debug.url().toExternalForm().equals(release.url().toExternalForm())) {
             throw new AssertionError("cooldown made a request or channels share a feed");
         }
         refuses(new PatchDownload(network), release, throttle, "patch feed returned HTTP 500");
         if (responses.size() != 1) throw new AssertionError("wrong transient retry count");
         refuses(new PatchDownload(network), release, throttle, "patch transfer failed");
         if (!responses.isEmpty()) throw new AssertionError("truncated response was not read");
+
+        var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        var binding = new GuestStartPatch.Compatibility("release", 159, "test", "1".repeat(64), "2".repeat(64));
+        byte[] envelope = GuestStartPatch.sign(new byte[]{1, 2, 3}, keys.getPrivate(), binding, 1);
+        PatchDownload good = new PatchDownload(url -> new Reply(url, 200, envelope, envelope.length));
+        if (!Arrays.equals(good.download(release, throttle, keys.getPublic(), binding, 0), envelope)) {
+            throw new AssertionError("verified bytes changed during transfer");
+        }
+        envelope[envelope.length - 1] ^= 1;
+        try {
+            good.download(release, throttle, keys.getPublic(), binding, 0);
+            throw new AssertionError("tampered response was returned");
+        } catch (IOException error) {
+            if (!"patch payload SHA-256 mismatch".equals(error.getMessage())) throw error;
+        }
+
     }
 
     private static void refuses(PatchDownload download, PatchDownload.Channel channel,
@@ -59,16 +77,24 @@ public final class PatchDownloadTest {
 
     private static final class Reply extends HttpURLConnection {
         private final int status;
+        private final byte[] bytes;
+        private final long declared;
 
         Reply(URL url, int status) {
+            this(url, status, new byte[4], 5);
+        }
+
+        Reply(URL url, int status, byte[] bytes, long declared) {
             super(url);
             this.status = status;
+            this.bytes = bytes;
+            this.declared = declared;
         }
 
         @Override public int getResponseCode() { return status; }
         @Override public String getHeaderField(String name) { return "Retry-After".equals(name) ? "120" : null; }
-        @Override public long getContentLengthLong() { return 5; }
-        @Override public InputStream getInputStream() { return new ByteArrayInputStream(new byte[4]); }
+        @Override public long getContentLengthLong() { return declared; }
+        @Override public InputStream getInputStream() { return new ByteArrayInputStream(bytes); }
         @Override public void connect() {}
         @Override public void disconnect() {}
         @Override public boolean usingProxy() { return false; }

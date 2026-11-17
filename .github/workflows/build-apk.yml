@@ -31,6 +31,28 @@ permissions:
   packages: read
 
 jobs:
+  migrate-patch-payloads:
+    # Only the owner's integration branch may perform the initial copy. Other PRs verify it.
+    if: >-
+      github.repository == 'DeathThoughts/OneOS-test' && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'fix/restart-home-and-bundled-script'
+    permissions:
+      contents: write
+    concurrency:
+      group: fork-patch-payload-migration
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Verify and migrate pinned patch payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/migrate-patch-payloads.py --publish --target "$GITHUB_SHA"
+
   build:
     if: >-
       github.ref_name == 'release' || github.ref_name == 'debug' ||
@@ -164,10 +186,37 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
+      - name: Configure debug patch pin and sign a marker
+        id: debug-patch
+        if: matrix.variant == 'debug'
+        env:
+          ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64: ${{ secrets.ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64 }}
+          ONEOS_PATCH_DEBUG_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_DEBUG_PUBLIC_KEY }}
+          ONEOS_PATCH_RELEASE_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_RELEASE_PUBLIC_KEY }}
+          ONEOS_PATCH_SMOKE_IMAGE: ${{ vars.ONEOS_PATCH_SMOKE_IMAGE }}
+          ONEOS_PATCH_SMOKE_SEQUENCE: ${{ vars.ONEOS_PATCH_SMOKE_SEQUENCE }}
+        run: |
+          set -eu
+          if [ -n "${ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64:-}" ]; then
+            sh scripts/sign-debug-patch-smoke.sh "$RUNNER_TEMP/oneos-debug-patch"
+            ONEOS_PATCH_DEBUG_PUBLIC_KEY=$(cat "$RUNNER_TEMP/oneos-debug-patch/public-key.b64")
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${ONEOS_PATCH_DEBUG_PUBLIC_KEY:-}" ]; then
+            # BuildConfig only accepts this DER public-key encoding. Do not let
+            # an unexpected newline in a repository variable write extra settings.
+            printf '%s' "$ONEOS_PATCH_DEBUG_PUBLIC_KEY" | grep -qE '^[A-Za-z0-9+/]{59}=$'
+            [ "${#ONEOS_PATCH_DEBUG_PUBLIC_KEY}" = 60 ]
+            printf 'ONEOS_PATCH_DEBUG_PUBLIC_KEY=%s\n' "$ONEOS_PATCH_DEBUG_PUBLIC_KEY" >> "$GITHUB_ENV"
+          else
+            echo "Signed patch feed disabled in this build: no debug patch key." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # :app refuses to run its staging task without the git-ignored
       # switcher/assets/guest_manager.apk, so stage it first.
       - name: Build guest manager
         env:
+          ONEOS_PATCH_RELEASE_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_RELEASE_PUBLIC_KEY }}
           # settings.gradle.kts reads these when ~/.config/twidget/github.properties
           # is absent. The workflow token with packages:read should read
           # tribalfs' public packages; if maven.pkg.github.com refuses it, add a
@@ -183,20 +232,30 @@ jobs:
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           python3 scripts/test-guest-manager-update.py
+          python3 scripts/test-patch-channel.py
+          python3 scripts/test-patch-migration.py
+          python3 scripts/migrate-patch-payloads.py --check-inventory
           cd app-android
-          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
+            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments'
 
-      - name: Verify signed guest startup patch format
+      - name: Verify signed guest startup patch lifecycle
         run: |
           classes=$(mktemp -d)
-          javac -d "$classes" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/PatchDownload.java" scripts/GuestStartPatchTest.java "scripts/PatchDownloadTest.java"
+          javac -d "$classes" app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/*.java \
+            scripts/GuestStartPatchTest.java scripts/PatchDownloadTest.java scripts/PatchTrialTest.java scripts/SignGuestStartPatch.java
           java -cp "$classes" GuestStartPatchTest
           java -cp "$classes" com.fahadali.oneos.patch.PatchDownloadTest
+          java -cp "$classes" PatchTrialTest
+          python3 scripts/test-guest-patch-handoff.py
 
       - name: Verify restart Home acknowledgement
         run: |
           sh -n switcher/assets/oneos_switch.sh
           sh -n switcher/assets/guest_prepare.sh
+          sh -n switcher/assets/guest_patch.sh
           python3 scripts/test-restart-home.py
 
       - name: Verify guest media mount safety
@@ -276,6 +335,13 @@ jobs:
             dist/*.apk
             dist/*.apk.sha256
             dist/*update-*.json
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        if: steps.debug-patch.outputs.ready == 'true'
+        with:
+          name: oneos-debug-signed-patch
+          path: ${{ runner.temp }}/oneos-debug-patch/guest-start.patch
           if-no-files-found: error
 
 

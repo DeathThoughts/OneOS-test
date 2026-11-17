@@ -45,7 +45,7 @@ class AboutFragment : PreferenceFragmentCompat() {
         }
     }
 
-    /** Hands the link to the browser (the app's only network use is Send to the OneOS team). */
+    /** Attribution links open in the browser. Support reports go to the fork’s issues. */
     private fun openInBrowser(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
         try {

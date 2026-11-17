@@ -31,7 +31,10 @@ public final class GuestStartPatchTest {
         KeyPair otherKey = generator.generateKeyPair();
         String baseHash = GuestStartPatch.sha256(base);
         var expected = new GuestStartPatch.Compatibility("debug", BUILD, IMAGE_ID, IMAGE_HASH, baseHash);
-        byte[] good = signed(key, baseHash, payload, payload.length, SEQUENCE);
+        byte[] good = GuestStartPatch.sign(payload, key.getPrivate(), expected, SEQUENCE);
+        if (!Arrays.equals(good, signed(key, baseHash, payload, payload.length, SEQUENCE))) {
+            throw new AssertionError("signer changed the wire format");
+        }
         var verified = GuestStartPatch.verify(new ByteArrayInputStream(good), key.getPublic(), expected, SEQUENCE - 1);
         if (verified.sequence() != SEQUENCE || !Arrays.equals(verified.payload(), payload)) {
             throw new AssertionError("valid patch failed verification");
