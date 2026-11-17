@@ -49,7 +49,7 @@ Use the exact `guest_start.sh` and host build from the bootstrap source. Read th
 image ID and raw SHA-256 from the booted stage or from the source
 `image_raw` table. On this S23, verify which ColorOS image was prepared
 before using the example. For `coloros17-findx9u-in-1105` the raw image hash
-in build 159 is
+in the raw-image table is
 `6c089f2d043d60f34b40dd58ad44f88621163163c1664121753311a115da8d7c`.
 
 From the bootstrap checkout with a JDK, use a private signing directory
@@ -64,6 +64,7 @@ base=switcher/assets/guest_start.sh
 image=coloros17-findx9u-in-1105
 image_sha=6c089f2d043d60f34b40dd58ad44f88621163163c1664121753311a115da8d7c
 sequence=1
+build=$(sed -n 's/^ *versionCode = \([0-9][0-9]*\) *$/\1/p' app-android/app/build.gradle.kts)
 # Set PATCH_KEYS to the private directory for the pinned debug key.
 {
   head -n 1 "$base"
@@ -73,7 +74,7 @@ sequence=1
 javac -d "$work/classes" \
   app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java \
   scripts/SignGuestStartPatch.java
-java -cp "$work/classes" SignGuestStartPatch debug 159 "$image" "$image_sha" \
+java -cp "$work/classes" SignGuestStartPatch debug "$build" "$image" "$image_sha" \
   "$sequence" "$base" "$work/guest_start.sh" "$PATCH_KEYS" "$work/guest-start.patch"
 ```
 
