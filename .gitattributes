@@ -1,2 +1,0 @@
-# Unified diffs encode empty context lines with a single space.
-switcher/patches/fold8-coloros/systemui.patch whitespace=-blank-at-eol

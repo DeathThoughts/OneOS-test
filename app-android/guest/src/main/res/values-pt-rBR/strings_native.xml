@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="add_tile_title">Adicionar o bloco Voltar para a One UI</string>
-    <string name="guest_report">Como está indo?</string>
-    <string name="checklist_card_summary">Marque o que funciona. Você envia depois, pela One UI.</string>
-    <string name="return_splash_title">Voltando para a One UI</string>
-    <string name="return_shortcut">Voltar para a One UI</string>
-</resources>

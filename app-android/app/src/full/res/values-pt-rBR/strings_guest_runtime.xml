@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="guest_root_shared_kernel_title">O root do guest tem acesso ao celular inteiro</string>
-    <string name="guest_root_shared_kernel_summary">O root concedido no guest é root no kernel compartilhado deste celular. Permissões de apps, módulos e estado do Xposed separados não isolam totalmente o código privilegiado da One UI.</string>
-</resources>
