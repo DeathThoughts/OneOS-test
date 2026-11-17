@@ -211,7 +211,7 @@ jobs:
         run: |
           python3 scripts/test-guest-manager-update.py
           cd app-android
-          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest'
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
             --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments'

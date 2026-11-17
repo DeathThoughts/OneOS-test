@@ -7,7 +7,6 @@ import android.os.Process
 import android.os.SystemClock
 import com.fahadali.oneos.core.model.ImageFileCheck
 import com.fahadali.oneos.core.root.HomeSnapshot
-import com.fahadali.oneos.report.UsageCheckIn
 
 /**
  * Build 2's small state, in the app-private SharedPreferences `oneos`
@@ -238,9 +237,6 @@ object SessionPrefs {
     fun autoGuestPatches(ctx: Context): Boolean = p(ctx).getBoolean("auto_guest_patches", false)
     fun setAutoGuestPatches(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("auto_guest_patches", enabled).apply() }
 
-    /** Anonymous usage count (Settings / Advanced): on by default; off never sends the daily check-in. Kept by [UsageCheckIn]. */
-    fun usageCount(ctx: Context): Boolean = UsageCheckIn.enabled(ctx)
-    fun setUsageCount(ctx: Context, enabled: Boolean) = UsageCheckIn.setEnabled(ctx, enabled)
 
     fun heatCap(ctx: Context): Boolean = p(ctx).getBoolean("heat_cap", true)
 

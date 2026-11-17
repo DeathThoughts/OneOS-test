@@ -109,7 +109,6 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
             SessionPrefs.setAutoGuestPatches(ctx, it)
         }
         toggle(sessions, R.string.advanced_full_logs_title, R.string.advanced_full_logs_summary, SessionPrefs.fullLogs(ctx)) { SessionPrefs.setFullLogs(ctx, it) }
-        toggle(sessions, R.string.usage_count_title, R.string.usage_count_summary, SessionPrefs.usageCount(ctx)) { SessionPrefs.setUsageCount(ctx, it) }
         // One UI photos (build 156; the owner made its marker by hand from a root shell; first put in the unused
         // AdvancedFragment, so the S25 Ultra's Settings did not show it): root on/off, read at the next guest boot.
         // Off until root says on; held while a call runs. The listener returns false: the switch follows root's
