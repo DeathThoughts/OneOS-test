@@ -240,7 +240,6 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
             app,
             SessionPrefs.Launch(sid, dryRun, profile.id, image.id, System.currentTimeMillis(), SystemClock.elapsedRealtime(), logsCollected = false),
         )
-        if (!dryRun) com.fahadali.oneos.report.UsageCheckIn.switchStarted(app)
         update(state.copy(detail = "Root is checking everything again and starting the switch…"))
         val guestVulkan = BuildConfig.DEBUG && !dryRun && image.id == Images.ID_FIND_X9U_IN_1105 &&
             (profile.id == Profiles.ID_S_8550 || profile.id == Profiles.ID_A55) && SessionPrefs.guestVulkan(app)
@@ -250,6 +249,8 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 if (dryRun) "dry" else "session", BuildConfig.VERSION_CODE.toString(), sid, if (hideGms) "1" else "0",
                 if (SessionPrefs.heatCap(app)) "1" else "0", if (secIms) "1" else "0", if (edmStub) "1" else "0",
                 if (SessionPrefs.verboseBoot(app)) "1" else "0", if (SessionPrefs.fullLogs(app)) "1" else "0",
+                // The same limits the app's gate used (owner's decision, 2026-11-17), so root never differs from it.
+                SwitchGates.BATTERY_MIN_PERCENT.toString(), SwitchGates.BATTERY_MAX_TENTHS_C.toString(),
                 if (SessionPrefs.autoGuestPatches(app)) "1" else "0",
                 if (guestVulkan) "1" else "0",
             ),

@@ -192,6 +192,14 @@ class FakeRoot(
         return sh(text.replace("set -- ${verb.word} $good\n", "set -- ${verb.word} $bad\n"), ByteArray(0))
     }
 
+    /** Like [runUnchecked] for several plain arguments: [good] (valid) is built, then [bad] is what the script is called with. */
+    fun runUncheckedArgs(verb: RootScript.Verb, good: List<String>, bad: List<String>): Run {
+        val text = RootScript.launcher(verb, good, scriptSha, script.size.toLong(), layout)
+        val from = "set -- ${verb.word} ${good.joinToString(" ")}\n"
+        check(text.contains(from))
+        return sh(text.replace(from, "set -- ${verb.word} ${bad.joinToString(" ")}\n"), ByteArray(0))
+    }
+
     fun sh(text: String, input: ByteArray = ByteArray(0)): Run {
         val cmd = if (shell.appletsFirst) listOf(shell.path, "ash", "-c", text) else listOf(shell.path, "-c", text)
         val pb = ProcessBuilder(cmd)

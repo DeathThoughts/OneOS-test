@@ -28,7 +28,6 @@ import com.fahadali.oneos.R
 import com.fahadali.oneos.core.model.FindingsBuilder
 import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.probe.ProbeSession
-import com.fahadali.oneos.report.ReportSender
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -84,8 +83,8 @@ class FindingsActivity : ToolbarActivity() {
         }
         setExpandedSubtitle(zip.name)
         findViewById<Button>(R.id.findings_share).setOnClickListener { share(zip) }
-        // 0.4.29: straight to the team when this build has the report service; Share and Save stay.
-        if (ReportSender.offered) {
+        // Reports open this fork’s GitHub issues in the browser.
+        run {
             findViewById<Button>(R.id.findings_send).apply {
                 visibility = View.VISIBLE
                 setOnClickListener { startActivity(SendReportActivity.intent(this@FindingsActivity, zip)) }

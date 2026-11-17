@@ -455,4 +455,7 @@
     <string name="guest_vulkan_summary">Usa Vulkan na interface do ColorOS 17 e na composição por GPU em uma thread dedicada. Entra em vigor ao iniciar pela One UI.</string>
     <string name="guest_vulkan_warning">O Vulkan pode causar falhas gráficas, travamentos de apps ou tela preta. Se isso acontecer, volte à One UI e desative a opção antes de iniciar o ColorOS novamente. Em caso de tela preta, segure os dois botões de volume por 3 segundos para voltar.</string>
     <string name="guest_vulkan_enable">Ativar Vulkan</string>
+    <string name="fork_patch_warning_title">Correções testadas em dois modelos</string>
+    <string name="fork_patch_warning_message">As correções deste fork foram testadas apenas no Galaxy S23 base e no Galaxy S25 Ultra. É provável que falhem em outros modelos Galaxy S e A, e também podem falhar em outros celulares. Prossiga com cuidado.</string>
+    <string name="fork_patch_warning_ack">Entendo que estas correções podem falhar neste celular.</string>
 </resources>
