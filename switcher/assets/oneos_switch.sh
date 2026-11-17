@@ -2290,14 +2290,21 @@ record_restart_home() {
         echo \"[UI Activator] Restart Home generation \$GEN: guest system_server identity could not be confirmed\"
         return
     fi
-    home_component=\$(timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd package resolve-activity --user 0 --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
-    case \"\$home_component\" in
-        *.*/*) ;;
-        *) echo \"[UI Activator] Restart Home generation \$GEN: no resolved Home component\"; return ;;
-    esac
-    i=0
-    while [ \$i -lt 6 ]; do
+    # ColorOS on the base S23 (OneOS build 162) missed Home twice with a
+    # short sample after UI setup. Observe through the keyguard and launcher
+    # startup, and retry resolution while the guest's package service warms up.
+    read -r started _ < /proc/uptime || return
+    deadline=\$((\${started%%.*} + 120))
+    home_component=''
+    while read -r now _ < /proc/uptime && [ \"\${now%%.*}\" -lt \"\$deadline\" ]; do
         same_restart || return
+        if [ -z \"\$home_component\" ]; then
+            home_component=\$(timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd package resolve-activity --user 0 --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
+            case \"\$home_component\" in
+                *.*/*) ;;
+                *) home_component=''; sleep 2; continue ;;
+            esac
+        fi
         if timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys activity activities 2>/dev/null |
             awk -v component=\"\$home_component\" '
                 function expand(value, parts) {
@@ -2321,10 +2328,13 @@ record_restart_home() {
             fi
             return
         fi
-        i=\$((i + 1))
         sleep 2
     done
-    echo \"[UI Activator] Restart Home generation \$GEN: resumed Home not observed for \$home_component\"
+    if [ -n \"\$home_component\" ]; then
+        echo \"[UI Activator] Restart Home generation \$GEN: resumed Home not observed for \$home_component\"
+    else
+        echo \"[UI Activator] Restart Home generation \$GEN: no resolved Home component\"
+    fi
 }
 GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=1; BRPID=''; SYSUI=''
 while true; do
@@ -2346,6 +2356,7 @@ while true; do
         fi
         if $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window 2>/dev/null | grep -q 'mStatusBar'; then
             echo '[UI Activator] WindowManager is ready! Dismissing bootanim and unlocking...'
+            (record_restart_home) </dev/null &
             # The camera hole for the size the guest runs the panel at
             # (guest_panel_fit.sh, see where the switch writes it): the switch
             # placed it when the window manager first answered. This is the check
@@ -3075,7 +3086,6 @@ while true; do
             fi
             echo \"[UI Activator] refresh: min \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system min_refresh_rate) peak \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system peak_refresh_rate); brightness \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system screen_brightness)\"
             echo '[UI Activator] Home activated!'
-            (record_restart_home) </dev/null &
             # ColorOS lock screen depth effect (0.4.60, owner; 0.4.59 A36 768c5a1d, S23
             # 77b9dfc0): SystemUI saves the cut-out subject as /data/oplus/os/deep_scenery_image*,
             # but that folder is system's and SystemUI runs as an app uid here (EACCES, \"can
@@ -4652,6 +4662,23 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # / PowerManagerService), the return keys or the guest's OneOS app end
             # the session from the host side, before the slow checks below.
             req=\$(getprop oneos.guest.powerctl)
+            # Save an observed Home before another guest restart can replace
+            # the namespace and discard the pending trial.
+            if [ -n \"\$trial_gen\" ] && { [ -z \"\$req\" ] || [ \"\$req\" = ksud:soft-reboot ]; }; then
+                ack=\$(cat $STAGE/tmp/restart-home.\$trial_gen 2>/dev/null)
+                if [ \"\$ack\" = \"\$trial_gen \$trial_ns\" ] &&
+                   [ \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" = \"\$trial_gen\" ] &&
+                   [ \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" = \"\$trial_ns\" ] &&
+                   /system/bin/sh $STAGE/guest_patch.sh $STAGE accept; then
+                    echo \"OneOS patch: accepted after Home in generation \$trial_gen\"
+                    trial_gen=''
+                    /system/bin/sh $STAGE/guest_patch.sh $STAGE publish || true
+                elif [ -z \"\$req\" ] && [ \$t -ge 140 ]; then
+                    echo \"OneOS patch: trial did not confirm Home; restoring the previous script\"
+                    if recover_trial; then continue; fi
+                    exec /system/bin/sh $STAGE/return_to_oneui.sh
+                fi
+            fi
             # KernelSU's soft reboot inside the guest (its ksud wrapper, 0.4.39):
             # this system alone starts again (guest_softreboot.sh); the timers
             # start over, with grace for the new boot's zygote and surfaceflinger,
@@ -4698,21 +4725,6 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         fi ;;
                 esac
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
-            fi
-            if [ -n \"\$trial_gen\" ]; then
-                ack=\$(cat $STAGE/tmp/restart-home.\$trial_gen 2>/dev/null)
-                if [ \"\$ack\" = \"\$trial_gen \$trial_ns\" ] &&
-                   [ \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" = \"\$trial_gen\" ] &&
-                   [ \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" = \"\$trial_ns\" ] &&
-                   /system/bin/sh $STAGE/guest_patch.sh $STAGE accept; then
-                    echo \"OneOS patch: accepted after Home in generation \$trial_gen\"
-                    trial_gen=''
-                    /system/bin/sh $STAGE/guest_patch.sh $STAGE publish || true
-                elif [ \$t -ge 140 ]; then
-                    echo \"OneOS patch: trial did not confirm Home; restoring the previous script\"
-                    if recover_trial; then continue; fi
-                    exec /system/bin/sh $STAGE/return_to_oneui.sh
-                fi
             fi
             # Reaching the home screen only lifts the black-screen and time
             # limits; a dead guest still has to come back to One UI (the watcher
