@@ -742,21 +742,152 @@ oneos_media_pid() {
     [ -n "$oneos_media_found" ]
 }
 
-# How many MediaStore rows are under OneUI/: counts only, never a name.
-oneos_media_rows() {
-    oneos_media_out=$("$BB" timeout 30 /system/bin/sh /data/oneos_genv.sh /system/bin/content query \
-        --uri content://media/external/file --projection _id \
-        --where "relative_path LIKE 'OneUI/%'" 2>&1)
+# One count of MediaStore rows: $1 is the timeout in seconds, $2 an optional
+# where clause (none: every row of content://media/external/file). Counts
+# only, never a name. Sets oneos_media_rows (the 'Row: ' lines),
+# oneos_media_answered (1 when content gave rows or its own "No result
+# found", 0 when it gave neither: the provider is not up, a crash, a
+# timeout) and oneos_media_first (with no row: content's own first line).
+oneos_media_query() {
+    if [ -n "$2" ]; then
+        oneos_media_out=$("$BB" timeout "$1" /system/bin/sh /data/oneos_genv.sh /system/bin/content query \
+            --uri content://media/external/file --projection _id \
+            --where "$2" 2>&1)
+    else
+        oneos_media_out=$("$BB" timeout "$1" /system/bin/sh /data/oneos_genv.sh /system/bin/content query \
+            --uri content://media/external/file --projection _id 2>&1)
+    fi
     oneos_media_rows=$(printf '%s\n' "$oneos_media_out" | "$BB" grep -c '^Row: ')
-    oneos_media_line=
+    oneos_media_first=
+    oneos_media_answered=1
+    [ "$((oneos_media_rows))" = 0 ] || return 0
     # No row: content's own first line ("No result found." or the error).
     # Printable ASCII is kept as the range ' -~': the guest's BusyBox tr has
     # no character classes, and '[:print:]' kept only the characters of
     # "[:print:]" itself
     # (S25 Ultra sessions db19aee410bd79ff, 75e538ac0ed725df: "(rtn)").
-    [ "$((oneos_media_rows))" != 0 ] ||
-        oneos_media_line=" ($(printf '%s\n' "$oneos_media_out" | "$BB" grep . | "$BB" head -n 1 | "$BB" tr -cd ' -~' | "$BB" cut -c 1-120))"
+    oneos_media_first=$(printf '%s\n' "$oneos_media_out" | "$BB" grep . | "$BB" head -n 1 | "$BB" tr -cd ' -~' | "$BB" cut -c 1-120)
+    printf '%s\n' "$oneos_media_out" | "$BB" grep -q 'No result found' || oneos_media_answered=0
+}
+
+# How many MediaStore rows are under OneUI/: counts only, never a name.
+oneos_media_rows() {
+    oneos_media_query 30 "relative_path LIKE 'OneUI/%'"
+    oneos_media_line=
+    [ "$((oneos_media_rows))" != 0 ] || oneos_media_line=" ($oneos_media_first)"
     echo "[Pivoted Root] Media prototype: MediaStore lists $((oneos_media_rows)) item(s) under OneUI/ $1$oneos_media_line"
+}
+
+# How many rows MediaStore has in all (not only under OneUI/): a total near 0
+# would mean the database itself was recreated, not just OneUI/ pruned.
+# $1 is the timeout in seconds, $2 says when ("at the first answer").
+oneos_media_all_rows() {
+    oneos_media_query "$1" ""
+    oneos_media_line=
+    [ "$((oneos_media_rows))" != 0 ] || oneos_media_line=" ($oneos_media_first)"
+    echo "[Pivoted Root] Media watch: MediaStore has $((oneos_media_rows)) row(s) in all $2$oneos_media_line"
+}
+
+# MediaProvider's own log lines, for the sessions where the OneUI/ rows were
+# gone at every boot (S25 Ultra sessions db19aee410bd79ff, 75e538ac0ed725df).
+# $1 is the part ("boot" or "late"), $2 how many lines to keep, $3 an epoch
+# in seconds: only lines from then on (the late part starts where the boot
+# part was taken, so nothing is logged twice). Never a file name: a path
+# below a user's storage keeps at most "OneUI/", and what follows it on the
+# line is dropped because album and file names have spaces and brackets
+# ("Camera (One UI)") that no delimiter would stop at. Printable ASCII only
+# (range ' -~': the guest's BusyBox tr and sed have no character classes
+# that work, see oneos_media_query). Nothing here may stop the boot.
+oneos_media_logcat() {
+    oneos_media_lpart=$1 oneos_media_lkeep=$2 oneos_media_lfrom=$3
+    oneos_media_lpid=
+    oneos_media_lpkg=
+    for oneos_media_lp in com.android.providers.media.module com.google.android.providers.media.module; do
+        oneos_media_pid "$oneos_media_lp" && { oneos_media_lpid=$oneos_media_found; oneos_media_lpkg=$oneos_media_lp; break; }
+    done
+    if [ -z "$oneos_media_lpid" ]; then
+        oneos_media_lage="MediaProvider not running"
+    else
+        oneos_media_lhz=$("$BB" timeout 5 getconf CLK_TCK 2>/dev/null)
+        case $oneos_media_lhz in ''|*[!0-9]*|0) oneos_media_lhz=100 ;; esac
+        oneos_media_lsec=$("$BB" awk -v hz="$oneos_media_lhz" '
+            NR == FNR { up = $1; next }
+            { sub(/^.*\) /, ""); printf "%d", up - $20 / hz }' /proc/uptime "/proc/$oneos_media_lpid/stat" 2>/dev/null)
+        case $oneos_media_lsec in
+            ''|*[!0-9-]*) oneos_media_lage="MediaProvider $oneos_media_lpkg pid $oneos_media_lpid running (age unknown)" ;;
+            *) oneos_media_lage="MediaProvider $oneos_media_lpkg pid $oneos_media_lpid running $oneos_media_lsec s" ;;
+        esac
+    fi
+    set -- -d -b main,system -v threadtime
+    [ -z "$oneos_media_lfrom" ] || set -- "$@" -T "$oneos_media_lfrom.000"
+    set -- "$@" -s MediaProvider:V ModernMediaScanner:V MediaService:V MediaReceiver:V DatabaseHelper:V \
+        ExternalStorageServiceImpl:V MediaVolume:V IdleService:V FuseDaemon:W
+    oneos_media_lall=$("$BB" timeout 15 logcat "$@" 2>&1 | "$BB" grep -v '^--------- ' | "$BB" grep .)
+    oneos_media_lseen=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep -c .)
+    oneos_media_lkept=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep . | "$BB" tail -n "$oneos_media_lkeep" |
+        "$BB" sed 's/[^ -~]//g' | "$BB" cut -c 1-300 |
+        "$BB" sed -E -e 's#((/emulated/[0-9]+|/media/[0-9]+|/sdcard)/)OneUI/.*#\1OneUI/…#' -e t \
+            -e 's#((/emulated/[0-9]+|/media/[0-9]+|/sdcard)/).+#\1…#')
+    oneos_media_lcount=$(printf '%s\n' "$oneos_media_lkept" | "$BB" grep -c .)
+    echo "[Pivoted Root] Media log ($oneos_media_lpart): $oneos_media_lcount line(s) kept of $oneos_media_lseen; $oneos_media_lage"
+    [ "$oneos_media_lcount" = 0 ] ||
+        printf '%s\n' "$oneos_media_lkept" | "$BB" grep . | "$BB" sed "s/^/[Pivoted Root] Media log ($oneos_media_lpart): /"
+    return 0
+}
+
+# Where the rows under OneUI/ go (S25 Ultra sessions db19aee410bd79ff,
+# 75e538ac0ed725df: 0 rows before the scan request at every boot, about 9600
+# after it, 1.5 min of MediaProvider CPU). Samples the count in the
+# background from the moment the guest's storage views exist (so before any
+# album is published) and logs only the first answer and each change; with
+# the totals and MediaProvider's own log lines it shows when the rows go and
+# whether MediaProvider's own volume scan at mount time removes them. It
+# only reads and logs: what is shared, the publish order and the scan request
+# do not depend on it. Every 5 s until sys.boot_completed, then every 10 s;
+# it stops 240 s after boot_completed was first seen or 420 s after it
+# started.
+oneos_media_watch() {
+    oneos_media_w0=$("$BB" date +%s)
+    oneos_media_wboot=
+    oneos_media_wn=0
+    oneos_media_wlast=
+    oneos_media_wfirst=1
+    oneos_media_wnoans=0
+    "$BB" rm -f /data/oneos_media_logt 2>/dev/null
+    while :; do
+        oneos_media_wnow=$("$BB" date +%s)
+        [ -n "$oneos_media_wboot" ] || [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ] ||
+            oneos_media_wboot=$oneos_media_wnow
+        oneos_media_query 10 "relative_path LIKE 'OneUI/%'"
+        oneos_media_wn=$((oneos_media_wn + 1))
+        oneos_media_wnow=$("$BB" date +%s)
+        oneos_media_wat="$("$BB" date +%T) ($((oneos_media_wnow - oneos_media_t0)) s after the zygote launch)"
+        if [ "$oneos_media_answered" = 1 ]; then
+            oneos_media_wcount=$((oneos_media_rows))
+            oneos_media_wnoans=0
+            if [ "$oneos_media_wfirst" = 1 ]; then
+                oneos_media_wfirst=0
+                echo "[Pivoted Root] Media watch: $oneos_media_wat: MediaStore lists $oneos_media_wcount item(s) under OneUI/ (first answer)"
+                oneos_media_all_rows 10 "at the first answer"
+            elif [ "$oneos_media_wcount" != "$oneos_media_wlast" ]; then
+                echo "[Pivoted Root] Media watch: $oneos_media_wat: MediaStore lists $oneos_media_wcount item(s) under OneUI/ (was $oneos_media_wlast)"
+            fi
+            oneos_media_wlast=$oneos_media_wcount
+        elif [ "$oneos_media_wnoans" = 0 ]; then
+            oneos_media_wnoans=1
+            echo "[Pivoted Root] Media watch: $oneos_media_wat: MediaStore did not answer ($oneos_media_first)"
+        fi
+        [ $((oneos_media_wnow - oneos_media_w0)) -lt 420 ] || break
+        [ -z "$oneos_media_wboot" ] || [ $((oneos_media_wnow - oneos_media_wboot)) -lt 240 ] || break
+        if [ -n "$oneos_media_wboot" ]; then "$BB" sleep 10; else "$BB" sleep 5; fi
+    done
+    echo "[Pivoted Root] Media watch: done after $oneos_media_wn sample(s), last count ${oneos_media_wlast:-none}"
+    # The boot part's epoch (oneos_media_late writes it), or everything.
+    oneos_media_wt=$("$BB" cat /data/oneos_media_logt 2>/dev/null)
+    case $oneos_media_wt in ''|*[!0-9]*) oneos_media_wt= ;; esac
+    "$BB" rm -f /data/oneos_media_logt 2>/dev/null
+    oneos_media_logcat late 150 "$oneos_media_wt"
+    return 0
 }
 
 oneos_media_late() {
@@ -806,6 +937,9 @@ oneos_media_late() {
         oneos_media_release_late
         return 0
     fi
+    # Started first, before any album is listed or published, and from /
+    # so it never holds a hold dir; it never delays the publish.
+    ( cd / 2>/dev/null; oneos_media_watch ) </dev/null &
     echo "[Pivoted Root] Media prototype: the guest's vold built its storage views at $oneos_media_first_at, settled at $("$BB" date +%T): $oneos_media_bases"
 
     oneos_media_s=$("$BB" date +%s)
@@ -959,6 +1093,12 @@ oneos_media_late() {
     # What MediaStore lists after the scan had time to run: counts only.
     "$BB" sleep 30
     oneos_media_rows "30 s after the scan request"
+    oneos_media_all_rows 30 "30 s after the scan request"
+    # MediaProvider's own log lines up to here; the watch logs the rest at
+    # its end, from this second on (it reads the epoch from this file).
+    oneos_media_lt=$("$BB" date +%s)
+    printf '%s' "$oneos_media_lt" > /data/oneos_media_logt 2>/dev/null
+    oneos_media_logcat boot 250 ""
 }
 
 # OneOS: pivot_root left the host's whole old root at /postinstall, including
