@@ -98,6 +98,18 @@ open class SystemsActivity : ToolbarActivity() {
 
     /** "I have the file" of [imageId] (null: whichever system it is). */
     fun choose(imageId: String?) {
+        if (imageId == Images.ID_HYPEROS_POPSICLE) {
+            val image = Images.HYPEROS_POPSICLE
+            AlertDialog.Builder(this).setTitle(image.nameWithVariant)
+                .setMessage(getString(R.string.image_split_zip_instructions, image.gzName))
+                .setPositiveButton(R.string.image_pick_title) { _, _ -> pickArchive(imageId) }
+                .setNegativeButton(android.R.string.cancel, null).show()
+        } else {
+            pickArchive(imageId)
+        }
+    }
+
+    private fun pickArchive(imageId: String?) {
         pickFor = imageId
         try {
             pick.launch(Unit)
@@ -152,13 +164,13 @@ internal object SystemsNav {
         }
     }
 
-    /** ACTION_OPEN_DOCUMENT for the .img.gz (any type: providers label .gz differently), as the OS image page. */
+    /** ACTION_OPEN_DOCUMENT for the image archive, as on the OS image page. */
     class OpenGz : ActivityResultContract<Unit, Uri?>() {
         override fun createIntent(context: Context, input: Unit): Intent =
             Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*")
-                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/octet-stream", "*/*"))
+                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/zip", "application/octet-stream", "*/*"))
 
         override fun parseResult(resultCode: Int, intent: Intent?): Uri? = if (resultCode == Activity.RESULT_OK) intent?.data else null
     }
@@ -447,7 +459,8 @@ class SystemsFragment : Fragment() {
         val color = image(com.fahadali.oneos.core.model.SystemFamily.COLOROS, Images.FIND_N6)
         val pixel = image(com.fahadali.oneos.core.model.SystemFamily.PIXEL, Images.PIXEL_YOGI)
         val infinity = image(com.fahadali.oneos.core.model.SystemFamily.INFINITYX, Images.INFINITYX)
-        val hyper = image(com.fahadali.oneos.core.model.SystemFamily.HYPEROS, Images.HYPEROS_LHASA)
+        val hyper = Images.HYPEROS_LHASA
+        val popsicle = available.firstOrNull { it.id == Images.ID_HYPEROS_POPSICLE }
         val nothing = image(com.fahadali.oneos.core.model.SystemFamily.NOTHING, Images.NOTHING_METROID)
         val oxygen = image(com.fahadali.oneos.core.model.SystemFamily.OXYGENOS, Images.OXYGEN16)
         val origin = image(com.fahadali.oneos.core.model.SystemFamily.ORIGINOS, Images.ORIGINOS7)
@@ -461,6 +474,7 @@ class SystemsFragment : Fragment() {
             CatalogEntry(lineage.name, lineage, R.drawable.os_lineage, true).takeIf { available.any { it.id == lineage.id } },
             CatalogEntry(infinity.name, infinity, R.drawable.os_infinity, available.any { it.id == infinity.id }),
             CatalogEntry(hyper.name, hyper, R.drawable.os_hyperos, available.any { it.id == hyper.id }),
+            popsicle?.let { CatalogEntry(it.name, it, R.drawable.os_hyperos, true) },
             CatalogEntry(color.name, color, R.drawable.os_coloros, available.any { it.id == color.id }),
             CatalogEntry(nothing.name, nothing, R.drawable.os_nothing, available.any { it.id == nothing.id }),
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
@@ -571,11 +585,12 @@ class SystemsFragment : Fragment() {
             if (entry.art != 0) bindArtwork(entry.art) else bind(image)
         }
         val badge = v.findViewById<TextView>(R.id.systems_badge)
-        badge.text = getString(when {
+        val status = getString(when {
             !entry.supported -> R.string.catalog_unsupported
             p?.choice(image?.id.orEmpty())?.tested == true -> R.string.catalog_optimised
             else -> R.string.catalog_experimental
         })
+        badge.text = if (image?.id == Images.ID_HYPEROS_POPSICLE) "${entry.name} · $status" else status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send
@@ -611,7 +626,7 @@ class SystemsFragment : Fragment() {
                     }
                     else -> {
                         menu.add(R.string.systems_download).setOnMenuItemClickListener { SystemsNav.open(host, image.mirrorUrl); true }
-                        image.downloadUrl?.let { drive ->
+                        image.downloadUrl?.takeUnless { it == image.mirrorUrl }?.let { drive ->
                             menu.add(R.string.systems_download_drive).setOnMenuItemClickListener { SystemsNav.open(host, drive); true }
                         }
                         menu.add(R.string.systems_have_file).setOnMenuItemClickListener { (host as? SystemsActivity)?.choose(image.id); true }

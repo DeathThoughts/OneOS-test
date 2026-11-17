@@ -242,6 +242,22 @@ jobs:
             --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \
             --tests '*StageScriptTest.a55VulkanUsesTheColorOsStage'
 
+      - name: Verify HyperOS Popsicle image and staging
+        env:
+          GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
+          GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/test-popsicle-framework-dex.py
+          python3 scripts/test-popsicle-guards.py
+          python3 scripts/test-popsicle-native.py
+          python3 scripts/test-popsicle-publisher.py
+          cd app-android
+          ./gradlew --console=plain :core:model:test \
+            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.popsicleStagingSetMatchesItsPayloadAndGuardPins' \
+            --tests '*SingleImageZipInputStreamTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23'
+
       - name: Verify signed guest startup patch lifecycle
         run: |
           classes=$(mktemp -d)

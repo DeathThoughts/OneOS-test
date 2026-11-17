@@ -161,6 +161,7 @@ object PackageSets {
     const val ID_PIXEL_F8 = "pixel-f8"
     const val ID_PIXEL_SULTRA = "pixel-sultra"
     const val ID_HYPER_F8U = "hyper-f8u"
+    const val ID_HYPER_POPSICLE = "hyper-popsicle"
     const val ID_PIXEL9_SULTRA = "pixel9-sultra"
     const val ID_INFINITYX = "infinityx"
     const val ID_NOTHING_F8U = "nothing-f8u"
@@ -575,6 +576,41 @@ object PackageSets {
         hasReturnApp = true,
     )
 
+    /** The Galaxy S23 trial set, built from the Xiaomi 17 Pro Max image. */
+    val HYPER_POPSICLE = PackageSet(
+        id = ID_HYPER_POPSICLE,
+        imageId = Images.ID_HYPEROS_POPSICLE,
+        sourceDir = "out/overlays_hyperos_popsicle_r1",
+        files = listOf(
+            PackageFile("services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("miui-services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("miui-framework_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("apprecovery.proinstaller_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("miui-wifi-service_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("miui-telephony-common_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("vold_patched", FileRole.GUARD_EXECUTABLE),
+            PackageFile("service.incremental_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("libcamera_client_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("libsurfaceflinger_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("guards.txt", FileRole.GUARDS),
+            PackageFile("oneos-telephony.jar", FileRole.INJECTION_JAR),
+            PackageFile("oneos-telephony.sha256", FileRole.INJECTION_SHA256),
+            PackageFile("OneOSPhoneInjection.apk", FileRole.RRO),
+            PackageFile("OneOSFoldCutout.apk", FileRole.RRO),
+            PackageFile("ims-ext-common_patched.jar", FileRole.FRAMEWORK_JAR),
+            PackageFile(GUEST_APP, FileRole.GUEST_APP),
+            PackageFile("socket_exec", FileRole.GUEST_FIX),
+            PackageFile("libaudiohal_aidl_patched.so", FileRole.GUEST_FIX),
+            PackageFile("samcam_bar.tar", FileRole.GUEST_FIX),
+            PackageFile("oneos-apex-requires.txt", FileRole.GUEST_FIX),
+        ) + (COMMON_PAYLOADS + listOf("bt", "gmssystem")).map { PackageFile("${it}_payload.img", FileRole.APEX_PAYLOAD) },
+        omitted = listOf(TETHERING),
+        approxBytes = 682_728_686L,
+        hasReturnApp = true,
+    )
+
     /**
      * Nothing OS 5.0 (0.4.33), out/overlays_nothing_r11. The smallest set so far:
      * Nothing's system is close enough to AOSP that only services.jar and
@@ -851,7 +887,7 @@ object PackageSets {
         hasReturnApp = true,
     )
 
-    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE)
+    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE)
 
     fun byId(id: String, sets: List<PackageSet> = ALL): PackageSet? = sets.firstOrNull { it.id == id }
 }
