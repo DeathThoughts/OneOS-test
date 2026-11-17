@@ -1316,6 +1316,8 @@ object Profiles {
 
     fun byId(id: String, profiles: List<PhoneProfile> = BUILT_IN): PhoneProfile? = profiles.firstOrNull { it.id == id }
 
+    fun forkPatchesTested(model: String): Boolean = Regex("^SM-(S911|S938)[A-Z0-9]*$").matches(model)
+
     fun resolve(f: DeviceFacts, profiles: List<PhoneProfile> = BUILT_IN): ProfileResolution =
         resolve(f.model, f.device, f.soc.model, profiles)
 

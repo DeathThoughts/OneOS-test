@@ -211,8 +211,10 @@ jobs:
         run: |
           python3 scripts/test-guest-manager-update.py
           cd app-android
-          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
-          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks'
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
+            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments'
 
       - name: Verify signed guest startup patch lifecycle
         run: |

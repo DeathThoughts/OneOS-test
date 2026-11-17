@@ -451,4 +451,7 @@
     <string name="lock_risk_accept">Entendo o risco</string>
     <string name="guest_patch_auto_title">Baixar correções do convidado automaticamente</string>
     <string name="guest_patch_auto_summary">Verifica ao abrir o OneOS no convidado. Para aplicar, reinicie o sistema convidado.</string>
+    <string name="fork_patch_warning_title">Correções testadas em dois modelos</string>
+    <string name="fork_patch_warning_message">As correções deste fork foram testadas apenas no Galaxy S23 base e no Galaxy S25 Ultra. É provável que falhem em outros modelos Galaxy S e A, e também podem falhar em outros celulares. Prossiga com cuidado.</string>
+    <string name="fork_patch_warning_ack">Entendo que estas correções podem falhar neste celular.</string>
 </resources>
