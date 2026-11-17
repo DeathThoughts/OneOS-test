@@ -17,7 +17,17 @@ import dev.oneuiproject.oneui.R as OuiIcons
 
 /** SESL9 preference rows, the same settings component used by Twidget. */
 class SettingsPreferenceFragment : InsetPreferenceFragment() {
-    override fun onResume() { super.onResume(); onCreatePreferences(null, null) }
+    // The rebuild refreshes rows changed elsewhere, but a new screen would put the list back at the top (the
+    // owner's Galaxy S25 Ultra, 2026-11-17), so the scroll position is kept across it. setPreferenceScreen binds
+    // the new adapter from a posted message, not at once, so the restore is posted behind it. listView is null
+    // before the view exists (first resume): nothing to keep then.
+    override fun onResume() {
+        super.onResume()
+        val list = listView
+        val saved = list?.layoutManager?.onSaveInstanceState()
+        onCreatePreferences(null, null)
+        if (list != null && saved != null) list.post { list.layoutManager?.onRestoreInstanceState(saved) }
+    }
 
     // Remove OneOS data says while it runs and how it ended (0.4.43, UX audit: no feedback at all before).
     private var unsubscribe: (() -> Unit)? = null
