@@ -1,5 +1,6 @@
 package com.fahadali.oneos.core.model
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -290,6 +291,27 @@ class CompatEvaluatorTest {
         val r = eval(Fixtures.facts(panels = listOf(Fixtures.F8U_INNER), hinge = false, inputs = emptyList()))
         assertEquals(Level.WARN, r.level("form-prefix-mismatch"))
         assertEquals(Verdict.WARNING, r.verdict)
+    }
+
+    @After
+    fun strictAgain() = SwitchGates.setBatteryLimits(SwitchGates.STRICT_BATTERY_MIN_PERCENT, SwitchGates.STRICT_BATTERY_MAX_TENTHS_C)
+
+    /** Owner's decision, 2026-11-17: the note follows the build type's limits; strict (release) when none were set. */
+    @Test
+    fun batteryNoteFollowsTheLimits() {
+        fun note(pct: Int, charging: Boolean, c: Float) = eval(Fixtures.facts(battery = BatteryInfo(pct, charging, c))).find("battery-now")
+        assertNull(note(30, false, 41.9f))
+        assertNotNull(note(29, false, 30f))
+        assertNotNull(note(90, false, 42f))
+        assertNull(note(5, true, 30f))
+        assertTrue(note(29, false, 30f)!!.detail.contains("30%") && note(29, false, 30f)!!.detail.contains("42 °C"))
+        SwitchGates.setBatteryLimits(5, 500)
+        assertNull(note(5, false, 49.9f))
+        assertNotNull(note(4, false, 30f))
+        assertNotNull(note(90, true, 50f))
+        assertTrue(note(4, false, 30f)!!.detail.contains("5%") && note(4, false, 30f)!!.detail.contains("50 °C"))
+        SwitchGates.setBatteryLimits(1, 600)
+        assertNotNull(note(29, false, 30f))
     }
 
     @Test

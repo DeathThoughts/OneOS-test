@@ -595,8 +595,15 @@ android {
     buildTypes {
         debug {
             signingConfig = signingConfigs.getByName("debug")
+            // Owner's decision, 2026-11-17: testing builds switch at 5 % and below 50 °C; the code is the
+            // same on both branches, the build type decides (SwitchGates.setBatteryLimits).
+            buildConfigField("int", "GATE_BATTERY_MIN_PERCENT", "5")
+            buildConfigField("int", "GATE_BATTERY_MAX_TENTHS_C", "500")
         }
         release {
+            // Owner's decision, 2026-11-17: friends' builds need 30 % (or charging) and below 42 °C.
+            buildConfigField("int", "GATE_BATTERY_MIN_PERCENT", "30")
+            buildConfigField("int", "GATE_BATTERY_MAX_TENTHS_C", "420")
             // What friends get: not debuggable, signed with the OneOS release key.
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")

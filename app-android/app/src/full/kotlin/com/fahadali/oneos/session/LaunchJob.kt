@@ -247,6 +247,8 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 if (dryRun) "dry" else "session", BuildConfig.VERSION_CODE.toString(), sid, if (hideGms) "1" else "0",
                 if (SessionPrefs.heatCap(app)) "1" else "0", if (secIms) "1" else "0", if (edmStub) "1" else "0",
                 if (SessionPrefs.verboseBoot(app)) "1" else "0", if (SessionPrefs.fullLogs(app)) "1" else "0",
+                // The same limits the app's gate used (owner's decision, 2026-11-17), so root never differs from it.
+                SwitchGates.BATTERY_MIN_PERCENT.toString(), SwitchGates.BATTERY_MAX_TENTHS_C.toString(),
             ),
             silenceMs = 5 * 60_000L,
         )
