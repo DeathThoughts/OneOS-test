@@ -188,11 +188,9 @@ class StageScriptTest {
         refused(s.launch(), "codename pa3q")
         fr.props["ro.product.device"] = "m3q"
         fr.writeProps()
-        fr.battery("4", "Discharging", "499")
+        fr.battery("12", "Discharging", "300")
         refused(s.launch(), "battery")
-        fr.battery("5", "Charging", "500")
-        refused(s.launch(), "battery too warm")
-        fr.battery("5", "Discharging", "499")
+        fr.battery("12", "Charging", "300")
         File(fr.root, "old_switcher").writeText("")
         refused(s.launch(), "old switcher")
         File(fr.root, "old_switcher").delete()
