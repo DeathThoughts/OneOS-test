@@ -1,0 +1,85 @@
+name: Build HyperOS Popsicle payloads
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/hyperos-popsicle]
+    paths:
+      - ".github/workflows/build-popsicle-payloads.yml"
+      - "scripts/build-popsicle-payloads.py"
+      - "scripts/make-overlays.sh"
+      - "scripts/check-oneos-refs.py"
+      - "scripts/test-popsicle-framework-dex.py"
+      - "scripts/test-popsicle-guards.py"
+      - "scripts/test-popsicle-native.py"
+      - "scripts/test-popsicle-publisher.py"
+      - "switcher/patches/**"
+
+concurrency:
+  group: popsicle-payload-release
+  cancel-in-progress: false
+
+jobs:
+  payloads:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/test/hyperos-popsicle'
+    environment: debug-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          repository: MysticGSI/mysticgsi
+          ref: 825b850dd8ddff11fdb8ed024034fc00e94b1451
+          path: mysticgsi
+          persist-credentials: false
+          sparse-checkout: |
+            tools/apktool
+            tools/bin/Linux/x86_64/extract.erofs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install overlay build tools
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs zip unzip
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on the runner}}
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+          fi
+          [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+
+      - name: Test Popsicle tooling
+        run: |
+          python3 scripts/test-popsicle-framework-dex.py
+          python3 scripts/test-popsicle-guards.py
+          python3 scripts/test-popsicle-native.py
+          python3 scripts/test-popsicle-publisher.py
+
+      - name: Build and publish hash-named payloads
+        env:
+          APKTOOL: ${{ github.workspace }}/mysticgsi/tools/apktool/apktool.jar
+          EXTRACT_EROFS: ${{ github.workspace }}/mysticgsi/tools/bin/Linux/x86_64/extract.erofs
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/build-popsicle-payloads.py --publish --target "$GITHUB_SHA"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hyper-popsicle-payload-metadata
+          path: out/popsicle-metadata/
+          if-no-files-found: warn
