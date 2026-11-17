@@ -286,7 +286,7 @@ add)
                       AHAL_StreamOut_QTI:D EffectOffloadImpl:V AHAL_EffectFactoryQti:V AHAL_DlbSpatializerEffectImpl:V \
                       DlbDap2Process:V A2dpStateMachine:I A2dpService:I BTAudioProviderStub_2_1:I \
                       thermal_core:V TelephonyComponentFactory:V OneOSSignalPoll:V WindowLayoutComponentImpl:V \
-                      ArtService:V OneOSComfortView:V DisplayTransformManager:V; do
+                      ArtService:V OneOSComfortView:V DisplayTransformManager:V incidentd:I; do
                 k=log.tag.${tl%:*}
                 grep -qxF "$k" "$HOST" && continue
                 sed -i "/^$(echo "$k" | sed 's/\./\\./g')=/d" "$NEW"

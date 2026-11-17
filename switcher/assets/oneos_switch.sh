@@ -959,6 +959,8 @@ if [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
         *) tr '\0' ' ' < "/proc/$swp/cmdline" 2>/dev/null | grep -q "sound_watch.log" && kill "$swp" 2>/dev/null ;;
     esac
     [ -f "$STAGE/sound_watch.log" ] && mv -f "$STAGE/sound_watch.log" "$STAGE/sound_watch.prev"
+    # incidentd: ColorOS sessions db19aee410bd79ff and 75e538ac0ed725df show incident_helper
+    # and a second top at 40-100% CPU for 30-60 s several times a session; say what requests them.
     $BB setsid $BB timeout 7200 logcat -b main,system,crash -v threadtime -f "$STAGE/sound_watch.log" -r 2048 -n 1 -s \
         AndroidRuntime:E DEBUG:F Telecom:I Telecom_INCOMING_RINGING:V Ringtone:V RingtoneManager:V \
         VibratorManagerService:V VibratorManagerServiceExtImpl:V VibrationThread:V VibrationScaler:V \
@@ -966,7 +968,7 @@ if [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
         AHAL_DlbSpatializerEffectImpl:V DlbDap2Process:V \
         AudioFlinger:W APM_AudioPolicyManager:W AHAL:W AHAL_ModulePrimary:W AHAL_StreamPrimary_exynos:W \
         audio_hw_primary:W audio_hw_proxy2:E bluetooth-a2dp:W A2dpStateMachine:I A2dpService:I \
-        BTAudioProviderStub_2_1:I BTAudioProviderA2dpSoftware:W </dev/null >/dev/null 2>&1 &
+        BTAudioProviderStub_2_1:I BTAudioProviderA2dpSoftware:W incidentd:I </dev/null >/dev/null 2>&1 &
     echo $! > "$STAGE/sound_watch.pid"
     echo "Sound watch: $STAGE/sound_watch.log"
 fi
