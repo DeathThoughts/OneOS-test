@@ -1846,14 +1846,36 @@ if [ "${ONEOS_GUEST_AUDIO:-1}" = "1" ]; then
     # gives an image's own value; when the key is still true and the
     # extension is not there a few seconds after the HAL restart, false for
     # the session (put back on the return with the other overrides).
+    # The extension never appears on a firmware that has none: in S25 Ultra
+    # sessions db19aee410bd79ff and 75e538ac0ed725df it was not there in any
+    # of the 10 checks, and every switch paid about 5.5 s of them in step
+    # [6/6]. So the absence is remembered per One UI build (its fingerprint
+    # from the preflight baseline, taken before any property is changed): the
+    # next switch on the same build does one check and no waiting, and a
+    # One UI update (another fingerprint) polls again.
     AVX=ro.audio.ihaladaptervendorextension_enabled
     if [ "$(getprop $AVX)" = true ] && [ -n "$RP" ]; then
-        n=0
-        while [ $n -lt 10 ] && ! timeout 5 service check android.media.audio.IHalAdapterVendorExtension/default 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.5; done
-        if ! timeout 5 service check android.media.audio.IHalAdapterVendorExtension/default 2>/dev/null | grep -q ": found"; then
+        AVXSVC=android.media.audio.IHalAdapterVendorExtension/default
+        AVXMEM="$STAGE/oneos_avx_absent"
+        AVXFP=$(sed -n 's/^\[ro\.build\.fingerprint\]: \[\(.*\)\]$/\1/p' "$STAGE/inplace_base/props" 2>/dev/null | head -n 1)
+        AVXREM=0
+        [ -n "$AVXFP" ] && [ -f "$AVXMEM" ] && [ ! -L "$AVXMEM" ] && [ "$(head -n 1 "$AVXMEM" 2>/dev/null)" = "$AVXFP" ] && AVXREM=1
+        if [ $AVXREM = 0 ]; then
+            n=0
+            while [ $n -lt 10 ] && ! timeout 5 service check $AVXSVC 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.5; done
+        fi
+        if ! timeout 5 service check $AVXSVC 2>/dev/null | grep -q ": found"; then
             grep -q "^$AVX=" "$STAGE/guest_props.overridden" 2>/dev/null || echo "$AVX=true" >> "$STAGE/guest_props.overridden"
             "$RP" -n "$AVX" false 2>/dev/null &&
-                echo "Audio: $AVX=false for the session (no IHalAdapterVendorExtension with One UI's audioserver stopped)"
+                echo "Audio: $AVX=false for the session (no IHalAdapterVendorExtension with One UI's audioserver stopped)$([ $AVXREM = 1 ] && echo ' (remembered for this firmware)')"
+            if [ $AVXREM = 0 ] && [ -n "$AVXFP" ] && [ ! -L "$AVXMEM" ] && [ ! -L "$AVXMEM.tmp" ]; then
+                # Root's own file, written whole or not at all.
+                rm -f "$AVXMEM.tmp"
+                ( umask 077; echo "$AVXFP" > "$AVXMEM.tmp" ) && mv -f "$AVXMEM.tmp" "$AVXMEM" &&
+                    echo "Audio: no IHalAdapterVendorExtension after the wait; remembered for this firmware"
+            fi
+        else
+            rm -f "$AVXMEM"
         fi
     fi
 else
@@ -4778,14 +4800,23 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # in S25 Ultra sessions bceaef29fb128e94 and 4d2e95c67f065941
                         # (ColorOS native audit 2026-11-16) the rounds froze the UI while it
                         # booted, with Full session logs off, and touch_events.txt was empty.
-                        # They run when Full session logs are on, or when the home screen
-                        # has not come yet: then something is stuck and the stacks are the
-                        # point. SurfaceFlinger's own dump below keeps its condition (it
+                        # They run when Full session logs are on. With them off, only the
+                        # 90 s round takes them, and only if the home screen still has not
+                        # come: then something is stuck and the stacks are the point. At 40 s
+                        # a normal boot has no home screen yet (S25 Ultra sessions
+                        # db19aee410bd79ff and 75e538ac0ed725df, Full logs off: it came about
+                        # 86 s after the zygote launch), so that round dumped SystemUI (1.74 MB)
+                        # and the launcher (1.37 MB) and held the touchscreen 15 s, 03:15:53 to
+                        # 03:16:36, while ColorOS brought up its home screen and the owner
+                        # unlocked. SurfaceFlinger's own dump below keeps its condition (it
                         # never registered, a stuck case already).
                         heavy=1
                         if [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$home = 1 ]; then
                             heavy=0
                             echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off and the home screen was up' > \$D/heavy_skipped.txt
+                        elif [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$dname = 40 ]; then
+                            heavy=0
+                            echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off; a normal boot has no home screen yet at 40 s, the 90 s round takes them if it still has none' > \$D/heavy_skipped.txt
                         fi
                         # Every thread's name, state and wait channel, from the kernel, read
                         # by the shell itself (a cat, sed, cut and cat per thread before,
