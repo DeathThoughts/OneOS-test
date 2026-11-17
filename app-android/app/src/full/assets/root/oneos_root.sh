@@ -1403,8 +1403,8 @@ do_launch() {
     st=$(cat "$bat/status" 2>/dev/null)
     temp=$(cat "$bat/temp" 2>/dev/null)
     is_dec "$cap" && is_dec "${temp#-}" || refuse "battery not readable"
-    [ "$cap" -ge 30 ] || [ "$st" = Charging ] || [ "$st" = Full ] || refuse "battery at $cap% and not charging"
-    [ "$temp" -lt 420 ] || refuse "battery too warm"
+    [ "$cap" -ge 5 ] || [ "$st" = Charging ] || [ "$st" = Full ] || refuse "battery at $cap% and not charging"
+    [ "$temp" -lt 500 ] || refuse "battery too warm"
     set -- $(stat -f -c '%a %S' "$DATA" 2>/dev/null)
     [ $# -eq 2 ] && ge "$(awk -v a="$1" -v s="$2" 'BEGIN { printf "%.0f", a * s }')" 11811160064 ||
         refuse "less than 11 GiB free on /data"
