@@ -29,6 +29,7 @@
         </activity>
 
         <activity android:name=".ModuleWebActivity" android:exported="false" />
+        <activity android:name=".GuestUpdatesActivity" android:exported="false" />
         <activity android:name=".GuestModulesActivity" android:exported="false" />
         <!-- Bring apps from One UI: lists the catalog the OneOS app left, asks the host session for one app. -->
         <activity android:name=".BringAppsActivity" android:exported="false" android:label="@string/bring_title" />
@@ -63,5 +64,16 @@
             android:authorities="com.sec.knox.provider2"
             android:enabled="false"
             android:exported="true" />
+        <!-- Enabled for the known LineageOS Sound Settings dashboard by the guest activator. -->
+        <provider
+            android:name=".DolbySoundSettingsProvider"
+            android:authorities="com.fahadali.oneos.guest.dolby"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+            <meta-data android:name="com.android.settings.profile" android:value="primary_profile_only" />
+        </provider>
     </application>
 </manifest>

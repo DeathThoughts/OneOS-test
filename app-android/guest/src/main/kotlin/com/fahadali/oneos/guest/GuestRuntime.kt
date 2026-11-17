@@ -9,7 +9,8 @@ import java.util.concurrent.Executors
 
 object GuestRuntime {
     data class Module(val id: String, val name: String, val description: String, val enabled: Boolean, val pending: Boolean, val framework: Boolean, val version: String = "", val author: String = "", val versionCode: Long = 0,
-        val updateUrl: String = "", val capabilities: Set<String> = emptySet(), val removing: Boolean = false)
+        val updateUrl: String = "", val capabilities: Set<String> = emptySet(), val removing: Boolean = false,
+        val disabledReason: String? = null)
     data class State(val root: Boolean = false, val provider: String = "none", val active: Boolean = false,
         val modules: List<Module> = emptyList(), val error: String? = null, val selected: String = "") {
         val providerName get() = when(provider) { "vector" -> "Vector"; "lsposed" -> "LSPosed"; else -> "None" }
@@ -39,11 +40,17 @@ object GuestRuntime {
         check(info.first == 0 && info.second.trim() == "OneOS guest root API 1 manager=${ctx.packageName}") { "Guest root runtime is inactive or needs an update" }
         val lines = control("status").lineSequence().map { it.removePrefix("@@RESULT ") }.toList()
         val framework = lines.firstOrNull { it.startsWith("framework-status ") }?.split(' ')
+        val reasons = lines.mapNotNull { line ->
+            val fields = line.split(' ')
+            if (fields.size == 4 && fields[0] == "module-disabled-reason") {
+                runCatching { (fields[1] to fields[2]) to unhex(fields[3]) }.getOrNull()
+            } else null
+        }.toMap()
         val modules = lines.filter { it.startsWith("module-info ") }.mapNotNull {
             val p = it.split(' '); if (p.size != 8 && p.size != 13) null else runCatching {
                 Module(p[1], unhex(p[6]).ifBlank { p[1] }, unhex(p[7]), p[2] == "1", p[3] == "modules_update", p[4] != "module", unhex(p[5]),
                     p.getOrNull(8)?.let(::unhex).orEmpty(), p.getOrNull(9)?.let(::unhex)?.toLongOrNull() ?: 0,
-                    p.getOrNull(10)?.let(::unhex).orEmpty(), p.getOrNull(11)?.split(',')?.toSet() ?: emptySet(), p.getOrNull(12) == "1")
+                    p.getOrNull(10)?.let(::unhex).orEmpty(), p.getOrNull(11)?.split(',')?.toSet() ?: emptySet(), p.getOrNull(12) == "1", disabledReason = reasons[p[3] to p[1]])
             }.getOrNull()
         }.associateBy { it.id }.values.sortedBy { it.name.lowercase() }
         return State("root active" in lines, framework?.getOrNull(2) ?: "none", framework?.getOrNull(3) == "1", modules, selected = framework?.getOrNull(1) ?: "")

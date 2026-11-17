@@ -94,7 +94,7 @@ object AppUpdater : BackgroundJob<AppUpdater.State>(State(), "oneos-update") {
         executor.execute {
             val testUrl = AppUpdate.testUrl(testCode(app))
             val test = testUrl != null
-            val r = runCatching { AppUpdate.parse(fetchText(testUrl ?: AppUpdate.URL), test).getOrThrow() }
+            val r = runCatching { AppUpdate.parse(fetchText(testUrl ?: AppUpdate.manifestUrl(BuildConfig.DEBUG)), test, debug = BuildConfig.DEBUG).getOrThrow() }
             prefs.edit().putLong("checked", now).apply()
             val u = r.getOrNull()
             update(

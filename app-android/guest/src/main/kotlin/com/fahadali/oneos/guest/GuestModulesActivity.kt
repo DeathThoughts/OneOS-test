@@ -88,7 +88,12 @@ class GuestModulesActivity : AppCompatActivity() {
             ModuleCards.add(list,module.name,module.description,
                 module.enabled,!busy && state.root,getColor(R.color.preboot_card),
                 version = module.version.ifBlank { module.versionCode.takeIf { it > 0 }?.toString().orEmpty() }, author = module.author,
-                status = if(module.removing) "Uninstall pending · Next guest restart" else if(module.pending) "Staged for next guest restart" else null,
+                status = when {
+                    module.removing -> "Uninstall pending · Next guest restart"
+                    module.disabledReason != null -> module.disabledReason
+                    module.pending -> "Staged for next guest restart"
+                    else -> null
+                },
                 toggleEnabled = !module.removing && (!module.framework || module.id == state.selected),
                 options = moduleOptions(module)) { enabled ->
                 busy=true; render()

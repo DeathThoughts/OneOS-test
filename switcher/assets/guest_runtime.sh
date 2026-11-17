@@ -96,8 +96,108 @@ control)
                 [ ! -f "$m/webroot/index.html" ] || caps="$caps,webui"
                 removed=0; [ ! -f "$m/remove" ] || removed=1
                 echo "@@RESULT module-info ${m##*/} $enabled $base $kind ${verhex:--} ${namehex:--} ${deschex:--} ${authorhex:--} ${codehex:--} ${updatehex:--} $caps $removed"
+                reason="$m/.oneos-disabled-reason"
+                if [ "$enabled" = 0 ] && [ -f "$reason" ] && [ ! -L "$reason" ]; then
+                    reasonhex=$(head -c 512 "$reason" | tr -d '\r\n' | od -An -v -tx1 | tr -d ' \n')
+                    [ -z "$reasonhex" ] || echo "@@RESULT module-disabled-reason $base ${m##*/} $reasonhex"
+                fi
             done
         done
+        ;;
+    manager-update-status)
+        d="$A/oneos/manager-update"
+        [ ! -L "$d" ] || exit 1
+        if [ -d "$d/pending" ]; then
+            echo "pending $(cat "$d/pending/code")"
+            [ ! -f "$d/error" ] || head -c 1024 "$d/error"
+        elif [ -f "$d/error" ]; then
+            echo 'failed'
+            head -c 1024 "$d/error"
+        else
+            echo 'idle'
+        fi
+        ;;
+    manager-update-stage|manager-update-cancel|manager-update-apply)
+        # The guest manager queues its signed APK. PackageManager verifies the
+        # installed package's signer again before replacing it at guest restart.
+        d="$A/oneos/manager-update"
+        [ ! -L "$d" ] || exit 1
+        mkdir -p "$d"
+        chmod 700 "$d"
+        if ! mkdir "$d/lock" 2>/dev/null; then
+            owner=$(cat "$d/lock/pid" 2>/dev/null || true)
+            case "$owner" in ''|*[!0-9]*) exit 1 ;; esac
+            kill -0 "$owner" 2>/dev/null && { echo 'Another update operation is running' >&2; exit 1; }
+            rm -rf "$d/lock"
+            mkdir "$d/lock" || exit 1
+        fi
+        echo $$ > "$d/lock/pid"
+        temp="$d/staging-$$"
+        trap 'rm -rf "$temp" "$d/lock"' EXIT
+        case "$2" in
+        manager-update-stage)
+            [ $# -eq 6 ] || exit 1
+            source=$3; bytes=$4; digest=$5; code=$6
+            [ "$source" = /data/user/0/com.fahadali.oneos.guest/files/oneos-update/OneOSGuest.apk ] || exit 1
+            case "$bytes:$code" in *[!0-9:]*|:*|*:) exit 1 ;; esac
+            [ "$bytes" -gt 0 ] && [ "$bytes" -le 67108864 ] && [ "$code" -gt 0 ] || exit 1
+            [ "${#digest}" -eq 64 ] || exit 1
+            case "$digest" in *[!0-9a-f]*) exit 1 ;; esac
+            [ -f "$source" ] && [ ! -L "$source" ] && [ ! -e "$d/pending" ] || exit 1
+            mkdir "$temp"
+            head -c 67108865 "$source" > "$temp/OneOSGuest.apk"
+            [ "$(stat -c %s "$temp/OneOSGuest.apk")" = "$bytes" ] || exit 1
+            [ "$(sha256sum "$temp/OneOSGuest.apk" | cut -d' ' -f1)" = "$digest" ] || exit 1
+            printf '%s\n' "$digest" > "$temp/sha256"
+            printf '%s\n' "$code" > "$temp/code"
+            chmod 644 "$temp/OneOSGuest.apk"
+            mv "$temp" "$d/pending"
+            rm -f "$d/error"
+            ;;
+        manager-update-cancel)
+            rm -rf "$d/pending"
+            rm -f "$d/error"
+            ;;
+        manager-update-apply)
+            [ -d "$d/pending" ] || exit 0
+            bb=/data/oneos_bin/busybox
+            update_failed() {
+                printf '%s\n' "$1" > "$d/error"
+                "$bb" timeout -s KILL 5 am start -f 0x04000000 \
+                    -n com.fahadali.oneos.guest/.GuestUpdatesActivity >/dev/null 2>&1 || true
+                exit 1
+            }
+            apk="$d/pending/OneOSGuest.apk"
+            if [ -L "$apk" ] || [ ! -f "$apk" ] ||
+               [ "$(sha256sum "$apk" | cut -d' ' -f1)" != "$(cat "$d/pending/sha256")" ]; then
+                update_failed 'The queued guest update failed its checksum.'
+            fi
+            # Copy into the guest's package-install staging directory for SELinux.
+            # The stage itself stays root-owned until pm finishes reading it.
+            install_dir=$(mktemp -d /data/local/tmp/oneos-manager-install.XXXXXX) ||
+                update_failed 'Could not prepare the guest update installer.'
+            temp=$install_dir
+            if ! chmod 755 "$install_dir" || ! cp "$apk" "$install_dir/OneOSGuest.apk" ||
+               ! chmod 644 "$install_dir/OneOSGuest.apk"; then
+                update_failed 'Could not copy the queued guest update for installation.'
+            fi
+            restorecon -RF "$install_dir" 2>/dev/null || true
+            # Keep the driver alive to release its lock and reopen the update UI
+            # if PackageManager stalls, before the host watcher's 60 s limit.
+            install_result=0
+            "$bb" timeout -s KILL 45 pm install -r --user 0 --pkg com.fahadali.oneos.guest \
+                "$install_dir/OneOSGuest.apk" > "$d/result" 2>&1 || install_result=$?
+            if [ "$install_result" = 0 ] &&
+               grep -q '^Success' "$d/result"; then
+                rm -rf "$d/pending"
+                rm -f "$d/error"
+            else
+                detail=$(head -c 1024 "$d/result")
+                case "$install_result" in 124|137) detail='The guest update installer timed out. Retry or discard the update.' ;; esac
+                update_failed "${detail:-The guest update installer did not finish. Retry or discard the update.}"
+            fi
+            ;;
+        esac
         ;;
     asset)
         valid_id "$id" || exit 1
@@ -146,6 +246,7 @@ control)
                 [ "$id" = "$(cat "$A/oneos/framework")" ] || { echo 'Select this framework on the pre-boot page first' >&2; exit 1; }
             fi
             if [ "$4" = on ]; then rm -f "$m/disable"; else : > "$m/disable"; fi
+            rm -f "$m/.oneos-disabled-reason"
             found=1
         done
         [ "$found" = 1 ] || exit 1

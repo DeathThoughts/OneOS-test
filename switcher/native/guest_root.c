@@ -29,6 +29,8 @@
 #define GRANTS BASE "/grants"
 #define PACKAGES "/data/system/packages.list"
 #define MANAGER "com.fahadali.oneos.guest"
+#define SHIZUKU "moe.shizuku.privileged.api"
+#define GUEST_BUSYBOX "/data/adb/ksu/bin/busybox"
 #define MAX_CMD 65536
 struct request { uint32_t magic, op, length; };
 enum { RUN=1, LIST=2, GRANT=3, REVOKE=4, INFO=5 };
@@ -62,6 +64,44 @@ static int allowed(unsigned uid) {
     while(fgets(line,sizeof(line),f))if(sscanf(line,"%255s %u",p,&u)==2&&u==uid&&granted(p,u)){found=1;break;}
     fclose(f);return found;
 }
+static int install_guest_namespace_guard(void);
+
+/* The S23 Termux shell loses job control when the broker creates a session.
+ * Allocate a PTY only for a real terminal with all three streams attached.
+ * Piped callers like libsu keep their streams separate and byte-for-byte. */
+static int interactive_stdio(const int fds[3]) {
+    struct stat terminal, stream;
+    if(!isatty(fds[0])||fstat(fds[0],&terminal))return 0;
+    for(int i=1;i<3;i++)
+        if(!isatty(fds[i])||fstat(fds[i],&stream)||
+            terminal.st_dev!=stream.st_dev||terminal.st_ino!=stream.st_ino)return 0;
+    return 1;
+}
+
+static int needs_guest_namespace_guard(unsigned uid) {
+    unsigned shizuku;
+    return uid>=10000&&package_uid(SHIZUKU,&shizuku)&&uid==shizuku;
+}
+
+static void run_guest_shell(const char *command, int interactive) {
+    const char *genv="/data/oneos_genv.sh";
+    const char *shell="/system/bin/sh";
+    const char *interactive_command=
+        "if " GUEST_BUSYBOX " --list | grep -qx script; then "
+        "exec " GUEST_BUSYBOX " script -q -c /system/bin/sh /dev/null; "
+        "fi; exec /system/bin/sh";
+
+    if(!access(genv,R_OK)){
+        if(command)execl(shell,"sh",genv,shell,"-c",command,NULL);
+        else if(interactive)execl(shell,"sh",genv,shell,"-c",interactive_command,NULL);
+        else execl(shell,"sh",genv,shell,NULL);
+    }
+    if(command)execl(shell,"sh","-c",command,NULL);
+    else if(interactive)execl(shell,"sh","-c",interactive_command,NULL);
+    else execl(shell,"sh",NULL);
+    _exit(127);
+}
+
 static int same_root(pid_t pid) {
     char p[64];struct stat peer,own;
     snprintf(p,sizeof(p),"/proc/%d/root",pid);
@@ -158,6 +198,8 @@ static void serve(int server) {
             else if(r.op==LIST&&admin){list_apps(fds[1]);status=0;}
             else if((r.op==GRANT||r.op==REVOKE)&&admin)status=edit_grant(arg,r.op==GRANT)?1:0;
             else if(r.op==RUN&&(admin||allowed(cred.uid))){
+                int guard_namespace=needs_guest_namespace_guard(cred.uid);
+                int interactive=!r.length&&interactive_stdio(fds);
                 pid_t handler=fork();
                 if(handler>0){for(int j=0;j<3;j++)close(fds[j]);close(c);continue;}
                 if(handler<0){for(int j=0;j<3;j++)close(fds[j]);close(c);continue;}
@@ -167,20 +209,22 @@ static void serve(int server) {
                     close(server);close(c);setsid();
                     for(int j=0;j<3;j++)dup2(fds[j],j);
                     for(int j=0;j<3;j++)if(fds[j]>2)close(fds[j]);
+                    /* Shizuku-Next's root starter tries to join PID 1's mount
+                     * namespace. On the S23 ColorOS session that mixed One UI
+                     * jars with guest ART and crashed the server. The guard
+                     * applies to the granted app's shell and its descendants. */
+                    if(guard_namespace&&install_guest_namespace_guard()){
+                        perror("OneOS guest namespace guard");_exit(126);
+                    }
                     clearenv();setenv("PATH","/system/bin:/system/xbin:/data/adb/ksu/bin",1);
                     setenv("HOME","/",1);setenv("USER","root",1);setenv("LOGNAME","root",1);
+                    setenv("SHELL","/system/bin/sh",1);
                     setenv("ANDROID_ROOT","/system",1);setenv("ANDROID_DATA","/data",1);
                     setenv("ANDROID_ART_ROOT","/apex/com.android.art",1);
                     setenv("ANDROID_I18N_ROOT","/apex/com.android.i18n",1);
                     setenv("ANDROID_TZDATA_ROOT","/apex/com.android.tzdata",1);
                     chdir("/");
-                    if(!access("/data/oneos_genv.sh",R_OK)){
-                        if(r.length)execl("/system/bin/sh","sh","/data/oneos_genv.sh","/system/bin/sh","-c",arg,NULL);
-                        else execl("/system/bin/sh","sh","/data/oneos_genv.sh","/system/bin/sh",NULL);
-                    }
-                    if(r.length)execl("/system/bin/sh","sh","-c",arg,NULL);
-                    else execl("/system/bin/sh","sh",NULL);
-                    _exit(127);
+                    run_guest_shell(r.length?arg:NULL,interactive);
                 }
                 close(server);
                 if(job>0){int w=0;pid_t got;do{got=waitpid(job,&w,0);}while(got<0&&errno==EINTR);
@@ -236,7 +280,7 @@ static int client(int op,const char *arg) {
 }
 /* Prevent Vector's dex2oat helper from entering host init's mount namespace.
  * This filter is inherited across fork/exec; failure is fatal. */
-static int guard_exec(char **argv) {
+static int install_guest_namespace_guard(void) {
     struct sock_filter code[]={
         BPF_STMT(BPF_LD|BPF_W|BPF_ABS,offsetof(struct seccomp_data,arch)),
         BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K,AUDIT_ARCH_AARCH64,1,0),
@@ -246,7 +290,11 @@ static int guard_exec(char **argv) {
         BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ERRNO|EPERM),
         BPF_STMT(BPF_RET|BPF_K,SECCOMP_RET_ALLOW)};
     struct sock_fprog filter={sizeof(code)/sizeof(code[0]),code};
-    if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)||prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&filter)){perror("guest namespace guard");return 1;}
+    if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0))return -1;
+    return prctl(PR_SET_SECCOMP,SECCOMP_MODE_FILTER,&filter);
+}
+static int guard_exec(char **argv) {
+    if(install_guest_namespace_guard()){perror("guest namespace guard");return 1;}
     execv(argv[0],argv);perror("exec");return 1;
 }
 /* Catch only our child's app_process exec, never seize host init or scan PIDs. */
