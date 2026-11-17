@@ -3,7 +3,7 @@
   "profile": "f8",
   "set": "n6-global-f8",
   "imageSha256": "eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c",
-  "revision": "fold8-2026-11-07.2",
+  "revision": "fork-2026-11-17.1",
   "files": [
     {
       "name": "Fold8AngleRelay.dex",
@@ -15,6 +15,12 @@
       "name": "Fold8SystemUI.apk",
       "sha256": "fbdc0570a79df22a81c55c350693f05f3c16636492459a3a600a9a82f8ed9beb",
       "bytes": 134953091,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "GlobalVerifiedAddons.tar",
+      "sha256": "eec3202107d1dc28214a073410a90cb8e559f26e653e25d23c1239f2a25c448e",
+      "bytes": 146706054,
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     },
     {
@@ -79,14 +85,14 @@
     },
     {
       "name": "framework_patched.jar",
-      "sha256": "e61f9bebe691ea90e540eeed79b0e5e70ed537c252d12d45cb46119d0d155230",
-      "bytes": 52377677,
+      "sha256": "77c9d39c1e31dde3c35982c009371a231f9825b4b17a54389f3839b67979222f",
+      "bytes": 52442303,
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     },
     {
       "name": "guards.txt",
-      "sha256": "916ca4712537bdc7e0e9fcba1a03f9ff437925b0e05a6e11d63bcab5056bb319",
-      "bytes": 2446,
+      "sha256": "44e206f2e1e80e5089ed0630337b24f09d779d547570e6ccb9736c89862facdf",
+      "bytes": 3382,
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     },
     {
@@ -138,6 +144,12 @@
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     },
     {
+      "name": "oplus_odm_ai.tar",
+      "sha256": "4faf5c11a7f9ee024805dafd520b158f6db470d39da46f8f02f5edca170b5b86",
+      "bytes": 15667200,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
       "name": "permission_payload.img",
       "sha256": "a74644f7a3817f52fdf59e248b88fdac19fca7a87a74a2e2ed91063ad213404f",
       "bytes": 30302208,
@@ -175,8 +187,8 @@
     },
     {
       "name": "services_patched.jar",
-      "sha256": "7c9d905836357a187b77a98749d24f72dff42e2bf0e366de770e2235454e32ac",
-      "bytes": 44700160,
+      "sha256": "2e5d1e1d403275cfef7830dafc8a21e1896953e778b185455d1b9a4398afd4bd",
+      "bytes": 44705476,
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     },
     {
@@ -204,9 +216,15 @@
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     },
     {
-      "name": "GlobalVerifiedAddons.tar",
-      "sha256": "eec3202107d1dc28214a073410a90cb8e559f26e653e25d23c1239f2a25c448e",
-      "bytes": 146706054,
+      "name": "ColorPanoramicSystemUI.apk",
+      "sha256": "c8ddf6bcf5858f0c1dd6b012c77f8cd442254347def89a3b58a3e05ff901175b",
+      "bytes": 116531153,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "oplus-framework_patched.jar",
+      "sha256": "86f96466150f3314872dc30f5e7254c82248e5cff5c3eb712a944b70d31e13ac",
+      "bytes": 12338345,
       "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
     }
   ]
