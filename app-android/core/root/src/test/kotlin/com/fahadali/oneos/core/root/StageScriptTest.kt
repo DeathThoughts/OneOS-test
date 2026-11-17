@@ -1719,6 +1719,24 @@ class StageScriptTest {
     }
 
     @Test
+    fun patchAutoLaunchArgumentReachesRootChecks() = eachShell { fr ->
+        val profile = Profiles.S_8550
+        fr.props["ro.product.model"] = "SM-S911B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val s = Stager(fr, profile)
+        s.prepare()
+        val launch = listOf("session", s.code, "0123456789abcdef", "0", "1", "0", "0", "0", "0")
+        for (patchAuto in listOf("0", "1")) {
+            refused(fr.run(RootScript.Verb.LAUNCH, *(launch + patchAuto).toTypedArray()),
+                "test root: every launch check passed")
+        }
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0")).isNotEmpty())
+    }
+
+    @Test
     fun verboseBootChoiceIsWrittenOnlyAfterLaunchChecks() = eachShell { fr ->
         val s = Stager(fr)
         s.prepare()
