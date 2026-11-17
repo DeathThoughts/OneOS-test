@@ -2343,4 +2343,170 @@ class StageScriptTest {
         assertEquals(before, fr.snapshot())
         assertEquals("exit 9\n", bin.readText())
     }
+
+    /** One UI's media/0 in the fake root, for the album picker: [albums] are relative folders, each with one photo. */
+    private fun oneUiMedia(fr: FakeRoot, vararg albums: String): File {
+        val m = File(fr.root, "data/media/0")
+        for (a in albums) File(m, a).apply { mkdirs() }.let { File(it, "IMG_1.jpg").writeText("x") }
+        return m
+    }
+
+    private fun albumsOf(r: FakeRoot.Run): List<OneUiAlbum> = OneUiMediaState.parse(r.reply.results)?.albums
+        ?: throw AssertionError("no album list:\n$r")
+
+    private fun idOf(path: String) = Hashes.sha256(path.toByteArray()).take(16)
+
+    /**
+     * The album picker (owner's decision after the Galaxy S25 Ultra, session 92032e7ae892154c): albums
+     * lists every folder of One UI's media/0 that directly holds a photo or video, by the rule
+     * guest_start.sh shares them by, and nothing under Android/ (not even WhatsApp's Android/media),
+     * hidden or .nomedia folders, or the storage root. It reads only.
+     */
+    @Test
+    fun oneUiMediaListsTheAlbumsButNeverAndroid() = eachShell { fr ->
+        ok(Stager(fr).begin())
+        val m = oneUiMedia(
+            fr, "DCIM/Camera", "Pictures/My Trip (2024)", "Pictures/صور", "Pictures/A", "Pictures/A/B", "-dash",
+            "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images", "Android/data/x/files/pics", "Android/obb/game",
+            "Pictures/.hidden", "Pictures/Private", "Pictures/Private/Deeper",
+        )
+        File(m, "Pictures/Private/.nomedia").writeText("")
+        File(m, "root.jpg").writeText("x")
+        File(m, "DCIM/Camera/VID_2.MP4").writeText("x")
+        File(m, "DCIM/Camera/notes.txt").writeText("x")
+        File(m, "Documents").mkdirs()
+        File(m, "Documents/a.pdf").writeText("x")
+        val before = fr.snapshot()
+        val media = fr.listing(m)
+        val r = fr.run(RootScript.Verb.ONEUI_MEDIA, "albums")
+        ok(r)
+        assertEquals(before, fr.snapshot())
+        assertEquals(media, fr.listing(m))
+        assertEquals("oneui-media off", r.reply.results.first())
+        val albums = albumsOf(r)
+        // In path order by bytes (LC_ALL=C). The Arabic name as the file system got it: a JVM whose file names
+        // are not UTF-8 makes it "???".
+        val arabic = "Pictures/" + File(m, "Pictures").list()!!.single { it !in setOf("My Trip (2024)", "A", ".hidden", "Private") }
+        val bytewise = Comparator<String> { x, y ->
+            val a = x.toByteArray(); val b = y.toByteArray()
+            (0 until minOf(a.size, b.size)).firstOrNull { a[it] != b[it] }?.let { (a[it].toInt() and 0xff) - (b[it].toInt() and 0xff) } ?: (a.size - b.size)
+        }
+        assertEquals(listOf("-dash", "DCIM/Camera", "Pictures/A", "Pictures/A/B", "Pictures/My Trip (2024)", arabic).sortedWith(bytewise), albums.map { it.path })
+        assertTrue(r.out, r.out.lines().none { it.contains("Android") || it.contains("WhatsApp") })
+        for (a in albums) assertEquals(idOf(a.path), a.id)
+        assertEquals(2, albums.first { it.path == "DCIM/Camera" }.files)
+        assertTrue(albums.none { it.excluded })
+        assertEquals("oneui-media-albums 6 0", r.reply.results.last())
+        // Nothing to list: no media/0 at all.
+        assertTrue(m.deleteRecursively())
+        val none = fr.run(RootScript.Verb.ONEUI_MEDIA, "albums")
+        ok(none)
+        assertEquals(emptyList<OneUiAlbum>(), albumsOf(none))
+    }
+
+    /**
+     * exclude replaces the list of unticked albums with exactly the albums named (their paths, one per
+     * line), root's 0600 file made beside it and renamed in, or removes it when none is named; an
+     * unknown id, a link or a folder at its path is refused and changes nothing; off and on keep it.
+     */
+    @Test
+    fun oneUiMediaExcludeWritesTheUntickedAlbumsAtomically() = eachShell { fr ->
+        ok(Stager(fr).begin())
+        oneUiMedia(fr, "DCIM/Camera", "DCIM/Screenshots", "Pictures/A", "Pictures/A/B", "Pictures/it's \"x\"")
+        val tmp = File(fr.root, "data/local/tmp")
+        val list = File(tmp, "oneos-oneui-media-excluded")
+        fun media(vararg a: String) = fr.run(RootScript.Verb.ONEUI_MEDIA, *a)
+        fun unchanged(r: FakeRoot.Run, part: String) {
+            val before = fr.snapshot()
+            refused(r, part)
+            assertEquals(r.toString(), before, fr.snapshot())
+        }
+        val ids = albumsOf(media("albums").also { ok(it) }).associate { it.path to it.id }
+
+        var r = media("exclude", ids.getValue("Pictures/it's \"x\""), ids.getValue("DCIM/Camera"), ids.getValue("DCIM/Camera"))
+        ok(r)
+        assertEquals("DCIM/Camera\nPictures/it's \"x\"\n", list.readText())
+        assertEquals("600", fr.mode(list))
+        assertEquals("${fr.uid}:" + FakeRoot.exec(listOf("id", "-g")).trim(), FakeRoot.exec(listOf("stat", "-c", "%u:%g", list.path)).trim())
+        assertEquals(listOf(list.name), tmp.list()!!.filter { it.startsWith("oneos-oneui-media-excluded") })
+        assertEquals(setOf("DCIM/Camera", "Pictures/it's \"x\""), albumsOf(r).filter { it.excluded }.map { it.path }.toSet())
+        assertEquals(albumsOf(r), albumsOf(media("albums")))
+        // A child album stays on its own when its parent is unticked.
+        ok(media("exclude", ids.getValue("Pictures/A")))
+        assertEquals("Pictures/A\n", list.readText())
+        assertEquals(listOf("Pictures/A"), albumsOf(media("albums")).filter { it.excluded }.map { it.path })
+
+        // Unknown ids change nothing.
+        unchanged(media("exclude", ids.getValue("DCIM/Camera"), "0123456789abcdef"), "0123456789abcdef is not one of One UI's albums")
+        assertEquals("Pictures/A\n", list.readText())
+
+        // Off and on keep the choice.
+        ok(media("on"))
+        ok(media("off"))
+        assertEquals("Pictures/A\n", list.readText())
+
+        // A link or a folder at its path is refused and not followed; status shows why the guest shares nothing.
+        assertTrue(list.delete())
+        val elsewhere = File(fr.root, "elsewhere").apply { writeText("keep\n") }
+        java.nio.file.Files.createSymbolicLink(list.toPath(), elsewhere.toPath())
+        unchanged(media("exclude", ids.getValue("DCIM/Camera")), "is a symlink")
+        unchanged(media("exclude"), "is a symlink")
+        assertEquals("keep\n", elsewhere.readText())
+        val st = OneUiMediaState.parse(media("albums").reply.results)!!
+        assertEquals("/data/local/tmp/oneos-oneui-media-excluded is a symlink", st.exclusionsWhy)
+        assertTrue(list.delete())
+        list.mkdir()
+        unchanged(media("exclude", ids.getValue("DCIM/Camera")), "is not a regular file")
+        assertTrue(list.delete())
+
+        // A regular file of the wrong mode is reported, and replaced by the next save.
+        list.writeText("DCIM/Screenshots\n")
+        FakeRoot.exec(listOf("chmod", "0644", list.path))
+        assertTrue(OneUiMediaState.parse(media("albums").reply.results)!!.exclusionsWhy!!.contains("not root's 0600 file"))
+        ok(media("exclude", ids.getValue("DCIM/Screenshots")))
+        assertEquals("600", fr.mode(list))
+
+        // Nothing unticked: the file goes.
+        r = media("exclude")
+        ok(r)
+        assertFalse(list.exists())
+        assertTrue(albumsOf(r).none { it.excluded })
+        val before = fr.snapshot()
+        ok(media("exclude"))
+        assertEquals(before, fr.snapshot())
+    }
+
+    /** The album verbs' arguments: albums none, exclude any number (to 4096) of 16-hex ids. */
+    @Test
+    fun oneUiMediaAlbumArguments() = eachShell { fr ->
+        ok(Stager(fr).begin())
+        val id = "0123456789abcdef"
+        fun problems(vararg a: String) = RootScript.problems(RootScript.Verb.ONEUI_MEDIA, a.toList())
+        assertEquals(emptyList<String>(), problems("albums"))
+        assertEquals(emptyList<String>(), problems("exclude"))
+        assertEquals(emptyList<String>(), problems("exclude", id, "fedcba9876543210"))
+        assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.ONEUI_MEDIA, listOf("exclude") + List(4096) { id }))
+        assertTrue(RootScript.problems(RootScript.Verb.ONEUI_MEDIA, listOf("exclude") + List(4097) { id }).isNotEmpty())
+        assertTrue(problems("albums", id).isNotEmpty())
+        assertTrue(problems("exclude", "0123456789ABCDEF").isNotEmpty())
+        assertTrue(problems("exclude", "0123456789abcde").isNotEmpty())
+        assertTrue(problems("exclude", "DCIM").isNotEmpty())
+        assertTrue(problems("on", id).isNotEmpty())
+        // The script itself refuses what the app would not send, and changes nothing.
+        val before = fr.snapshot()
+        assertEquals(RootScript.EXIT_USAGE, fr.runUnchecked(RootScript.Verb.ONEUI_MEDIA, "albums", "albums $id").exit)
+        assertEquals(RootScript.EXIT_USAGE, fr.runUnchecked(RootScript.Verb.ONEUI_MEDIA, "albums", "exclude 0123456789ABCDEF").exit)
+        assertEquals(RootScript.EXIT_USAGE, fr.runUnchecked(RootScript.Verb.ONEUI_MEDIA, "albums", "exclude ../../x").exit)
+        assertEquals(before, fr.snapshot())
+    }
+
+    /** guest_start.sh publishes exactly what the picker lists: one extension list, the same in both scripts. */
+    @Test
+    fun albumRuleIsTheSameInTheGuestAndTheRootScript() {
+        val guest = Regex("(?m)^oneos_media_ext=\"([^\"]*)\"$").findAll(File(Shipped.switcherAssets, "guest_start.sh").readText()).map { it.groupValues[1] }.toList()
+        val root = Regex("(?m)^OMEDIA_EXT=\"([^\"]*)\"$").findAll(Shipped.rootScriptText).map { it.groupValues[1] }.toList()
+        assertEquals(1, guest.size)
+        assertEquals(guest, root)
+        assertEquals("jpg jpeg png gif webp heic heif avif bmp dng mp4 m4v 3gp 3g2 mkv webm mov avi ts", root.single())
+    }
 }
