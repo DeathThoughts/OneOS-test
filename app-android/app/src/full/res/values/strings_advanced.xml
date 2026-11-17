@@ -474,4 +474,7 @@
     <string name="guest_vulkan_summary">Uses Vulkan for the ColorOS 17 UI and threaded GPU composition on the Galaxy S23. Applies when launching from One UI.</string>
     <string name="guest_vulkan_warning">Vulkan can cause graphical glitches, app crashes, or a black screen. If that happens, return to One UI and turn this off before launching ColorOS again. To return from a black screen, hold Volume Up and Volume Down together for 3 seconds.</string>
     <string name="guest_vulkan_enable">Enable Vulkan</string>
+    <string name="fork_patch_warning_title">Patches tested on two phone models</string>
+    <string name="fork_patch_warning_message">This fork’s patches have been tested only on the base Galaxy S23 and Galaxy S25 Ultra. They are likely to fail on other Galaxy S and A models and may also fail on other phones. Proceed with caution.</string>
+    <string name="fork_patch_warning_ack">I understand that these patches may fail on this phone.</string>
 </resources>

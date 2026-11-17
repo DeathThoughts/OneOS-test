@@ -19,7 +19,17 @@ import dev.oneuiproject.oneui.R as OuiIcons
 
 /** SESL9 preference rows, the same settings component used by Twidget. */
 class SettingsPreferenceFragment : InsetPreferenceFragment() {
-    override fun onResume() { super.onResume(); onCreatePreferences(null, null) }
+    // The rebuild refreshes rows changed elsewhere, but a new screen would put the list back at the top (the
+    // owner's Galaxy S25 Ultra, 2026-11-17), so the scroll position is kept across it. setPreferenceScreen binds
+    // the new adapter from a posted message, not at once, so the restore is posted behind it. listView is null
+    // before the view exists (first resume): nothing to keep then.
+    override fun onResume() {
+        super.onResume()
+        val list = listView
+        val saved = list?.layoutManager?.onSaveInstanceState()
+        onCreatePreferences(null, null)
+        if (list != null && saved != null) list.post { list.layoutManager?.onRestoreInstanceState(saved) }
+    }
 
     // Remove OneOS data says while it runs and how it ended (0.4.43, UX audit: no feedback at all before).
     private var unsubscribe: (() -> Unit)? = null
@@ -34,7 +44,9 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
             if (!isAdded) return@observe
             val ended = lastRemove == RemoveJob.Phase.REMOVING && (st.phase == RemoveJob.Phase.DONE || st.phase == RemoveJob.Phase.FAILED)
             lastRemove = st.phase
-            onCreatePreferences(null, null)
+            // Updated in place, not rebuilt: a new screen gave the list a new adapter and it jumped to the top
+            // (the owner's Galaxy S25 Ultra, 2026-11-17).
+            bindRemove(st)
             if (ended) st.message?.let { msg ->
                 AlertDialog.Builder(requireContext()).setTitle(R.string.remove_title).setMessage(msg).setPositiveButton(android.R.string.ok, null).show()
             }
@@ -43,7 +55,7 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
         shownPick = OneUiMedia.state.pick
         unsubscribeMedia = OneUiMedia.observe { st ->
             if (!isAdded) return@observe
-            onCreatePreferences(null, null)
+            bindMedia(st)  // in place, see above
             if (st.pick != shownPick) {
                 shownPick = st.pick
                 st.albums?.let(::showAlbumPicker)
@@ -76,10 +88,6 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
         row(setup, R.string.prepare_title, R.string.advanced_setup_summary, OuiIcons.drawable.ic_oui_refresh, PrepareActivity::class.java)
         setup.addDescribedPreference(Preference(ctx).apply {
             key = "remove_data"
-            val rs = RemoveJob.state
-            setTitle(if (rs.busy) R.string.remove_running else R.string.remove_title)
-            if (!rs.busy && rs.message != null) summary = rs.message else setSummary(R.string.remove_summary)
-            isEnabled = !rs.busy
             setIcon(OuiIcons.drawable.ic_oui_delete_outline)
             setOnPreferenceClickListener {
                 if (!RemoveJob.canStart()) android.widget.Toast.makeText(ctx, R.string.remove_busy, android.widget.Toast.LENGTH_LONG).show()
@@ -103,25 +111,23 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
             SessionPrefs.setAutoGuestPatches(ctx, it)
         }
         toggle(sessions, R.string.advanced_full_logs_title, R.string.advanced_full_logs_summary, SessionPrefs.fullLogs(ctx)) { SessionPrefs.setFullLogs(ctx, it) }
-        toggle(sessions, R.string.usage_count_title, R.string.usage_count_summary, SessionPrefs.usageCount(ctx)) { SessionPrefs.setUsageCount(ctx, it) }
         // One UI photos (build 156; the owner made its marker by hand from a root shell; first put in the unused
         // AdvancedFragment, so the S25 Ultra's Settings did not show it): root on/off, read at the next guest boot.
         // Off until root says on; held while a call runs. The listener returns false: the switch follows root's
         // answer when the state updates, so a refusal never shows a wrong position.
-        val media = OneUiMedia.state
         sessions.addDescribedPreference(SwitchPreferenceCompat(ctx).apply {
-            key = "setting_${R.string.oneui_media_title}"
-            setTitle(R.string.oneui_media_title); summary = mediaSummary(media)
-            isIconSpaceReserved = false; isPersistent = false; isChecked = media.media?.on == true; isEnabled = !media.busy
+            key = MEDIA_KEY
+            setTitle(R.string.oneui_media_title)
+            isIconSpaceReserved = false; isPersistent = false
             setOnPreferenceChangeListener { _, next -> OneUiMedia.set(ctx, next as Boolean); false }
         })
         // Which of One UI's albums ColorOS shows (owner's decision after the Galaxy S25 Ultra, session
         // 92032e7ae892154c): root lists them on each tap, so a folder made in One UI since shows up; the
         // choice is root's file, read at the next guest boot, and works with the switch on or off.
         sessions.addDescribedPreference(Preference(ctx).apply {
-            key = "setting_${R.string.oneui_media_albums_title}"
-            setTitle(R.string.oneui_media_albums_title); summary = albumsSummary(media)
-            isIconSpaceReserved = false; isEnabled = !media.busy
+            key = ALBUMS_KEY
+            setTitle(R.string.oneui_media_albums_title)
+            isIconSpaceReserved = false
             setOnPreferenceClickListener { OneUiMedia.choose(ctx); true }
         })
         val experimental = category(R.string.settings_experimental)
@@ -189,6 +195,34 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
         row(help, R.string.about_title, target = AboutActivity::class.java)
         row(help, R.string.team_title, R.string.advanced_team_summary, target = DebugSettingsActivity::class.java)
         preferenceScreen.addBottomInset()
+        // Initial values come from the same functions the observers use, so the two never disagree.
+        bindMedia(OneUiMedia.state)
+        bindRemove(RemoveJob.state)
+    }
+
+    // State updates change the existing rows and never rebuild the screen: a rebuild gives the RecyclerView a
+    // new adapter and the list jumps to the top (the owner's Galaxy S25 Ultra, 2026-11-17). Preference.setChecked
+    // does not call the change listener (only a user click does), so this cannot re-trigger OneUiMedia.set.
+    private fun bindMedia(st: OneUiMedia.State) {
+        findPreference<SwitchPreferenceCompat>(MEDIA_KEY)?.apply {
+            summary = mediaSummary(st); isChecked = st.media?.on == true; isEnabled = !st.busy
+        }
+        findPreference<Preference>(ALBUMS_KEY)?.apply {
+            summary = albumsSummary(st); isEnabled = !st.busy
+        }
+    }
+
+    private fun bindRemove(rs: RemoveJob.State) {
+        findPreference<Preference>("remove_data")?.apply {
+            setTitle(if (rs.busy) R.string.remove_running else R.string.remove_title)
+            if (!rs.busy && rs.message != null) summary = rs.message else setSummary(R.string.remove_summary)
+            isEnabled = !rs.busy
+        }
+    }
+
+    private companion object {
+        val MEDIA_KEY = "setting_${R.string.oneui_media_title}"
+        val ALBUMS_KEY = "setting_${R.string.oneui_media_albums_title}"
     }
 
     /** The switch's text, then what root said when it read or changed nothing, or what is at the marker's path. */

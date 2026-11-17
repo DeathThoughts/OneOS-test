@@ -31,6 +31,28 @@ permissions:
   packages: read
 
 jobs:
+  migrate-patch-payloads:
+    # Only the owner's integration branch may perform the initial copy. Other PRs verify it.
+    if: >-
+      github.repository == 'DeathThoughts/OneOS-test' && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'fix/restart-home-and-bundled-script'
+    permissions:
+      contents: write
+    concurrency:
+      group: fork-patch-payload-migration
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Verify and migrate pinned patch payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/migrate-patch-payloads.py --publish --target "$GITHUB_SHA"
+
   build:
     if: >-
       github.ref_name == 'release' || github.ref_name == 'debug' ||
@@ -210,9 +232,14 @@ jobs:
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           python3 scripts/test-guest-manager-update.py
+          python3 scripts/test-patch-channel.py
+          python3 scripts/test-patch-migration.py
+          python3 scripts/migrate-patch-payloads.py --check-inventory
           cd app-android
-          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
-          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks'
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
+            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments'
 
       - name: Verify signed guest startup patch lifecycle
         run: |

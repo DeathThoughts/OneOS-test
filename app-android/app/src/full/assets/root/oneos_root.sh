@@ -1346,8 +1346,8 @@ switch_verdict() {
 }
 
 do_launch() {
-    [ $# -ge 7 ] && [ $# -le 11 ] || usage "launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub> [verboseBoot [fullLogs [patchAuto [guestVulkan]]]]"
-    mode=$1 code=$2 sid=$3 gms=$4 heat=$5 secims=$6 edmstub=$7 verbose=${8:-0} fulllogs=${9:-1} patchauto=${10:-0} guestvulkan=${11:-0}
+    [ $# -ge 7 ] && [ $# -le 13 ] || usage "launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub> [verboseBoot [fullLogs [batMinPercent [batMaxTenthsC [patchAuto [guestVulkan]]]]]]"
+    mode=$1 code=$2 sid=$3 gms=$4 heat=$5 secims=$6 edmstub=$7 verbose=${8:-0} fulllogs=${9:-1} batmin=${10:-30} batmaxt=${11:-420} patchauto=${12:-0} guestvulkan=${13:-0}
     case "$mode" in session|dry) ;; *) usage "launch mode $mode" ;; esac
     is_dec "$code" || usage "launch versionCode $code"
     case "$sid" in *[!0-9a-f]*|'') usage "launch session id" ;; esac
@@ -1358,6 +1358,9 @@ do_launch() {
     case "$edmstub" in 0|1) ;; *) usage "launch edmStub $edmstub" ;; esac
     case "$verbose" in 0|1) ;; *) usage "launch verboseBoot $verbose" ;; esac
     case "$fulllogs" in 0|1) ;; *) usage "launch fullLogs $fulllogs" ;; esac
+    # Owner's decision, 2026-11-17: the app passes its build type's battery limits; strict when absent.
+    is_dec "$batmin" && [ "$batmin" -ge 5 ] && [ "$batmin" -le 100 ] || usage "launch batMinPercent $batmin"
+    is_dec "$batmaxt" && [ "$batmaxt" -ge 300 ] && [ "$batmaxt" -le 500 ] || usage "launch batMaxTenthsC $batmaxt"
     case "$patchauto" in 0|1) ;; *) usage "launch patchAuto $patchauto" ;; esac
     case "$guestvulkan" in 0|1) ;; *) usage "launch guestVulkan $guestvulkan" ;; esac
     [ -n "$T" ] || [ "$(id -u)" = 0 ] || refuse "not root"
@@ -1408,8 +1411,8 @@ do_launch() {
     st=$(cat "$bat/status" 2>/dev/null)
     temp=$(cat "$bat/temp" 2>/dev/null)
     is_dec "$cap" && is_dec "${temp#-}" || refuse "battery not readable"
-    [ "$cap" -ge 5 ] || [ "$st" = Charging ] || [ "$st" = Full ] || refuse "battery at $cap% and not charging"
-    [ "$temp" -lt 500 ] || refuse "battery too warm"
+    [ "$cap" -ge "$batmin" ] || [ "$st" = Charging ] || [ "$st" = Full ] || refuse "battery at $cap% and not charging"
+    [ "$temp" -lt "$batmaxt" ] || refuse "battery too warm"
     set -- $(stat -f -c '%a %S' "$DATA" 2>/dev/null)
     [ $# -eq 2 ] && ge "$(awk -v a="$1" -v s="$2" 'BEGIN { printf "%.0f", a * s }')" 11811160064 ||
         refuse "less than 11 GiB free on /data"

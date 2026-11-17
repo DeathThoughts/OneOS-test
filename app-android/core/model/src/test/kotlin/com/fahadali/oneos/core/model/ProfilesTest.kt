@@ -652,4 +652,14 @@ class ProfilesTest {
             }
         }
     }
+    @Test
+    fun forkPatchWarningExemptsOnlyTheTestedModels() {
+        for (model in listOf("SM-S911B", "SM-S911U1", "SM-S938B", "SM-S938N")) {
+            assertTrue(model, Profiles.forkPatchesTested(model))
+        }
+        for (model in listOf("SM-S916B", "SM-S918B", "SM-S931B", "SM-A556B", "SM-F956B", "", "SM-S911-invalid")) {
+            assertFalse(model, Profiles.forkPatchesTested(model))
+        }
+    }
+
 }

@@ -8,7 +8,7 @@
     <string name="home_check_summary">Модель, чип, One UI, экраны, root и свободное место, а также сможет ли OneOS работать здесь</string>
     <string name="home_tests_title">Запустить тесты</string>
     <string name="home_tests_summary">Тесты только для чтения с root для команды OneOS. Ничего на телефоне не меняется.</string>
-    <string name="home_send_title">Отправить результаты команде OneOS</string>
+    <string name="home_send_title">Сообщить о результатах на GitHub</string>
     <string name="home_send_summary">После запуска тестов отправьте команде архив с результатами, чтобы она проверила, сможет ли OneOS работать на этом телефоне.</string>
     <string name="home_cat_app">OneOS</string>
     <string name="home_about_summary">Что умеет эта версия, безопасность и авторы</string>
@@ -59,7 +59,7 @@
     <string name="findings_share_chooser">Отправить результаты команде OneOS</string>
     <string name="findings_share_subject">Результаты OneOS</string>
     <string name="findings_cat_bundle">Результаты</string>
-    <string name="findings_send_title">Отправить результаты команде OneOS</string>
+    <string name="findings_send_title">Сообщить о результатах на GitHub</string>
     <string name="findings_send_summary">«Поделиться» отправляет архив ниже. Личные данные удалены; нажмите на любой файл, чтобы увидеть, что в нём.</string>
     <string name="findings_cat_summary">Сводка</string>
     <string name="findings_cat_privacy">Удалённые личные данные</string>
@@ -77,7 +77,7 @@
     <string name="logs_share_subject">Журналы сеансов OneOS</string>
     <string name="logs_share_chooser">Отправить журналы сеансов команде OneOS</string>
     <string name="logs_cat_bundle">Журналы сеансов</string>
-    <string name="logs_send_title">Отправить журналы команде OneOS</string>
+    <string name="logs_send_title">Отправить журналы на GitHub</string>
     <string name="logs_send_summary">«Поделиться» отправляет архив ниже. Личные данные удалены при чтении журналов; нажмите на любой файл, чтобы увидеть, что в нём.</string>
     <string name="logs_delete_title">Удалить эти журналы с телефона</string>
     <string name="logs_delete_summary">Удаляет архив и его папку из памяти OneOS. Собственные копии телефона в папке stage остаются.</string>
@@ -88,11 +88,11 @@
     <string name="about_what_summary">Запускает другую ОС Android, собранную на сервере OneOS из обновления производителя, рядом с One UI на рутованном флагмане Samsung и возвращается в One UI, обычно без перезагрузки. Ничего не прошивается.</string>
     <string name="about_version_scope_title">Эта версия</string>
     <string name="about_tested_title">Проверено</string>
-    <string name="about_tested_summary">Проверено на Z Fold (F8U), S26 Ultra, S25 Ultra и S25. Другие телефоны не проверялись.</string>
+    <string name="about_tested_summary">Патчи этого форка проверены только на базовом Galaxy S23 и Galaxy S25 Ultra. На других Galaxy S, A и других телефонах возможны сбои. Соблюдайте осторожность.</string>
     <string name="about_safety_title">Безопасность</string>
     <string name="about_cat_credits">Авторы</string>
-    <string name="about_credit_oneos_title">OneOS</string>
-    <string name="about_credit_oneos_summary">Приложение, патчи фреймворка и серверная сборка. Скрипты сеансов начаты с проекта, указанного ниже.</string>
+    <string name="about_credit_oneos_title">Оригинальный OneOS от Fahad Ali Javed</string>
+    <string name="about_credit_oneos_summary">Этот независимый форк основан на OneOS от Fahad Ali Javed. Благодарности авторам и лицензии указаны ниже.</string>
     <string name="about_credit_onelineage_title">OneLineage</string>
     <string name="about_credit_fold8_title">Поддержка Galaxy Z Fold8</string>
     <string name="about_credit_fold8_summary">Josh Skinner (thatjoshguy67): наборы для Fold8 и шарнир, с приложениями в полусложенном состоянии и анимациями складывания в ColorOS и Pixel на Fold8 и Fold8 Ultra.</string>
@@ -106,7 +106,7 @@
     <string name="about_cat_legal">Правовая информация</string>
     <string name="about_legal_title">Не связано с компаниями</string>
     <string name="about_legal_summary">Не связано с Samsung, OPPO, Google, Project Infinity-X и LineageOS. Galaxy, One UI, ColorOS, Pixel и Android являются товарными знаками их владельцев.</string>
-    <string name="send_title">Отправка команде OneOS</string>
+    <string name="send_title">Сообщить на GitHub</string>
     <string name="send_unavailable">В этой сборке отправка недоступна. Используйте «Поделиться».</string>
     <string name="send_cat_session">Отчёт о сеансе</string>
     <string name="send_cat_probe">Отчёт о телефоне</string>
@@ -143,7 +143,7 @@
     <string name="usage_count_summary">Раз в день отправляются случайный ID, модель телефона, версия OneOS и настроенные системы, чтобы мы могли считать активные телефоны. Без аккаунта, номера, местоположения и файлов.</string>
     <string name="send_privacy_title">Что видит команда</string>
     <string name="send_privacy_summary">Тот же файл, что отправляет «Поделиться», с уже удалёнными личными данными, и ваши ответы. Отчёты хранятся 30 дней. В публичной таблице совместимости учитываются только ответы: никогда ваша заметка, имя или данные телефона.</string>
-    <string name="send_button">Отправить команде OneOS</string>
+    <string name="send_button">Открыть issue на GitHub</string>
     <string name="send_button_summary">Используется мобильный интернет или Wi-Fi</string>
     <string name="send_preparing">Подготовка…</string>
     <string name="send_progress">Отправка… %1$d%% из %2$s</string>
@@ -160,7 +160,7 @@
     <string name="send_share_instead">Поделиться вместо этого</string>
     <string name="send_share_instead_summary">Отправьте файл сами, например в группу Telegram</string>
     <string name="findings_send_team">Отправить команде OneOS</string>
-    <string name="last_send_summary">Как всё прошло и журналы, прямо команде</string>
+    <string name="last_send_summary">Подготовить отчёт и приложить полный архив журналов к issue этого форка</string>
     <string name="last_send_sent">Отправлено, код отчёта %1$s. Нажмите, чтобы отправить снова.</string>
     <string name="send_cat_telegram">Telegram</string>
     <string name="send_tg_sign_in">Войти через Telegram</string>
