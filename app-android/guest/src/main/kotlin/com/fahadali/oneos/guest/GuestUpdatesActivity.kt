@@ -9,6 +9,7 @@ import com.fahadali.oneos.shared.NativeCards
 class GuestUpdatesActivity : AppCompatActivity() {
     private lateinit var list: LinearLayout
     private var rendered: GuestUpdates.State? = null
+    private var renderedPatch: GuestPatches.Phase? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val progress = object : Runnable {
         override fun run() {
@@ -34,6 +35,7 @@ class GuestUpdatesActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         handler.post(progress)
+        GuestPatches.checkAutomatically(this)
         if (GuestUpdates.supported() && GuestUpdates.rootActive() && !GuestUpdates.state.busy) GuestUpdates.refresh(::render)
     }
 
@@ -45,9 +47,12 @@ class GuestUpdatesActivity : AppCompatActivity() {
     override fun onSupportNavigateUp(): Boolean { finish(); return true }
 
     private fun render(state: GuestUpdates.State) {
-        if (isDestroyed || rendered == state) return
+        val patch = GuestPatches.phase
+        if (isDestroyed || (rendered == state && renderedPatch == patch)) return
         rendered = state
+        renderedPatch = patch
         list.removeAllViews()
+        if (GuestPatches.supported()) renderPatches(patch)
         val card = NativeCards.section(list, getString(R.string.guest_updates_title), getColor(R.color.preboot_card))
         NativeCards.row(card, getString(R.string.guest_updates_installed, BuildConfig.VERSION_NAME),
             getString(R.string.guest_updates_scope))
@@ -91,4 +96,22 @@ class GuestUpdatesActivity : AppCompatActivity() {
             }.isEnabled = !state.busy
         }
     }
+
+    private fun renderPatches(phase: GuestPatches.Phase) {
+        val card = NativeCards.section(list, getString(R.string.guest_patch_title), getColor(R.color.preboot_card))
+        when (phase) {
+            GuestPatches.Phase.IDLE, GuestPatches.Phase.FAILED -> NativeCards.row(card,
+                getString(R.string.guest_patch_check),
+                if (phase == GuestPatches.Phase.FAILED) getString(R.string.guest_patch_failed) else "") {
+                GuestPatches.check(this)
+            }
+            GuestPatches.Phase.CHECKING -> NativeCards.row(card, getString(R.string.guest_updates_checking))
+            GuestPatches.Phase.READY -> NativeCards.row(card, getString(R.string.guest_patch_stage)) {
+                GuestPatches.stage(this)
+            }
+            GuestPatches.Phase.STAGED -> NativeCards.row(card, getString(R.string.guest_updates_restart),
+                getString(R.string.guest_patch_staged)) { GuestRestart.confirm(this) }
+        }
+    }
+
 }

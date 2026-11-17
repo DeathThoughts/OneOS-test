@@ -135,6 +135,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "OneOSBootStatus.dex" to File(repoRoot, "switcher/assets/OneOSBootStatus.dex"),
     "oneos_boot_icon.png" to File(repoRoot, "switcher/assets/oneos_boot_icon.png"),
     "guest_prepare.sh" to File(repoRoot, "switcher/assets/guest_prepare.sh"),
+    "guest_patch.sh" to File(repoRoot, "switcher/assets/guest_patch.sh"),
     "guest_start.sh" to File(repoRoot, "switcher/assets/guest_start.sh"),
     "guest_props.sh" to File(repoRoot, "switcher/assets/guest_props.sh"),
     "return_to_oneui.sh" to File(repoRoot, "switcher/assets/return_to_oneui.sh"),
@@ -522,8 +523,8 @@ android {
         // the vendor's Bluetooth module with offload off, as One UI does; 0.4.99's bridge got the session but the
         // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
         // Refresh stages created before the storage, diagnostics and bring-apps changes.
-        versionCode = 158
-        versionName = "0.5.19-s23.5-teste.2"
+        versionCode = 159
+        versionName = "0.5.19-s23.5-teste.3"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
         // Send to the OneOS team (0.4.29, both editions): the report service's

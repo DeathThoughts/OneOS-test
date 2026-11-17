@@ -3356,6 +3356,12 @@ if [ "${ONEOS_GUEST_APP:-1}" = 1 ]; then
     chmod 644 "$STAGE/data/oneos_bootui/boot_status.sh"
     echo 1 > "$STAGE/data/oneos_bootui/manager_updates"
     chmod 644 "$STAGE/data/oneos_bootui/manager_updates"
+    if [ ! -L "$STAGE/data/oneos_bootui" ]; then
+        rm -f "$STAGE/data/oneos_bootui/signed_patch"
+        if [ -f "$STAGE/tmp/guest-patch-session/scope" ]; then
+            /system/bin/sh "$STAGE/guest_patch.sh" "$STAGE" publish || true
+        fi
+    fi
     GUEST_APP_APK="$STAGE/OneOSGuest.apk"
     [ ! -f "$STAGE/guest_manager.apk" ] || GUEST_APP_APK="$STAGE/guest_manager.apk"
     # One integrated OneOS app in every guest, including when guest root is off.
@@ -7285,6 +7291,11 @@ HOST_DEV=$(stat -L -c %d /proc/1/root/ 2>/dev/null)
 [ "$GUEST_DEV" = "$HOST_DEV" ] && GUEST_DEV=""
 [ -n "$GUEST_NS" ] && [ "$GUEST_NS" != "$HOST_NS" ] || { echo "soft reboot: no guest namespace recorded"; exit 1; }
 base_script="$S/guest_start.sh"
+case "${2:-base}" in
+    base) ;;
+    trial|known) base_script="$S/tmp/guest-patch-session/run.sh" ;;
+    *) exit 1 ;;
+esac
 [ -f "$base_script" ] && [ ! -L "$base_script" ] && [ "$(stat -c '%u:%g' "$base_script")" = 0:0 ] &&
     [ -f "$S/data/zygote_exec" ] || { echo "soft reboot: guest_start.sh or zygote_exec missing"; exit 1; }
 if [ -f "$S/boot_status.sh" ]; then

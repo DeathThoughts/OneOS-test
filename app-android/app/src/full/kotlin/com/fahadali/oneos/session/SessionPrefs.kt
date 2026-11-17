@@ -235,6 +235,9 @@ object SessionPrefs {
     fun fullLogs(ctx: Context): Boolean = p(ctx).getBoolean("full_logs", false)
     fun setFullLogs(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("full_logs", enabled).apply() }
 
+    fun autoGuestPatches(ctx: Context): Boolean = p(ctx).getBoolean("auto_guest_patches", false)
+    fun setAutoGuestPatches(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("auto_guest_patches", enabled).apply() }
+
     /** Anonymous usage count (Settings / Advanced): on by default; off never sends the daily check-in. Kept by [UsageCheckIn]. */
     fun usageCount(ctx: Context): Boolean = UsageCheckIn.enabled(ctx)
     fun setUsageCount(ctx: Context, enabled: Boolean) = UsageCheckIn.setEnabled(ctx, enabled)

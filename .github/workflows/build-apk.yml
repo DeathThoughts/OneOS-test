@@ -168,6 +168,8 @@ jobs:
       # switcher/assets/guest_manager.apk, so stage it first.
       - name: Build guest manager
         env:
+          ONEOS_PATCH_DEBUG_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_DEBUG_PUBLIC_KEY }}
+          ONEOS_PATCH_RELEASE_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_RELEASE_PUBLIC_KEY }}
           # settings.gradle.kts reads these when ~/.config/twidget/github.properties
           # is absent. The workflow token with packages:read should read
           # tribalfs' public packages; if maven.pkg.github.com refuses it, add a
@@ -186,17 +188,21 @@ jobs:
           cd app-android
           ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest'
 
-      - name: Verify signed guest startup patch format
+      - name: Verify signed guest startup patch lifecycle
         run: |
           classes=$(mktemp -d)
-          javac -d "$classes" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/GuestStartPatch.java" "app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/PatchDownload.java" scripts/GuestStartPatchTest.java "scripts/PatchDownloadTest.java"
+          javac -d "$classes" app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/*.java \
+            scripts/GuestStartPatchTest.java scripts/PatchDownloadTest.java scripts/PatchTrialTest.java scripts/SignGuestStartPatch.java
           java -cp "$classes" GuestStartPatchTest
           java -cp "$classes" com.fahadali.oneos.patch.PatchDownloadTest
+          java -cp "$classes" PatchTrialTest
+          python3 scripts/test-guest-patch-handoff.py
 
       - name: Verify restart Home acknowledgement
         run: |
           sh -n switcher/assets/oneos_switch.sh
           sh -n switcher/assets/guest_prepare.sh
+          sh -n switcher/assets/guest_patch.sh
           python3 scripts/test-restart-home.py
 
       - name: Verify guest media mount safety

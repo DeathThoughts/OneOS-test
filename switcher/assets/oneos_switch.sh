@@ -181,7 +181,7 @@ if [ "$APP" = 1 ]; then
     bad=$(awk 'NF != 2 || length($1) != 64 || $1 ~ /[^0-9a-f]/ || $2 !~ /^[A-Za-z0-9_][A-Za-z0-9._-]*$/ ||
                $2 == "system.raw" || seen[$2]++ { print NR ": " $0 }' "$SUMS" | head -3)
     [ -z "$bad" ] || refuse "files.sha256 has malformed lines: $bad"
-    for need in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
+    for need in oneos_switch.sh guest_prepare.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
                 check_host_apex.sh bridges.sh zygote_exec guards.txt $GUARD_JARS; do
         awk -v n="$need" '$2 == n { f = 1 } END { exit !f }' "$SUMS" || refuse "files.sha256 does not list $need"
     done
@@ -1433,6 +1433,11 @@ if [ -n "$wave_zpid" ]; then
     ONEOS_HOST_DEX2OATBOOTCLASSPATH=$(tr '\0' '\n' < "/proc/$wave_zpid/environ" 2>/dev/null | sed -n 's/^DEX2OATBOOTCLASSPATH=//p')
     export ONEOS_HOST_BOOTCLASSPATH ONEOS_HOST_DEX2OATBOOTCLASSPATH
 fi
+# Validate the pin and target while the host ART environment is still available.
+if [ "${ONEOS_APP:-0}" = 1 ]; then
+    /system/bin/sh "$STAGE/guest_patch.sh" "$STAGE" configure "${ONEOS_PATCH_AUTO:-0}" ||
+        echo "OneOS patch: signed feed inactive for this session"
+fi
 setprop ctl.stop zygote
 # zygote64_32 phones (Galaxy S23): One UI's 32-bit zygote is a service of its
 # own, and stopping zygote leaves it running. The guest's system_server then
@@ -2269,8 +2274,20 @@ record_restart_home() {
     case \"\$GEN\" in ''|0|*[!0-9]*) return ;; esac
     ns=\$(cat $STAGE/guest_mntns 2>/dev/null)
     server_ns=\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)
-    if [ -z \"\$ns\" ] || [ \"\$ns\" != \"\$server_ns\" ]; then
-        echo \"[UI Activator] Restart Home generation \$GEN: guest and system_server mount namespaces differ (\${ns:-missing} vs \${server_ns:-missing})\"
+    host_ns=\$(readlink /proc/1/ns/mnt 2>/dev/null)
+    guest_root=\$(stat -Lc '%d:%i' $STAGE/rootfs 2>/dev/null)
+    # Android can put system_server in a descendant mount namespace. Require
+    # the exact staged guest root and exclude the host's namespace either way.
+    same_restart() {
+        [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
+            [ \"\$ns\" = \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" ] &&
+            [ \"\$server_ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ] &&
+            [ \"\$guest_root\" = \"\$(stat -Lc '%d:%i' /proc/\$PID/root 2>/dev/null)\" ]
+    }
+    if [ -z \"\$ns\" ] || [ -z \"\$server_ns\" ] || [ -z \"\$host_ns\" ] ||
+       [ \"\$server_ns\" = \"\$host_ns\" ] || [ \"\$ns\" = \"\$host_ns\" ] ||
+       [ -z \"\$guest_root\" ] || ! same_restart; then
+        echo \"[UI Activator] Restart Home generation \$GEN: guest system_server identity could not be confirmed\"
         return
     fi
     home_component=\$(timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd package resolve-activity --user 0 --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -n 1)
@@ -2280,9 +2297,7 @@ record_restart_home() {
     esac
     i=0
     while [ \$i -lt 6 ]; do
-        [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
-            [ \"\$ns\" = \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" ] &&
-            [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ] || return
+        same_restart || return
         if timeout 5 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys activity activities 2>/dev/null |
             awk -v component=\"\$home_component\" '
                 function expand(value, parts) {
@@ -2290,14 +2305,12 @@ record_restart_home() {
                     if (parts[2] ~ /^[.]/) return parts[1] \"/\" parts[1] parts[2]
                     return value
                 }
-                /topResumedActivity[=:]|mResumedActivity[=:]/ {
+                /^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity)[[:space:]]*[=:]/ {
                     for (i = 2; i <= NF; i++)
                         if (\$(i - 1) == \"u0\" && expand(\$i) == expand(component)) found = 1
                 }
                 END { exit !found }
-            ' &&
-            [ \"\$GEN\" = \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" ] &&
-            [ \"\$ns\" = \"\$(readlink /proc/\$PID/ns/mnt 2>/dev/null)\" ]; then
+            ' && same_restart; then
             record=\$(mktemp $STAGE/tmp/restart-home.XXXXXX) || return
             if printf '%s %s\n' \"\$GEN\" \"\$ns\" > \"\$record\" &&
                 mv -f \"\$record\" $STAGE/tmp/restart-home.\$GEN; then
@@ -3825,7 +3838,8 @@ done
 # A fresh file every session: rm -f takes a link at that path away (not what
 # it points to), and set -C refuses whatever appears there in between. A
 # running activator of an earlier session keeps reading its own, unlinked copy.
-rm -f "$STAGE/tmp/ui_activator.sh" "$STAGE"/tmp/restart-home.[0-9]*
+rm -f "$STAGE"/tmp/restart-home.[0-9]*
+rm -f "$STAGE/tmp/ui_activator.sh"
 if (umask 077; set -C; $BB cat > "$STAGE/tmp/ui_activator.sh") 2>/dev/null <<UIACT
 # Written by oneos_switch.sh at every start (the UI activator); see there.
 $UI_ACTIVATOR
@@ -4562,6 +4576,34 @@ if [ "$RETURN_MAX" -gt 0 ]; then
         echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
         echo -1000 > /proc/\$\$/oom_score_adj 2>/dev/null
         t=0; total=0; dead=0; sfgone=0; prev_failed=0; homebase=0; wmbase=0; wmseen=0
+        trial_gen=''
+        restart_guest() {
+            kind=base
+            if [ -f $STAGE/tmp/guest-patch-session/scope ]; then
+                kind=\$(/system/bin/sh $STAGE/guest_patch.sh $STAGE select \"\$2\") || kind=base
+            fi
+            homebase=\$(grep -c 'Home activated' /data/local/tmp/ui_activator.log 2>/dev/null)
+            wmbase=\$(grep -c 'Dismissing bootanim' /data/local/tmp/ui_activator.log 2>/dev/null)
+            BB=$BB timeout 120 /system/bin/sh $STAGE/tmp/guest_softreboot.sh \"\$1\" \"\$kind\" || return 1
+            t=0; dead=-60; sfgone=-30; prev_failed=0; wmseen=0; hwcarm=0
+            rm -f $STAGE/data/oneos_hwc_forced
+            trial_gen=''
+            if [ \"\$kind\" = trial ]; then
+                trial_gen=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)
+                trial_ns=\$(cat $STAGE/guest_mntns 2>/dev/null)
+                case \"\$trial_gen\" in ''|0|*[!0-9]*) return 1 ;; esac
+                [ -n \"\$trial_ns\" ] || return 1
+                echo \"OneOS patch: trial boot generation \$trial_gen\"
+            fi
+            return 0
+        }
+        recover_trial() {
+            [ -n \"\$trial_gen\" ] &&
+                [ \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" = \"\$trial_ns\" ] || return 1
+            trial_gen=''
+            echo \"OneOS patch: rolling back the trial to the previous script\"
+            restart_guest patch-rollback 0
+        }
         rm -f $STAGE/diag.pid
         while [ \$t -lt $RETURN_MAX ]; do
             # The 10 s wait ends early on a request. Run 34: Volume Up + Volume
@@ -4574,7 +4616,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # checked every second here: taken once (deleted) and turned into
             # the same request as the keys, app:app or app:tile. Only a plain
             # file is read, 16 bytes at most; nothing in it but the reason is used.
-            i=0
+            i=0; app_restart=0
             while [ \$i -lt 10 ] && [ -z \"\$(getprop oneos.guest.powerctl)\" ]; do
                 if [ -f $GUEST_RETURN_REQ ] && [ ! -L $GUEST_RETURN_REQ ]; then
                     case \"\$(timeout 2 head -c 16 $GUEST_RETURN_REQ 2>/dev/null)\" in tile*) r=tile ;; *) r=app ;; esac
@@ -4599,6 +4641,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 fi
                 if [ -f $GUEST_RESTART_REQ ] && [ ! -L $GUEST_RESTART_REQ ]; then
                     rm -f $GUEST_RESTART_REQ
+                    app_restart=1
                     setprop oneos.guest.powerctl ksud:soft-reboot
                     break
                 fi
@@ -4626,12 +4669,9 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     fi
                 fi
                 echo \"\$(date) guest requested a soft reboot (\$req) after \${t}s\"
-                if BB=$BB timeout 120 /system/bin/sh $STAGE/tmp/guest_softreboot.sh \"\$req\"; then
-                    t=0; dead=-60; sfgone=-30; prev_failed=0; wmseen=0; hwcarm=0; rm -f $STAGE/data/oneos_hwc_forced
-                    homebase=\$(grep -c 'Home activated' /data/local/tmp/ui_activator.log 2>/dev/null)
-                    wmbase=\$(grep -c 'Dismissing bootanim' /data/local/tmp/ui_activator.log 2>/dev/null)
-                    continue
-                fi
+                # A second restart while testing rolls back to the last accepted script.
+                [ -z \"\$trial_gen\" ] || app_restart=0
+                if restart_guest \"\$req\" \"\$app_restart\"; then continue; fi
                 echo \"\$(date) soft reboot failed, returning to One UI\"
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
             fi
@@ -4658,6 +4698,21 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         fi ;;
                 esac
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
+            fi
+            if [ -n \"\$trial_gen\" ]; then
+                ack=\$(cat $STAGE/tmp/restart-home.\$trial_gen 2>/dev/null)
+                if [ \"\$ack\" = \"\$trial_gen \$trial_ns\" ] &&
+                   [ \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" = \"\$trial_gen\" ] &&
+                   [ \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" = \"\$trial_ns\" ] &&
+                   /system/bin/sh $STAGE/guest_patch.sh $STAGE accept; then
+                    echo \"OneOS patch: accepted after Home in generation \$trial_gen\"
+                    trial_gen=''
+                    /system/bin/sh $STAGE/guest_patch.sh $STAGE publish || true
+                elif [ \$t -ge 140 ]; then
+                    echo \"OneOS patch: trial did not confirm Home; restoring the previous script\"
+                    if recover_trial; then continue; fi
+                    exec /system/bin/sh $STAGE/return_to_oneui.sh
+                fi
             fi
             # Reaching the home screen only lifts the black-screen and time
             # limits; a dead guest still has to come back to One UI (the watcher
@@ -4963,6 +5018,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             else
                 dead=\$((dead + 10))
                 if [ \$dead -ge 30 ]; then
+                    if recover_trial; then continue; fi
                     echo \"\$(date) guest zygote/system_server gone for \${dead}s after \${t}s, returning to One UI\"
                     exec /system/bin/sh $STAGE/return_to_oneui.sh
                 fi
@@ -4978,6 +5034,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             else
                 sfgone=\$((sfgone + 10))
                 if [ \$sfgone -ge 30 ]; then
+                    if recover_trial; then continue; fi
                     echo \"\$(date) black screen after \${t}s (the guest's surfaceflinger gone for \${sfgone}s, nothing restarts it), returning to One UI\"
                     exec /system/bin/sh $STAGE/return_to_oneui.sh
                 fi
@@ -5010,6 +5067,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             ba=\$(pidof bootanimation)
             [ \$wm = 0 ] && [ \"\$(grep -c 'Dismissing bootanim' /data/local/tmp/ui_activator.log 2>/dev/null)\" -gt \"\${wmbase:-0}\" ] && wm=1
             if [ \$t -ge $RETURN_BLACK ] && { ! pidof surfaceflinger >/dev/null || [ \$new_failed -gt 100 ] || { [ \$home = 0 ] && [ -z \"\$ba\" ] && { [ \$wm = 0 ] || [ \$wmseen -ge 120 ]; }; }; }; then
+                if recover_trial; then continue; fi
                 echo \"\$(date) black screen after \${t}s (surfaceflinger: \$(pidof surfaceflinger), bootanimation: \$(pidof bootanimation), new failed frames: \$new_failed), returning to One UI\"
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
             fi
