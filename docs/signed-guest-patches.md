@@ -32,6 +32,19 @@ system patches** work with that toggle off. Downloads never restart the guest.
 
 ## Debug marker patch
 
+For a CI-built smoke test, put the base64 PKCS#8 DER **debug** signing key in
+the `ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64` secret in the `debug-build` GitHub
+Actions environment. Keep the key in your private signing storage and use
+the environment's existing branch restrictions. Actions derives the pin for
+the debug APK and creates the `oneos-debug-signed-patch` artifact. It leaves
+feed publication to the maintainer. Set repository variable
+`ONEOS_PATCH_SMOKE_IMAGE` if the test phone uses a different image and
+`ONEOS_PATCH_SMOKE_SEQUENCE` if that exact target has already seen a patch
+with sequence 1. This step does not load the debug signing key into a release
+build.
+
+For offline signing, the build can also use a public pin alone.
+
 Use the exact `guest_start.sh` and host build from the bootstrap source. Read the
 image ID and raw SHA-256 from the booted stage or from the source
 `image_raw` table. On this S23, verify which ColorOS image was prepared
