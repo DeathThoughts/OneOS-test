@@ -4113,7 +4113,10 @@ if [ -f "$WAVE_APK" ]; then
     if $BB mount -o bind "$WAVE_APK" /system/system_ext/priv-app/SystemUI/SystemUI.apk 2>/dev/null; then
         echo "[Pivoted Root] SystemUI: fingerprint wave APK bound"
         # SurfaceFlinger thrashes 10 Hz <-> 120 Hz during the wave without a
-        # floor; the setting lives in the guest's data and resets on boot.
+        # floor; this runs only when the separate wave APK is bound, and the
+        # setting lives in the guest's settings database and persists across
+        # boots (S25 Ultra, coloros17-findx9u-in-1105, sessions
+        # db19aee410bd79ff and 75e538ac0ed725df).
         (
             n=0
             while [ "$(getprop sys.boot_completed)" != 1 ] && [ "$n" -lt 120 ]; do
