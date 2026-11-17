@@ -52,6 +52,40 @@ HOLD = START[START.index("# One UI's albums in ColorOS (owner's decision"):
 LAUNCH = START[START.index("# One UI's albums (S25 Ultra session 9a5159cc76ee3748): One UI's media/0,\n"):
                START.index('echo "[Pivoted Root] time $($BB date +%T) zygote"')]
 
+# The fake content: the late step's queries are logged in content.log and answer
+# with two rows; the watch's (MEDIA_TEST_WATCH, set by the fake timeout 10) are
+# logged in content-watch.log and answer from watch.seq, one count per line
+# ("none": an error and no row), the last line repeating; a query without a
+# where clause answers watch.total rows (default 2).
+CONTENT = r"""#!/bin/sh
+rows() {
+    i=0
+    while [ "$i" -lt "$1" ]; do echo "Row: $i _id=$i"; i=$((i + 1)); done
+}
+log=content.log
+[ -z "$MEDIA_TEST_WATCH" ] || log=content-watch.log
+echo "$*" >> "$MEDIA_TEST_ROOT/$log"
+case "$*" in
+    *--where*) ;;
+    *) rows "$(cat "$MEDIA_TEST_ROOT/watch.total" 2>/dev/null || echo 2)"; exit 0 ;;
+esac
+if [ -n "$MEDIA_TEST_WATCH" ] && [ -f "$MEDIA_TEST_ROOT/watch.seq" ]; then
+    n=$(cat "$MEDIA_TEST_ROOT/watch.n" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$MEDIA_TEST_ROOT/watch.n"
+    last=$(wc -l < "$MEDIA_TEST_ROOT/watch.seq")
+    [ "$n" -le "$last" ] || n=$last
+    v=$(sed -n "${n}p" "$MEDIA_TEST_ROOT/watch.seq")
+    case "$v" in
+        none) echo "Error while accessing provider:media"; exit 1 ;;
+        0) echo "No result found." ;;
+        *) rows "$v" ;;
+    esac
+    exit 0
+fi
+rows 2
+"""
+
 BUSYBOX = r"""#!/usr/bin/env python3
 import json
 import os
@@ -59,6 +93,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 root = Path(os.environ["MEDIA_TEST_ROOT"])
 p = root / "state"
@@ -75,7 +110,10 @@ def esc(s):
     return s.replace("\\", "\\134").replace(" ", "\\040").replace("\t", "\\011").replace("\n", "\\012")
 
 def save():
-    p.write_text(json.dumps(state))
+    # Atomic: the row watch's fake commands read the state while the late step writes it.
+    tmp = root / "state.tmp"
+    tmp.write_text(json.dumps(state))
+    os.replace(tmp, p)
     lines = ["1 0 0:1 / / rw - tmpfs tmpfs rw",
              f"2 1 0:50 {os.environ['MEDIA_TEST_DATA_ROOT']} {root}/data rw,nosuid,nodev,noatime - f2fs /dev/block/dm-50 rw"]
     for i, m in enumerate(state["mounts"], 3):
@@ -244,6 +282,23 @@ elif cmd == "stat":
             print(f"{st.st_mode & 0o777:o} {st.st_uid} {st.st_gid}")
         else:
             sys.exit(f"fake stat: format {fmt}")
+elif cmd == "sleep" and args[0] in ("5", "10"):
+    # Only the row watch sleeps 5 or 10 s, in the background next to the
+    # late step: it must not touch the shared state (a read-modify-write
+    # there would race the mounts), so it moves a clock of its own, which
+    # date +%s adds. MEDIA_TEST_CLOCK_SCALE makes the watch's run short.
+    clock = root / "clock"
+    now = int(clock.read_text()) if clock.exists() else 0
+    tmp = root / "clock.tmp"
+    tmp.write_text(str(now + int(args[0]) * int(os.environ.get("MEDIA_TEST_CLOCK_SCALE", "100"))))
+    os.replace(tmp, clock)
+elif cmd == "date" and args == ["+%s"]:
+    clock = root / "clock"
+    print(int(time.time()) + (int(clock.read_text()) if clock.exists() else 0))
+elif cmd == "timeout" and args[0] == "10":
+    # The watch's queries (timeout 10): the fake content tells them from the late step's.
+    os.environ["MEDIA_TEST_WATCH"] = "1"
+    passthrough()
 elif cmd == "sleep":
     state["sleeps"] += 1
     if os.environ.get("MEDIA_TEST_VOLD_AT") and state["sleeps"] == int(os.environ["MEDIA_TEST_VOLD_AT"]):
@@ -310,6 +365,10 @@ else:
 
 
 class Base(unittest.TestCase):
+    # How much a 5 or 10 s sleep of the row watch moves the fake clock: the
+    # watch ends after a few samples. Tests of the watch itself use 1.
+    clock_scale = "100"
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -343,8 +402,9 @@ class Base(unittest.TestCase):
         self.script(w / "data/oneos_genv.sh", '#!/bin/sh\nexec "$@"\n')
         self.script(w / "system/bin/am", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/am.log"\n'
                     'echo "Broadcasting: Intent { act=$4 dat=$6 }"\necho "Broadcast completed: result=0"\n')
-        self.script(w / "system/bin/content", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/content.log"\n'
-                    'echo "Row: 0 _id=11"\necho "Row: 1 _id=12"\n')
+        self.script(w / "system/bin/content", CONTENT)
+        self.script(w / "fakebin/logcat", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/logcat.log"\n'
+                    'cat "$MEDIA_TEST_ROOT/logcat.out" 2>/dev/null\n')
         self.proc(4242, MP_PKG, "Uid:\t10077\t10077\t10077\t10077\nGid:\t10077\t10077\t10077\t10077\n"
                   "Groups:\t1023 1078 9997 20077 50077\n",
                   ["7 1 0:50 /local/tmp/oneos/data/media / rw - f2fs x rw",
@@ -379,6 +439,8 @@ class Base(unittest.TestCase):
         d.mkdir(parents=True)
         (d / "cmdline").write_bytes(name.encode() + b"\0")
         (d / "status").write_text(status)
+        # Field 22 (starttime, 5 ticks after boot) comes after a comm with a space and a parenthesis.
+        (d / "stat").write_text(f"{pid} (media (x) y) " + " ".join(["S"] + ["0"] * 18 + ["5"]) + "\n")
         (d / "mountinfo").write_text("".join(l + "\n" for l in mountinfo))
 
     def mounts(self):
@@ -404,7 +466,7 @@ class Base(unittest.TestCase):
                     os.rename(e, d / e.name)
         st["mounts"] = []
         self.state.write_text(json.dumps(st))
-        for log in ("am.log", "content.log", "chcon.log"):
+        for log in ("am.log", "content.log", "content-watch.log", "logcat.log", "chcon.log"):
             (self.work / log).unlink(missing_ok=True)
 
     def boot(self, mode="", vold_at=3, bad="", xuid="0", keep=False):
@@ -414,6 +476,8 @@ class Base(unittest.TestCase):
         st = json.loads(self.state.read_text())
         st["sleeps"] = 0
         self.state.write_text(json.dumps(st))
+        for f in ("clock", "watch.n"):
+            (self.work / f).unlink(missing_ok=True)
         shell = GATE + HOLD + LAUNCH + "wait\n"
         shell = shell.replace("/proc/self/mountinfo", str(self.work / "mountinfo"))
         shell = shell.replace("/proc/$", str(self.work) + "/proc/$")
@@ -425,7 +489,7 @@ class Base(unittest.TestCase):
             SHELL + ["-c", shell],
             env={**os.environ, "BB": str(self.work / "bb"), "MEDIA_TEST_ROOT": str(self.work),
                  "MEDIA_TEST_MODE": mode, "MEDIA_TEST_FLAGS": FLAGS, "MEDIA_TEST_BAD": bad,
-                 "MEDIA_TEST_XUID": xuid,
+                 "MEDIA_TEST_XUID": xuid, "MEDIA_TEST_CLOCK_SCALE": self.clock_scale,
                  "MEDIA_TEST_ALIASES": aliases, "MEDIA_TEST_DATA_ROOT": DATA_ROOT,
                  "MEDIA_TEST_VOLD_AT": str(vold_at or ""),
                  "PATH": str(self.work / "fakebin") + ":" + os.environ["PATH"]},
@@ -592,7 +656,9 @@ class GuestMediaAlbums(Base):
         self.assertLess(out.index("MediaStore lists 2 item(s) under OneUI/ before the scan request\n"),
                         out.index("scan of OneUI asked"))
         self.assertIn("Media prototype: MediaStore lists 2 item(s) under OneUI/ 30 s after the scan request\n", out)
-        self.assertEqual(2 * ["query --uri content://media/external/file --projection _id --where relative_path LIKE 'OneUI/%'"],
+        # The late step's own queries: the two OneUI/ counts, the total after the second.
+        where = "query --uri content://media/external/file --projection _id --where relative_path LIKE 'OneUI/%'"
+        self.assertEqual([where, where, "query --uri content://media/external/file --projection _id"],
                          (self.work / "content.log").read_text().splitlines())
 
     def test_content_and_am_output_is_logged_as_they_printed_it(self):
@@ -612,6 +678,8 @@ class GuestMediaAlbums(Base):
         self.assertRegex(out, r"Media prototype: scan of OneUI asked \d+ s after the zygote "
                          r"launch \(am status 0, \d+ s\): Broadcast completed: result=0\n")
         self.assertIn("Media prototype: MediaStore lists 0 item(s) under OneUI/ 30 s after the scan request "
+                      "(No result found.)\n", out)
+        self.assertIn("Media watch: MediaStore has 0 row(s) in all 30 s after the scan request "
                       "(No result found.)\n", out)
 
     def test_nothing_under_android_is_ever_listed_or_mounted(self):
@@ -1038,6 +1106,116 @@ class GuestMediaAlbums(Base):
         self.assert_released()
 
 
+class GuestMediaWatch(Base):
+    clock_scale = "1"
+    ARGS = ("-d -b main,system -v threadtime -s MediaProvider:V ModernMediaScanner:V MediaService:V "
+            "MediaReceiver:V DatabaseHelper:V ExternalStorageServiceImpl:V MediaVolume:V IdleService:V FuseDaemon:W")
+
+    def watch_lines(self, result):
+        return [l for l in result.stdout.splitlines() if l.startswith("[Pivoted Root] Media watch:")]
+
+    def test_the_watch_logs_the_first_answer_and_each_change_only(self):
+        # S25 Ultra sessions db19aee410bd79ff, 75e538ac0ed725df: the rows under OneUI/ were gone before
+        # the scan request. 5 -> 5 -> 0 -> 12: nothing is logged for an unchanged sample.
+        (self.work / "watch.seq").write_text("5\n5\n0\n12\n")
+        (self.work / "watch.total").write_text("40\n")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = self.watch_lines(result)
+        pre = r"\[Pivoted Root\] Media watch: \d\d:\d\d:\d\d \(\d+ s after the zygote launch\): "
+        want = [pre + r"MediaStore lists 5 item\(s\) under OneUI/ \(first answer\)$",
+                r"\[Pivoted Root\] Media watch: MediaStore has 40 row\(s\) in all at the first answer$",
+                pre + r"MediaStore lists 0 item\(s\) under OneUI/ \(was 5\)$",
+                pre + r"MediaStore lists 12 item\(s\) under OneUI/ \(was 0\)$"]
+        # The late step's own total line is a Media watch line too, after the scan request.
+        late = r"\[Pivoted Root\] Media watch: MediaStore has 40 row\(s\) in all 30 s after the scan request$"
+        # 240 s after boot_completed in 10 s steps: 25 samples, or 24 when the real seconds the run
+        # takes (the fake clock is the real one plus the sleeps) add one.
+        done = r"\[Pivoted Root\] Media watch: done after 2[45] sample\(s\), last count 12$"
+        got = [l for l in lines if not re.search(late, l)]
+        self.assertEqual(len(want) + 1, len(got), lines)
+        for l, rx in zip(got, want + [done]):
+            self.assertRegex(l, rx)
+        self.assertEqual(1, len([l for l in lines if re.search(late, l)]), lines)
+        samples = int(re.search(r"done after (\d+) sample", got[-1])[1])
+        self.assertEqual(samples, len((self.work / "content-watch.log").read_text().splitlines()) - 1)
+        # The late step's counts are the watch's neither way.
+        self.assertIn("Media prototype: MediaStore lists 2 item(s) under OneUI/ before the scan request\n", result.stdout)
+        self.assertIn("Media prototype: MediaStore lists 2 item(s) under OneUI/ 30 s after the scan request\n", result.stdout)
+
+    def test_no_answer_is_logged_once_per_transition(self):
+        (self.work / "watch.seq").write_text("none\nnone\n3\nnone\nnone\n")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        text = "\n".join(self.watch_lines(result))
+        self.assertEqual(2, len(re.findall(r"MediaStore did not answer \(Error while accessing provider:media\)", text)), text)
+        self.assertEqual(1, len(re.findall(r"lists 3 item\(s\) under OneUI/ \(first answer\)", text)), text)
+        self.assertRegex(text, r"done after 2[45] sample\(s\), last count 3")
+
+    def test_the_watch_starts_before_the_albums_and_never_stops_the_publish(self):
+        (self.work / "watch.seq").write_text("none\n")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        out = result.stdout
+        self.assertLess(out.index("Media watch:"), out.index("Media prototype: album 1 of"))
+        self.assertIn("Media prototype: albums: 2 found, 0 excluded, 2 mounted, 0 skipped\n", out)
+        self.assert_released()
+
+    def test_the_log_excerpt_drops_every_file_name_and_non_ascii_bytes(self):
+        lines = [b"--------- beginning of main",
+                 b"11-17 10:00:01.000  4242  4242 I MediaProvider: Scanning /storage/emulated/0/DCIM/Camera/IMG_1.jpg done",
+                 b"11-17 10:00:02.000  4242  4242 D ModernMediaScanner: /storage/emulated/0/OneUI/Camera (One UI)/IMG_1.jpg added",
+                 b"11-17 10:00:03.000  4242  4242 W MediaProvider: caf\xc3\xa9 /data/media/0/Pictures/\xd8\xa7 x.jpg",
+                 b"11-17 10:00:04.000  4242  4242 W MediaProvider: open /mnt/pass_through/0/emulated/0/Movies/m.mp4 failed",
+                 b"11-17 10:00:05.000  4242  4242 I MediaService: volume external_primary attached",
+                 b"11-17 10:00:06.000  4242  4242 I MediaProvider: " + b"y" * 400]
+        (self.work / "logcat.out").write_bytes(b"\n".join(lines) + b"\n")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        boot = [l[len("[Pivoted Root] Media log (boot): "):] for l in result.stdout.splitlines()
+                if l.startswith("[Pivoted Root] Media log (boot): ")]
+        self.assertRegex(boot[0], r"^6 line\(s\) kept of 6; MediaProvider " + re.escape(MP_PKG) + r" pid 4242 running \d+ s$")
+        got = boot[1:]
+        self.assertEqual(6, len(got), got)
+        self.assertTrue(got[0].endswith("I MediaProvider: Scanning /storage/emulated/0/\u2026"), got[0])
+        self.assertTrue(got[1].endswith("D ModernMediaScanner: /storage/emulated/0/OneUI/\u2026"), got[1])
+        self.assertTrue(got[2].endswith("W MediaProvider: caf /data/media/0/\u2026"), got[2])
+        self.assertTrue(got[3].endswith("W MediaProvider: open /mnt/pass_through/0/emulated/0/\u2026"), got[3])
+        self.assertTrue(got[4].endswith("I MediaService: volume external_primary attached"), got[4])
+        self.assertEqual(300, len(got[5].encode()))
+        out = result.stdout
+        for leak in ("IMG_1", "DCIM", "Camera", "One UI)", "Pictures", "Movies", "m.mp4", "x.jpg", "\xc3", "beginning of main"):
+            self.assertNotIn(leak, "\n".join(l for l in out.splitlines() if "Media log" in l))
+        self.assertTrue(all(ord(c) < 128 or c == "\u2026" for c in out))
+        # Two captures: the boot part takes everything, the late part only what came after it.
+        log = (self.work / "logcat.log").read_text().splitlines()
+        self.assertEqual(2, len(log), log)
+        self.assertEqual(self.ARGS, log[0])
+        self.assertRegex(log[1], r"^-d -b main,system -v threadtime -T \d+\.000 -s MediaProvider:V ")
+        self.assertIn("Media log (late): 6 line(s) kept of 6;", out)
+        self.assertLess(out.index("Media log (boot)"), out.index("Media watch: done after"))
+        self.assertLess(out.index("Media watch: done after"), out.index("Media log (late)"))
+
+    def test_the_excerpt_keeps_the_last_250_and_150_lines(self):
+        (self.work / "logcat.out").write_text("".join(f"11-17 10:00:00.000  1  1 I MediaProvider: line {i}\n" for i in range(300)))
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Media log (boot): 250 line(s) kept of 300;", result.stdout)
+        self.assertIn("Media log (late): 150 line(s) kept of 300;", result.stdout)
+        self.assertIn("Media log (boot): 11-17 10:00:00.000  1  1 I MediaProvider: line 299\n", result.stdout)
+        self.assertNotIn("line 49\n", result.stdout)
+        self.assertNotIn("Media log (late): 11-17 10:00:00.000  1  1 I MediaProvider: line 149\n", result.stdout)
+
+    def test_a_missing_media_provider_is_logged_and_a_failing_logcat_stops_nothing(self):
+        shutil.rmtree(self.work / "proc/4242")
+        self.script(self.work / "fakebin/logcat", "#!/bin/sh\nexit 1\n")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Media log (boot): 0 line(s) kept of 0; MediaProvider not running\n", result.stdout)
+        self.assertIn("Media log (late): 0 line(s) kept of 0; MediaProvider not running\n", result.stdout)
+        self.assertIn("Media prototype: MediaStore lists 2 item(s) under OneUI/ 30 s after the scan request\n", result.stdout)
+
+
 class GuestMediaShareOrder(unittest.TestCase):
     """Where the pieces sit in guest_start.sh."""
 
@@ -1063,6 +1241,13 @@ class GuestMediaShareOrder(unittest.TestCase):
         calls = [i for i, l in enumerate(lines) if re.search(r"\boneos_media_publish_album \"", l)]
         late = at("oneos_media_late() {")
         self.assertTrue(calls and all(late < i < launch for i in calls), calls)
+        # The row watch starts once the views are ready, before any album is listed or published,
+        # in the background and from /, and nothing is awaited for it.
+        watch = at("( cd / 2>/dev/null; oneos_media_watch ) </dev/null &")
+        ready = at('if [ "$oneos_media_ready" != 1 ]; then')
+        listed = at("oneos_media_sum=$(oneos_media_albums)")
+        self.assertLess(ready, watch)
+        self.assertLess(watch, listed)
         self.assertNotIn("oneos-media-share-test\n", START)
         self.assertNotIn("/data/local/tmp/oneos-media-share-test", START)
 
