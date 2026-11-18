@@ -1066,9 +1066,13 @@ def main() -> int:
             shutil.rmtree(guest_images_dir, ignore_errors=True)
             shutil.rmtree(mystic_dir / "tmp", ignore_errors=True)
             shutil.rmtree(mystic_dir / "work", ignore_errors=True)
-            built_imgs = sorted(mystic_out_dir.rglob("*.img"), key=lambda p: p.stat().st_size, reverse=True)
-            if not built_imgs:
-                raise RuntimeError(f"MysticGSI produced no .img under {mystic_out_dir}")
+            built_imgs = sorted(p for p in mystic_out_dir.rglob("*.img") if p.is_file())
+            if len(built_imgs) != 1:
+                names = [str(p.relative_to(mystic_out_dir)) for p in built_imgs]
+                raise RuntimeError(
+                    f"Expected exactly one MysticGSI guest system image, found {len(built_imgs)}: {names}. "
+                    "Refusing to select an arbitrary .img by size."
+                )
             shutil.move(str(built_imgs[0]), str(ported_img))
             shutil.rmtree(mystic_out_dir, ignore_errors=True)
 
