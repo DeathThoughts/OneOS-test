@@ -199,7 +199,7 @@ class TwinityElfSitesTest(unittest.TestCase):
         self.assertEqual(0x2000 + 20, try_off)
 
     def test_unknown_vold_produces_bounded_diagnostics_without_patch(self):
-        rodata = b"prefix\\x00vold\\x00suffix"
+        rodata = b"prefix\x00vold\x00suffix"
         adrp = 0x90000081
         add = 0x91000021 | (7 << 10)
         # This unknown build retains a name reference but lacks the validated
