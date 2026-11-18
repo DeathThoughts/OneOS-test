@@ -491,5 +491,100 @@ class WireRepositoryAndRestartHomeTest(unittest.TestCase):
             subprocess.run([sys.executable, str(repo / "scripts/test-restart-home.py")], cwd=repo, check=True)
 
 
+
+class RealImageResolverGuardTest(unittest.TestCase):
+    def test_rejects_non_ext4_before_touching_overlays(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            img = root / "system.img"
+            img.write_bytes(b"not a real filesystem" + bytes(2048))
+            overlays = root / "make-overlays.sh"
+            original = "BUILDS = [\\n]\\nSITES = {}\\n"
+            overlays.write_text(original)
+            with self.assertRaisesRegex(ValueError, "raw ext4"):
+                twinity_elf_sites.resolve_and_update_for_image(
+                    system_img=img, make_overlays_path=overlays,
+                    build_label="Twinity invalid", dexdump_path="unused",
+                    debugfs_path="unused", extract_erofs_path="unused")
+            self.assertEqual(original, overlays.read_text())
+
+    def test_missing_native_files_never_changes_overlays(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            img = root / "system.img"
+            raw = bytearray(2048)
+            raw[1080:1082] = bytes.fromhex("53ef")
+            img.write_bytes(raw)
+            overlays = root / "make-overlays.sh"
+            original = "BUILDS = [\\n]\\nSITES = {}\\n"
+            overlays.write_text(original)
+            with patch.object(subprocess, "run") as fake:
+                fake.return_value = subprocess.CompletedProcess([], 0, "", "")
+                with self.assertRaisesRegex(ValueError, "Missing native"):
+                    twinity_elf_sites.resolve_and_update_for_image(
+                        system_img=img, make_overlays_path=overlays,
+                        build_label="Twinity incomplete", dexdump_path="unused",
+                        debugfs_path="unused", extract_erofs_path="unused")
+            self.assertEqual(original, overlays.read_text())
+
+
+
+    def test_resolves_mock_image_and_registers_sites_idempotently(self):
+        from unittest.mock import patch
+        build = TwinityElfSitesTest._build_minimal_elf64
+        rodata = b"prefix\x00vold\x00suffix"
+        adrp = 0x90000081
+        add = 0x91000021 | (7 << 10)
+        vold_code = struct.pack("<6I", adrp, add, 0xF9402509, 0xD63F0120,
+                                0x2A0003F3, 0x360006B3) + b"\x1f\x20\x03\xd5" * 60
+        vold = build(0x20000, rodata, 0x10000, vold_code)
+        incremental = build(0x20000, rodata, 0x10000,
+                            struct.pack("<2I", adrp, add) + b"\x1f\x20\x03\xd5" * 4)
+        sf_code = bytearray(0x200)
+        struct.pack_into("<4I", sf_code, 0, 0x94000040, 0xF94007E8,
+                         0xB4000268, 0x94000041)
+        sf = build(0x20000, b"rodata\x00", 0x10000, bytes(sf_code), dynsym_names=[
+            ("AIBinder_getExtension", 0x10100),
+            ("_ZN4aidl6vendor3qti8hardware7display8composer20IQtiComposer3Client10fromBinderERKNS_7android2os11SpAIBinderE", 0x10110),
+        ])
+        fixtures = {
+            "/system/bin/vold": vold,
+            "/system/lib64/service.incremental.so": incremental,
+            "/system/bin/surfaceflinger": sf,
+            "/system/apex/com.android.crashrecovery.apex": b"synthetic-apex",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            image = root / "system.img"
+            header = bytearray(2048)
+            header[1080:1082] = bytes.fromhex("53ef")
+            image.write_bytes(header)
+            overlay = root / "make-overlays.sh"
+            overlay.write_text("BUILDS = [\n]\nSITES = {}\n", encoding="utf-8")
+
+            def fake_debugfs(command, **kwargs):
+                _, source, dest = command[2].split(" ", 2)
+                payload = fixtures.get(source)
+                if payload is not None:
+                    Path(dest).write_bytes(payload)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with patch.object(subprocess, "run", side_effect=fake_debugfs):
+                args = dict(system_img=image, make_overlays_path=overlay,
+                            build_label="Synthetic Twinity", dexdump_path="unused",
+                            debugfs_path="fake-debugfs", extract_erofs_path="unused")
+                first = twinity_elf_sites.resolve_and_update_for_image(**args)
+                initial = overlay.read_text(encoding="utf-8")
+                second = twinity_elf_sites.resolve_and_update_for_image(**args)
+            self.assertEqual(0x1006, first["vold_name_offset"])
+            self.assertEqual(0x2014, first["vold_try_start_offset"])
+            self.assertEqual(0x2008, first["surfaceflinger_cbz_offset"])
+            self.assertTrue(first["overlay_table_updated"])
+            self.assertFalse(second["overlay_table_updated"])
+            self.assertEqual(initial, overlay.read_text(encoding="utf-8"))
+            self.assertIn("Synthetic Twinity", initial)
+
+
 if __name__ == "__main__":
     unittest.main()

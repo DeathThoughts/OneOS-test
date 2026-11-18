@@ -926,7 +926,7 @@ def publish_release(
         f"- **Branch**: `experiment/gemini-twinity-4c`\n"
         f"- **Target Device**: Base Samsung Galaxy S23 (`SM-S911*`, `dm1q`, `SM8550`) — **Experimental / Untested on physical phone**\n"
         f"- **Guest Archive (`{image_info['gz_name']}`)**: `{image_info['gz_bytes']:,}` bytes · SHA-256 `{image_info['gz_sha256']}`\n"
-        f"- **Unpacked `system.raw`**: `{image_info['raw_bytes']:,}` bytes · SHA-256 `{image_info['raw_sha256']}`\n\n"
+        f"- **Unpacked ext4 `system.img`**: `{image_info['raw_bytes']:,}` bytes · SHA-256 `{image_info['raw_sha256']}`\n\n"
         f"### Phone-Only Join & Import Steps\n"
         f"1. Download all `{GUEST_ARCHIVE_NAME}.00*` parts below into `Download/` on your phone:\n"
         f"{part_lines}\n"
@@ -1066,9 +1066,13 @@ def main() -> int:
             shutil.rmtree(guest_images_dir, ignore_errors=True)
             shutil.rmtree(mystic_dir / "tmp", ignore_errors=True)
             shutil.rmtree(mystic_dir / "work", ignore_errors=True)
-            built_imgs = sorted(mystic_out_dir.rglob("*.img"), key=lambda p: p.stat().st_size, reverse=True)
-            if not built_imgs:
-                raise RuntimeError(f"MysticGSI produced no .img under {mystic_out_dir}")
+            built_imgs = sorted(p for p in mystic_out_dir.rglob("*.img") if p.is_file())
+            if len(built_imgs) != 1:
+                names = [str(p.relative_to(mystic_out_dir)) for p in built_imgs]
+                raise RuntimeError(
+                    f"Expected exactly one MysticGSI guest system image, found {len(built_imgs)}: {names}. "
+                    "Refusing to select an arbitrary .img by size."
+                )
             shutil.move(str(built_imgs[0]), str(ported_img))
             shutil.rmtree(mystic_out_dir, ignore_errors=True)
 

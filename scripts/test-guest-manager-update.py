@@ -136,6 +136,10 @@ def maybe_bootstrap_twinity_ci_port():
     import os
     import shutil
     import sys
+    # Keep the guest-manager unit suite independent of the multi-GB Twinity port.
+    # Only a dedicated port job may opt in to rebuilding ROM images.
+    if os.environ.get('ONEOS_BOOTSTRAP_TWINITY_PORT') != '1':
+        return
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         return
     if (ROOT / 'app-android/packages/twinity-4c-s23.sha256').is_file():
