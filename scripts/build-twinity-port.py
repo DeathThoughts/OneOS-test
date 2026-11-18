@@ -297,9 +297,17 @@ def lpunpack_super(
     lpunpack_bin: Path | None = None,
 ) -> dict[str, object]:
     """Unpack super.img dynamic partitions while strictly excluding Poco F5 vendor/odm/dlkm/mi_ext."""
-    if lpunpack_bin is None:
+    if lpunpack_bin is not None:
+        extractor_cmd = [str(lpunpack_bin)]
+    else:
         cand = ROOT / "mysticgsi/tools/bin/Linux/x86_64/lpunpack"
-        lpunpack_bin = cand if cand.is_file() else Path(shutil.which("lpunpack") or "lpunpack")
+        standalone = str(cand) if cand.is_file() else shutil.which("lpunpack")
+        # The pinned MysticGSI checkout contains a Python LP extractor even
+        # when the runner has no standalone lpunpack binary installed.
+        extractor_cmd = (
+            [standalone] if standalone
+            else [sys.executable, str(SCRIPT_DIR / "unpack-twinity-super.py")]
+        )
 
     guest_out_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = guest_out_dir.parent / f"{guest_out_dir.name}_lp_raw"
@@ -308,7 +316,7 @@ def lpunpack_super(
     raw_dir.mkdir(parents=True)
 
     try:
-        subprocess.run([str(lpunpack_bin), str(super_img), str(raw_dir)], check=True)
+        subprocess.run([*extractor_cmd, str(super_img), str(raw_dir)], check=True)
         by_base: dict[str, list[Path]] = {}
         for img in sorted(raw_dir.glob("*.img")):
             stem = img.stem
