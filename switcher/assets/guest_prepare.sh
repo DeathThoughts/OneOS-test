@@ -3960,8 +3960,10 @@ done
 # (the else below). The guest enrolls and removes nothing of its own: enrollment is One UI's only.
 if [ "$BIO_GUARD" = 1 ]; then
     # ColorOS can only use the biometrics the phone's TEE already holds. Enrolling
-    # inside the guest needs a HardwareAuthToken, and the guest has no gatekeeper
-    # to mint one (its PIN is verified locally), so ColorOS's "Add" does nothing.
+    # inside the guest needs a HardwareAuthToken the phone's HAL accepts, and the
+    # guest has no gatekeeper to mint one (its PIN is verified locally; the guest
+    # lock only hands Settings a placeholder token, which the HAL refuses, and
+    # guest_no_biometric_writes.py fails every enroll before it), so "Add" does nothing.
     # Carry One UI's enrollment metadata across instead: the templates never leave
     # the TEE, and no credential, gatekeeper handle or SP blob is read.
     #
