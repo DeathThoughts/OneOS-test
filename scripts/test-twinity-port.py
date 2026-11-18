@@ -519,7 +519,7 @@ class RealImageResolverGuardTest(unittest.TestCase):
             overlays = root / "make-overlays.sh"
             original = "BUILDS = [\\n]\\nSITES = {}\\n"
             overlays.write_text(original)
-            with patch.object(twinity_elf_sites.subprocess, "run") as fake:
+            with patch.object(subprocess, "run") as fake:
                 fake.return_value = subprocess.CompletedProcess([], 0, "", "")
                 with self.assertRaisesRegex(ValueError, "Missing native"):
                     twinity_elf_sites.resolve_and_update_for_image(
