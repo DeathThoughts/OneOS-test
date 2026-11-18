@@ -146,7 +146,7 @@ def update_make_overlays_text(
         f'        "{crash_apex_name}": "{crash_sha.lower()}",\n'
         f'    }}, [("vold", {vold_name_off:#x}, {name_patch}), '
         f'("vold", {vold_try_off:#x}, TRY_START), '
-        f'("service.incremental.so", {inc_name_off - 1:#x}, {name_patch})]),\n'
+        f'("service.incremental.so", {inc_name_off:#x}, {name_patch})]),\n'
     )
     if vold_name_off < 1 or inc_name_off < 1:
         raise ValueError("Service string must have leading NUL")
