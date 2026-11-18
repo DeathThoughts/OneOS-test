@@ -6,7 +6,7 @@
   for user 0 -> /data/oneos_oplus_telemetry_off; ONEOS_GUEST_OPLUS_TELEMETRY=1
   turns back on only those recorded packages.
 - Phase 1 debloat + restrict (2026-11-18): S25 Ultra, coloros17-findx9u-in-1105,
-  sessions db475ad5017133c4 and a12bf19e1931e81a: 15 bloat packages off for user 0
+  sessions db475ad5017133c4 and a12bf19e1931e81a: 15 bloat packages off for user 0 (16 with com.oplus.ota, session 161a843fbaddcd7a)
   -> /data/oneos_oplus_bloat_off; com.oplus.games stays enabled and gets
   RUN_ANY_IN_BACKGROUND ignore + standby bucket restricted ->
   /data/oneos_oplus_restricted; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
@@ -99,6 +99,7 @@ BLOAT_EXPECTED = [
     'com.coloros.assistantscreen',
     'com.oplus.member',
     'com.heytap.browser',
+    'com.oplus.ota',
 ]
 DEFERRED_OR_DROPPED = [
     'com.oplus.aiunit',
@@ -238,6 +239,21 @@ class Guest:
         return f.read_text(encoding='utf-8') if f.exists() else ''
 
 
+class RGuest(Guest):
+    """Guest whose script restricts GAMES again.
+
+    RESTRICT_PKGS is empty in guest_prepare.sh (Game Assistant is not restricted any more),
+    so the restrict/unrestrict logic itself is exercised with a one-package list put back
+    into the generated script.
+    """
+
+    def __init__(self, d, *a, **kw):
+        super().__init__(d, *a, **kw)
+        text = self.script.read_text(encoding='utf-8')
+        self.script.write_text(text.replace('RESTRICT_PKGS=""', f'RESTRICT_PKGS="{GAMES}"', 1),
+                               encoding='utf-8', newline='\n')
+
+
 def extract_pkg_list(name):
     m = re.search(rf'^{name}="([^"]*)"', BODY, re.M)
     assert m, f'{name} not found in BODY'
@@ -265,9 +281,11 @@ class ListsAndStatic(unittest.TestCase):
     def test_exact_package_lists(self):
         self.assertEqual(extract_pkg_list('TELE_PKGS'), [ONT, OLC])
         self.assertEqual(extract_pkg_list('BLOAT_PKGS'), BLOAT_EXPECTED)
-        self.assertEqual(len(BLOAT_EXPECTED), 15)
-        self.assertEqual(extract_pkg_list('RESTRICT_PKGS'), [GAMES])
-        all_pkgs = set(extract_pkg_list('TELE_PKGS')) | set(BLOAT_EXPECTED) | {GAMES}
+        self.assertEqual(len(BLOAT_EXPECTED), 16)
+        # Game Assistant is not restricted any more (S25 Ultra session 22343aacdd4e1d6c: the in-game
+        # sidebar did not appear while it was); the list stays empty and only undoes old records.
+        self.assertEqual(extract_pkg_list('RESTRICT_PKGS'), [])
+        all_pkgs = set(extract_pkg_list('TELE_PKGS')) | set(BLOAT_EXPECTED)
         for p in DEFERRED_OR_DROPPED:
             self.assertNotIn(p, all_pkgs)
             self.assertNotIn(p, BODY)
@@ -370,7 +388,7 @@ class Telemetry(unittest.TestCase):
 
 
 class Bloat(unittest.TestCase):
-    def test_off_disables_all_15_and_is_idempotent(self):
+    def test_off_disables_all_16_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as d:
             g = Guest(d, bloat_mode='off')
             for p in BLOAT_EXPECTED:
@@ -380,7 +398,7 @@ class Bloat(unittest.TestCase):
             for p in BLOAT_EXPECTED:
                 self.assertTrue(g.disabled(p), p)
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED)
-            self.assertIn('OPPO bloat apps: 15 turned off, 0 failed', log)
+            self.assertIn('OPPO bloat apps: 16 turned off, 0 failed', log)
             log2 = g.run()
             self.assertEqual(g.assert_exit0, 0)
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED)
@@ -401,7 +419,7 @@ class Bloat(unittest.TestCase):
             self.assertNotIn(f'disable-user --user 0 {BLOAT_EXPECTED[0]}', g.calls('pm'))
             self.assertNotIn(f'disable-user --user 0 {BLOAT_EXPECTED[1]}', g.calls('pm'))
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED[2:])
-            self.assertIn('OPPO bloat apps: 13 turned off, 0 failed', log)
+            self.assertIn('OPPO bloat apps: 14 turned off, 0 failed', log)
 
     def test_off_failure_logged_not_recorded(self):
         with tempfile.TemporaryDirectory() as d:
@@ -502,7 +520,7 @@ class Bloat(unittest.TestCase):
 class Restrict(unittest.TestCase):
     def test_off_restricts_reads_back_and_reapplies_drifted_bucket(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES)
             log = g.run()
             self.assertEqual(g.assert_exit0, 0)
@@ -523,7 +541,7 @@ class Restrict(unittest.TestCase):
     def test_off_parses_multiline_appops_outputs(self):
         # Case 1: Uid mode ignore + package allow -> still treated as ignore (owner-restricted).
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES, appop='Uid mode: RUN_ANY_IN_BACKGROUND: ignore\nRUN_ANY_IN_BACKGROUND: allow\n',
                   bucket='active')
             log = g.run()
@@ -534,7 +552,7 @@ class Restrict(unittest.TestCase):
 
         # Case 2: Uid mode default + package allow -> not ignore, OneOS restricts it.
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES, appop='Uid mode: RUN_ANY_IN_BACKGROUND: default\nRUN_ANY_IN_BACKGROUND: allow\n')
             log = g.run()
             self.assertEqual(g.appop(GAMES), 'ignore')
@@ -544,7 +562,7 @@ class Restrict(unittest.TestCase):
 
     def test_off_leaves_owner_restricted_untouched_and_keep_respects_it(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES, appop='ignore', bucket='rare')
             log = g.run()
             self.assertIn(f'{GAMES}: already restricted', log)
@@ -566,7 +584,7 @@ class Restrict(unittest.TestCase):
 
     def test_off_appops_get_failure_does_not_restrict(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES)
             (g.st / f'fail.appops.{GAMES}').write_text('', encoding='utf-8', newline='\n')
             log = g.run()
@@ -580,7 +598,7 @@ class Restrict(unittest.TestCase):
     def test_off_appop_set_failure_records_nothing_and_skips_bucket(self):
         # S25 Ultra, coloros17-findx9u-in-1105, review of the debloat branch
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES, bucket='active')
             (g.st / f'fail.appops_set.{GAMES}').write_text('', encoding='utf-8', newline='\n')
             log = g.run()
@@ -593,7 +611,7 @@ class Restrict(unittest.TestCase):
 
     def test_off_appop_set_success_records_and_sets_bucket(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES, bucket='active')
             g.run()
             self.assertEqual(g.restrict_record(), [GAMES])
@@ -604,7 +622,7 @@ class Restrict(unittest.TestCase):
     def test_off_recorded_entry_with_appop_already_ignore_is_reapplied(self):
         # OneOS's own earlier change must not be mistaken for the owner's restriction
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             g.pkg(GAMES, appop='ignore', bucket='active')
             g.restrict_rec.write_text(GAMES + '\n', encoding='utf-8', newline='\n')
             log = g.run()
@@ -615,7 +633,7 @@ class Restrict(unittest.TestCase):
 
     def test_off_skips_not_installed(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             log = g.run()
             self.assertIn(f'{GAMES}: not installed', log)
             self.assertEqual(g.calls('cmd'), '')
@@ -624,7 +642,7 @@ class Restrict(unittest.TestCase):
 
     def test_keep_restores_and_removes_record(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='keep')
+            g = RGuest(d, bloat_mode='keep')
             g.pkg(GAMES, appop='ignore', bucket='restricted')
             g.restrict_rec.write_text(GAMES + '\n', encoding='utf-8', newline='\n')
             log = g.run()
@@ -639,7 +657,7 @@ class Restrict(unittest.TestCase):
     def test_keep_failure_retains_record(self):
         for fail_file in (f'fail.appops.{GAMES}', f'fail.bucket.{GAMES}'):
             with self.subTest(fail_file=fail_file), tempfile.TemporaryDirectory() as d:
-                g = Guest(d, bloat_mode='keep')
+                g = RGuest(d, bloat_mode='keep')
                 g.pkg(GAMES, appop='ignore', bucket='restricted')
                 g.restrict_rec.write_text(GAMES + '\n', encoding='utf-8', newline='\n')
                 (g.st / fail_file).write_text('', encoding='utf-8', newline='\n')
@@ -651,7 +669,7 @@ class Restrict(unittest.TestCase):
     def test_shrinking_list_in_off_and_keep_with_stdin_drain(self):
         # off mode: dropped packages unrestricted and dropped from record while GAMES stays
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             (g.st / 'appops_reads_stdin').write_text('', encoding='utf-8', newline='\n')
             (g.st / 'am_reads_stdin').write_text('', encoding='utf-8', newline='\n')
             d1, d2 = 'com.oplus.dropped1', 'com.oplus.dropped2'
@@ -673,7 +691,7 @@ class Restrict(unittest.TestCase):
 
         # off mode: failed shrinking-list unrestrict retains the dropped entry
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='off')
+            g = RGuest(d, bloat_mode='off')
             dropped = 'com.oplus.dropped1'
             g.pkg(dropped, appop='ignore', bucket='restricted')
             (g.st / f'fail.bucket.{dropped}').write_text('', encoding='utf-8', newline='\n')
@@ -683,7 +701,7 @@ class Restrict(unittest.TestCase):
 
         # keep mode: restores multiple recorded packages (including dropped) even when cmd/am drain stdin
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, bloat_mode='keep')
+            g = RGuest(d, bloat_mode='keep')
             (g.st / 'appops_reads_stdin').write_text('', encoding='utf-8', newline='\n')
             (g.st / 'am_reads_stdin').write_text('', encoding='utf-8', newline='\n')
             dropped = 'com.oplus.dropped1'
@@ -700,6 +718,51 @@ class Restrict(unittest.TestCase):
             self.assertIn('OPPO restricted apps: kept, 2 restored, 0 failed', log)
 
 
+class GameAssistantNotRestricted(unittest.TestCase):
+    """S25 Ultra, coloros17-findx9u-in-1105, session 22343aacdd4e1d6c: com.oplus.games is left alone."""
+
+    def test_record_from_an_earlier_switch_is_undone_and_dropped(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d, bloat_mode='off')
+            g.pkg(GAMES, appop='ignore', bucket='restricted')
+            g.restrict_rec.write_text(GAMES + '\n', encoding='utf-8', newline='\n')
+            log = g.run()
+            self.assertEqual(g.assert_exit0, 0)
+            self.assertIn('appops set --user 0 ' + GAMES + ' RUN_ANY_IN_BACKGROUND default', g.calls('cmd'))
+            self.assertIn('set-standby-bucket --user 0 ' + GAMES + ' active', g.calls('am'))
+            self.assertEqual(g.appop(GAMES), 'default')
+            self.assertEqual(g.bucket(GAMES), 'active')
+            self.assertIsNone(g.restrict_record())
+            self.assertFalse(g.restrict_rec.exists())
+            self.assertIn(f'{GAMES}: unrestricted (appop=default bucket=active)', log)
+
+    def test_empty_record_restricts_nothing(self):
+        for rec in (None, ''):
+            with self.subTest(record=rec), tempfile.TemporaryDirectory() as d:
+                g = Guest(d, bloat_mode='off')
+                g.pkg(GAMES)
+                if rec is not None:
+                    g.restrict_rec.write_text(rec, encoding='utf-8', newline='\n')
+                log = g.run()
+                self.assertEqual(g.assert_exit0, 0)
+                self.assertNotIn('RUN_ANY_IN_BACKGROUND ignore', g.calls('cmd'))
+                self.assertNotIn('restricted', g.calls('am'))
+                self.assertEqual(g.appop(GAMES), 'default')
+                self.assertEqual(g.bucket(GAMES), 'active')
+                self.assertFalse(g.restrict_rec.exists())
+                self.assertNotIn('OPPO restricted apps:', log)
+                self.assertNotIn(GAMES, log)
+                self.assertNotRegex(log, r'(?m)^\S+ : ')  # no log line for an empty package name
+
+    def test_owner_restriction_is_not_undone(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d, bloat_mode='off')
+            g.pkg(GAMES, appop='ignore', bucket='rare')
+            g.run()
+            self.assertEqual(g.appop(GAMES), 'ignore')
+            self.assertEqual(g.bucket(GAMES), 'rare')
+
+
 class SymlinksAndModes(unittest.TestCase):
     def test_symlinked_records_and_tmp_refused_in_both_modes(self):
         records = [
@@ -712,7 +775,7 @@ class SymlinksAndModes(unittest.TestCase):
                 for mode in ('off', 'keep'):
                     with self.subTest(label=label, target=target_kind, mode=mode), \
                             tempfile.TemporaryDirectory() as d:
-                        g = Guest(d, mode=mode, bloat_mode=mode)
+                        g = RGuest(d, mode=mode, bloat_mode=mode)
                         if kind == 'disable':
                             g.pkg(pkg_name, disabled=(mode == 'keep'))
                         else:
@@ -745,7 +808,7 @@ class SymlinksAndModes(unittest.TestCase):
 
     def test_tele_and_bloat_modes_are_independent(self):
         with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, mode='keep', bloat_mode='off')
+            g = RGuest(d, mode='keep', bloat_mode='off')
             g.pkg(ONT, disabled=True)
             g.pkg(BLOAT_EXPECTED[0])
             g.pkg(GAMES)

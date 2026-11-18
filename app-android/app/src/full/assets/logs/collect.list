@@ -117,6 +117,14 @@ true'
 #: 0.4.57: and up to two of the files between, newest first, that log a crash or an ANR (0.4.55's camera and IMS
 #: crashes of a ten-minute session were all in the middle, which no report had). Fixed-string matching avoids the
 #: extended-regexp scan taking the whole 300 s on a noisy session with hundreds of megabytes of rotations.
+#: And up to two of the newest rotations that end at or before the return to One UI, so the guest's last
+#: minutes are in the report. The capture runs about ten minutes after the return (return_to_oneui.sh) and a
+#: report sent a few minutes later has One UI's own logs in boot.log and boot.log.01: S25 Ultra, session
+#: 22343aacdd4e1d6c, boot.log and .01 held 17:35-17:37 only, head/ stopped at 17:13, and the guest's 17:13-17:33
+#: (the game and the camera) were in no file. The return time is the mtime of return_inplace.done, which both
+#: return paths write once One UI is up; a file's mtime is when its rotation ended. Without that marker (no
+#: return yet, a session still running) nothing extra is taken. Printed before the middle-file search, same as
+#: the newest two, and counted in T so the search does not list them again.
 files logs.capture 300 capture '
 L=/data/local/tmp/oneos_logs
 T=" "
@@ -133,6 +141,23 @@ for f in "$L"/head/boot.log*; do
   [ -n "$i" ] && T="$T$i "
 done
 for f in "$L"/boot.log "$L"/boot.log.01; do [ -f "$f" ] && printf "%s\n" "$f"; done
+S=/data/local/tmp/oneos
+[ -e "$S" ] || [ -L "$S" ] || [ ! -d /data/local/tmp/lineage_stage ] || [ -L /data/local/tmp/lineage_stage ] || S=/data/local/tmp/lineage_stage
+R=""
+[ -f "$S/return_inplace.done" ] && R=$(stat -c %Y "$S/return_inplace.done" 2>/dev/null)
+n=0
+if [ -n "$R" ]; then
+  for f in "$L"/boot.log.[0-9][0-9]; do
+    [ -f "$f" ] && [ "$f" != "$L/boot.log.01" ] && [ "$n" -lt 2 ] || continue
+    m=$(stat -c %Y "$f")
+    [ -n "$m" ] && [ "$m" -le "$R" ] || continue
+    i=$(stat -c %i "$f")
+    [ -n "$i" ] && printf "%s\n" "$T" | grep -q " $i " && continue
+    printf "%s\n" "$f"
+    [ -n "$i" ] && T="$T$i "
+    n=$((n + 1))
+  done
+fi
 c=""
 for f in "$L"/boot.log.[0-9][0-9]; do
   [ -f "$f" ] && [ "$f" != "$L/boot.log.01" ] && [ "$c" != xx ] || continue

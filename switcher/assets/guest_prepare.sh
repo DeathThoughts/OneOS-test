@@ -3362,12 +3362,21 @@ fi
 #   (com.coloros.assistantscreen) crashes, Meta and Branch.io wakelocks, and unused
 #   OPPO/Microsoft apps (ebadge, microsoft.*, pictorial, member, heytap.browser) are
 #   disabled for user 0 and recorded in /data/oneos_oplus_bloat_off.
+#   com.oplus.ota (System updates) crashed at every start with "Failed to find
+#   update_engine" (session 161a843fbaddcd7a, 18:51:13 and 18:54:35): the guest has no
+#   update_engine and must never update itself, so it is disabled the same way.
 #   com.oplus.games (Game Assistant) ran at 82.1% CPU plus a 46.4% sandboxed WebView
-#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34), so it stays
-#   enabled for the in-game sidebar and has its background execution restricted
-#   (RUN_ANY_IN_BACKGROUND ignore, standby bucket restricted, recorded in
-#   /data/oneos_oplus_restricted), while com.oplus.cosa and com.oplus.statistics.rom
-#   (135 callers) stay enabled and unrestricted. An owner's own disabled/restricted
+#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34). It stays
+#   enabled for the in-game sidebar, and since 2026-11-18 it is no longer restricted
+#   either: S25 Ultra, coloros17-findx9u-in-1105, session 22343aacdd4e1d6c, the sidebar
+#   did not appear when a game was opened while RUN_ANY_IN_BACKGROUND was ignore and
+#   the standby bucket restricted. Game Assistant sees the game start from the
+#   background, so the restriction is the likely cause (inferred: the part of the
+#   logcat with the game was not in the report). The owner wants the sidebar more than
+#   the CPU saving. RESTRICT_PKGS is empty, so run_restrict only undoes what OneOS
+#   recorded in /data/oneos_oplus_restricted (appops default, bucket active) on the next
+#   switch; com.oplus.cosa and com.oplus.statistics.rom (135 callers) stay enabled and
+#   unrestricted. An owner's own disabled/restricted
 #   state is never recorded or undone; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
 #   unrestricts only what OneOS recorded.
 #   A package the owner had disabled (or already restricted) is never listed or touched,
@@ -3380,9 +3389,9 @@ if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
 BLOAT_MODE=${BLOAT_MODE:-off}
 TELE_PKGS="com.oplus.onetrace com.oplus.olc"
 TELE_REC=/data/oneos_oplus_telemetry_off
-BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser"
+BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota"
 BLOAT_REC=/data/oneos_oplus_bloat_off
-RESTRICT_PKGS="com.oplus.games"
+RESTRICT_PKGS=""
 RESTRICT_REC=/data/oneos_oplus_restricted
 log() { echo "$(date +%T) $*"; }
 is_pkg() { case "$1" in ''|*[!A-Za-z0-9._]*) return 1 ;; esac; }
