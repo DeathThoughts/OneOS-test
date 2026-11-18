@@ -455,7 +455,13 @@ object Plain {
             "restart the phone" in p || "still running" in p -> gate(SwitchGates.ID_STAGE, SwitchGates.R_STAGE_RUNNING)
             "no oneos marker" in p || "prepare first" in p -> gate(SwitchGates.ID_IMAGE, SwitchGates.R_IMAGE_NOTHING)
             "prepare again" in p -> gate(SwitchGates.ID_IMAGE, SwitchGates.R_IMAGE_OTHER_VERSION)
-            else -> PlainMessage("Couldn't switch", "Something didn't check out. Send a report so the OneOS team can look.", FixAction.SEND_REPORT, defaultLabel(FixAction.SEND_REPORT))
+            // Root's own words too (S25 Ultra, 0.5.20 debug build, 2026-11-18): the report Send
+            // report shares is the last session's, so a refusal before any session left no trace.
+            else -> PlainMessage(
+                "Couldn't switch",
+                "Something didn't check out: ${problem.trim().take(300)}. Send a report so the OneOS team can look.",
+                FixAction.SEND_REPORT, defaultLabel(FixAction.SEND_REPORT),
+            )
         }
     }
 
