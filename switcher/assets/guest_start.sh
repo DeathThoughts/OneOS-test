@@ -824,12 +824,25 @@ oneos_media_logcat() {
         ExternalStorageServiceImpl:V MediaVolume:V IdleService:V FuseDaemon:W
     oneos_media_lall=$("$BB" timeout 15 logcat "$@" 2>&1 | "$BB" grep -v '^--------- ' | "$BB" grep .)
     oneos_media_lseen=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep -c .)
-    oneos_media_lkept=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep . | "$BB" tail -n "$oneos_media_lkeep" |
+    # Without MediaProvider's "Failed to update quota type for
+    # /storage/emulated/0/OneUI/..." warnings and their IOException stack
+    # lines: in both S25 Ultra sessions of 2026-11-18 they were every line
+    # kept (106,133 seen in 92 s), so nothing else of MediaProvider's was
+    # left. A stack line is one of the warning's thread (pid and tid of
+    # threadtime), so another thread's line in between ends nothing; the
+    # first other line of that thread ends the stack. logcat writes the
+    # trace's "at" lines with a tab after the tag.
+    oneos_media_lrest=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep . | "$BB" awk '
+        index($0, "Failed to update quota type") { k = $3 " " $4; next }
+        k != "" && $3 " " $4 == k && /MediaProvider: [ \t]*(at |java\.io\.IOException)/ { next }
+        { if ($3 " " $4 == k) k = ""; print }')
+    oneos_media_lquota=$((oneos_media_lseen - $(printf '%s\n' "$oneos_media_lrest" | "$BB" grep -c .)))
+    oneos_media_lkept=$(printf '%s\n' "$oneos_media_lrest" | "$BB" grep . | "$BB" tail -n "$oneos_media_lkeep" |
         "$BB" sed 's/[^ -~]//g' | "$BB" cut -c 1-300 |
         "$BB" sed -E -e 's#((/emulated/[0-9]+|/media/[0-9]+|/sdcard)/)OneUI/.*#\1OneUI/…#' -e t \
             -e 's#((/emulated/[0-9]+|/media/[0-9]+|/sdcard)/).+#\1…#')
     oneos_media_lcount=$(printf '%s\n' "$oneos_media_lkept" | "$BB" grep -c .)
-    echo "[Pivoted Root] Media log ($oneos_media_lpart): $oneos_media_lcount line(s) kept of $oneos_media_lseen; $oneos_media_lage"
+    echo "[Pivoted Root] Media log ($oneos_media_lpart): $oneos_media_lcount line(s) kept of $oneos_media_lseen; $oneos_media_lquota quota-type error line(s) left out; $oneos_media_lage"
     [ "$oneos_media_lcount" = 0 ] ||
         printf '%s\n' "$oneos_media_lkept" | "$BB" grep . | "$BB" sed "s/^/[Pivoted Root] Media log ($oneos_media_lpart): /"
     return 0
@@ -890,6 +903,42 @@ oneos_media_watch() {
     return 0
 }
 
+# The end of the media hold (set next to the zygote launch, see there): the
+# guest's services.jar holds StorageManagerService's "emulated volume
+# mounted" call to MediaProvider until oneos.media.published is 1 (15 s at
+# most). Sent once per boot, as soon as the albums are mounted or the
+# publish has given up; $1 says which. Never before the album loop's summary
+# on the normal path: an empty OneUI/ at MediaProvider's mount scan is what
+# the hold is for (S25 Ultra session a12bf19e1931e81a).
+oneos_media_hold_done() {
+    [ "$oneos_media_hold_on" = 1 ] && [ "$oneos_media_hold_sent" != 1 ] || return 0
+    oneos_media_hold_sent=1
+    oneos_media_hnow=$("$BB" date +%s)
+    if setprop oneos.media.published 1 2>/dev/null; then
+        echo "[Pivoted Root] Media hold: released at $("$BB" date +%T) ($((oneos_media_hnow - ${oneos_media_t0:-$oneos_media_hnow})) s after the zygote launch, $1)"
+    else
+        echo "[Pivoted Root] Media hold: setprop oneos.media.published 1 failed ($1); StorageManagerService waits out its 15 s"
+    fi
+    return 0
+}
+
+# system_server's own line of the hold (tag OneOSMediaHold: how long
+# StorageManagerService waited and why it went on), next to MediaProvider's
+# lines: the proof that the mount scan came after the albums. Last 3 lines.
+oneos_media_hold_log() {
+    oneos_media_hlines=$("$BB" timeout 15 logcat -d -b main,system -s OneOSMediaHold 2>/dev/null |
+        "$BB" grep -v '^--------- ' | "$BB" grep . | "$BB" tail -n 3 |
+        "$BB" sed 's/[^ -~]//g' | "$BB" cut -c 1-300)
+    if [ -n "$oneos_media_hlines" ]; then
+        printf '%s\n' "$oneos_media_hlines" | "$BB" sed 's/^/[Pivoted Root] Media hold: system_server: /'
+    elif [ "$oneos_media_hold_on" = 1 ]; then
+        echo "[Pivoted Root] Media hold: system_server logged nothing (the set's services_patched.jar has no hold yet, or logcat had rotated)"
+    else
+        echo "[Pivoted Root] Media hold: system_server logged nothing (the hold was off this boot)"
+    fi
+    return 0
+}
+
 oneos_media_late() {
     oneos_media_t0=$("$BB" date +%s)
     oneos_media_n=0
@@ -931,8 +980,10 @@ oneos_media_late() {
     if [ "$oneos_media_ready" != 1 ]; then
         if [ -n "$oneos_media_first" ]; then
             echo "[Pivoted Root] Media prototype skipped: the guest's storage views did not settle in $oneos_media_n s (last seen: $oneos_media_bases)"
+            oneos_media_hold_done "skipped: the storage views did not settle"
         else
             echo "[Pivoted Root] Media prototype skipped: the guest's vold built no storage view of /data/media in 180 s (seen: ${oneos_media_bases:-none})"
+            oneos_media_hold_done "skipped: vold built no storage view"
         fi
         oneos_media_release_late
         return 0
@@ -951,6 +1002,7 @@ oneos_media_late() {
     esac
     if [ "$#" != 4 ] || [ ! -f "$oneos_media_tmp/albums" ]; then
         echo "[Pivoted Root] Media prototype skipped: One UI's albums could not be listed in the hold"
+        oneos_media_hold_done "skipped: the albums could not be listed"
         oneos_media_release_late
         return 0
     fi
@@ -1013,6 +1065,14 @@ oneos_media_late() {
         fi
     fi
     echo "[Pivoted Root] Media prototype: albums: $oneos_media_listed found, $oneos_media_unticked excluded, $oneos_media_mounted mounted, $oneos_media_skipped skipped"
+    # Every album that will be there is mounted (and checked after
+    # propagation): MediaProvider's mount scan may run now. Before the hold
+    # dir's release, whose unmounts it does not need to wait for.
+    if [ "$oneos_media_mounted" != 0 ]; then
+        oneos_media_hold_done "albums published: $oneos_media_mounted mounted, $oneos_media_skipped skipped"
+    else
+        oneos_media_hold_done "no album mounted: $oneos_media_skipped skipped"
+    fi
     oneos_media_release_late
     [ "$oneos_media_mounted" != 0 ] || return 0
 
@@ -1099,6 +1159,7 @@ oneos_media_late() {
     oneos_media_lt=$("$BB" date +%s)
     printf '%s' "$oneos_media_lt" > /data/oneos_media_logt 2>/dev/null
     oneos_media_logcat boot 250 ""
+    oneos_media_hold_log
 }
 
 # OneOS: pivot_root left the host's whole old root at /postinstall, including
@@ -4211,8 +4272,41 @@ fi
 # pinned before /postinstall went, is published album by album once the
 # guest's vold has built its storage views, which is after this point. In the background: the
 # boot never waits for it, and the hold goes with it.
+# The media hold: MediaProvider's own volume scan at mount time ran a few
+# seconds before the albums were there, found OneUI/ empty and deleted every
+# row, so all was indexed again (S25 Ultra session a12bf19e1931e81a,
+# coloros17-findx9u-in-1105: 4560 items under OneUI/ 25 s after the zygote
+# launch, 0 at 38 s, ~100 s of re-indexing after the scan request at 70 s).
+# The guest's services.jar (StorageManagerService) waits, before it tells
+# MediaProvider the emulated volume is mounted, while oneos.media.hold is 1
+# and until oneos.media.published is 1, at most 15 s and once per boot;
+# oneos_media_hold_done sends published. Both are set on every boot, before
+# system_server starts: they may survive from the last one. published goes
+# to 0 first, so a hold never meets the last boot's 1. A set whose
+# services.jar has no hold reads neither and nothing changes.
+# ONEOS_GUEST_MEDIA_HOLD=0 leaves the hold off.
+oneos_media_hold_on=0
+oneos_media_hold_sent=0
+if [ -z "$oneos_media_tmp" ]; then
+    oneos_media_hold_why="the media prototype does not run this boot"
+elif [ "${ONEOS_GUEST_MEDIA_HOLD:-1}" = 0 ]; then
+    oneos_media_hold_why="ONEOS_GUEST_MEDIA_HOLD=0"
+elif setprop oneos.media.published 0 2>/dev/null && setprop oneos.media.hold 1 2>/dev/null; then
+    oneos_media_hold_on=1
+else
+    oneos_media_hold_why="setprop failed"
+fi
+if [ "$oneos_media_hold_on" = 1 ]; then
+    echo "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the albums before MediaProvider's mount scan)"
+else
+    setprop oneos.media.hold 0 2>/dev/null
+    setprop oneos.media.published 0 2>/dev/null
+    echo "[Pivoted Root] Media hold: off ($oneos_media_hold_why)"
+fi
 if [ -n "$oneos_media_tmp" ]; then
-    ( oneos_media_late ) </dev/null &
+    # oneos_media_hold_done again once the publish has ended for any reason:
+    # it is sent once, so this only covers a path that forgot it.
+    ( oneos_media_late; oneos_media_hold_done "oneos_media_late ended without releasing it" ) </dev/null &
 fi
 echo "[Pivoted Root] time $($BB date +%T) zygote"
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."

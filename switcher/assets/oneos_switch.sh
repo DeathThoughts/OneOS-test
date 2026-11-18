@@ -524,7 +524,9 @@ echo "preflight: host state done $(date +%T)"
 # overwrite: a file a round skips this time, such as a stack of an app that is
 # not running, would be the last session's) and the return's capture.
 rm -rf "$STAGE/diag_wifi" "$STAGE/diag_fold" "$STAGE/diag_display" "$STAGE/diag_pages" \
-       "$STAGE/diag_20" "$STAGE/diag_40" "$STAGE/diag_90" "$STAGE/diag_final" "$STAGE/diag_return"
+       "$STAGE/diag_20" "$STAGE/diag_40" "$STAGE/diag_90" "$STAGE/diag_final" "$STAGE/diag_return" \
+       "$STAGE/diag_end"
+rm -f "$STAGE/mem_300.log" "$STAGE/heat_series.log"
 echo "Host state recorded: $(wc -l < "$STAGE/host_state.before") entries"
 # This phone's camera hole, while One UI's display service still runs, for
 # guest_props.sh (bar phones): the image's ro.oplus.display.screenhole.positon
@@ -4074,6 +4076,11 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         echo \"# \$(date) OneOS heat cap off (Cool down when hot): the guest thermal status only\" > \$F
     fi
     [ $GUEST_THERMAL_MAP = 1 ] && echo \"# guest thermal status from skin: NONE, LIGHT 47, MODERATE 50, SEVERE 53, the HAL status from 56 C (1 C hysteresis)\" >> \$F
+    # Every 30 s, this loop's own readings, for a before/after comparison (S25 Ultra,
+    # coloros17-findx9u-in-1105, sessions db475ad5017133c4 and a12bf19e1931e81a);
+    # heat_cap.log keeps its lines (scripts/test-heat-cap-cpu.py).
+    HS=$STAGE/heat_series.log
+    echo \"# \$(date) skin, ap, hottest CPU zone (C), level, skin and CPU levels, cpufreq_max_limit\" > \$HS
     # The GPU's ceiling vote (Samsung's gpu_max_clock, in MHz) outlives One UI's
     # SSRM the same way the CPU's does: a whole S23 session at 220 of 719 MHz
     # (HyperOS 0.5.13), so every app animation dropped frames in every guest.
@@ -4149,7 +4156,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     # Curve B (S25 Ultra, coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
     # a12bf19e1931e81a): skin enters immediately and waits 3 readings (-2 C) to leave;
     # CPU needs 3 >= 82 C for L1, 4 >= 90 C for L2 (max), and 3 (-4 C) to leave.
-    slvl=0; clvl=0; sk_prev=''; sk_prev2=''; cpu_prev=0; cpu_prev2=0; cpu_prev3=0
+    slvl=0; clvl=0; sk_prev=''; sk_prev2=''; cpu_prev=0; cpu_prev2=0; cpu_prev3=0; hst=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -4227,6 +4234,12 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             fi
             [ \"\$new\" = \"\$lvl\" ] || echo \$new > $STAGE/heat_cap.level
             lvl=\$new; first=0
+        fi
+        hst=\$((hst + 1))
+        if [ \$hst -ge 3 ]; then
+            hst=0; cfl=''; read -r cfl 2>/dev/null < \$CFL
+            cs=-; [ -n \"\$ct\" ] && cs=\"\$((ct / 1000)).\$((ct % 1000 / 100))(\$cz)\"
+            echo \"\$(date +%T) skin=\${sk:--} ap=\${ap:--} cpu=\$cs lvl=\$lvl s=\$slvl c=\$clvl cfl=\${cfl:--}\" >> \$HS
         fi
         sleep 10
     done
@@ -4732,6 +4745,24 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             echo \"guest battery service: \${a:-no answer}\"
                         fi ;;
                 esac
+                # Smoothness at the end, against diag_90's base (smoothness.txt there; S25 Ultra,
+                # coloros17-findx9u-in-1105, sessions db475ad5017133c4 and a12bf19e1931e81a):
+                # timestats, panel rate, missed frames, GPU memory, gfxinfo, reclaim and PSI.
+                # 3 s at most in all, so the return waits no longer; none without surfaceflinger.
+                SFP=\$(pidof surfaceflinger | awk '{print \$1}')
+                if [ -n \"\$SFP\" ]; then
+                    mkdir -p $STAGE/diag_end; s0=\$(date +%s)
+                    timeout 3 /system/bin/sh -c '
+                        P=\$1; gx() { $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh \"\$@\"; }
+                        date +%T; gx /system/bin/dumpsys SurfaceFlinger --timestats -dump -maxlayers 20
+                        gx /system/bin/dumpsys SurfaceFlinger --timestats -disable
+                        gx /system/bin/dumpsys SurfaceFlinger | grep -E \" Hz:|missed frame count|Total imported by gralloc|Total GPU memory\"
+                        for p in com.android.systemui com.android.settings com.android.launcher; do echo \"== \$p\"; gx /system/bin/dumpsys gfxinfo \$p | grep -E \"Total frames|Janky|percentile\"; done
+                        grep -E \"^(pgscan_kswapd|pgsteal_kswapd|allocstall|compact_stall|pswpin|pswpout)\" /proc/vmstat
+                        for r in cpu memory io; do echo \$r: \$(cat /proc/pressure/\$r); done
+                    ' sh \$SFP > $STAGE/diag_end/smoothness.txt 2>&1
+                    echo \"\$(date) smoothness at the end: \$((\$(date +%s) - s0)) s ($STAGE/diag_end/smoothness.txt)\"
+                fi
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
             fi
             # Reaching the home screen only lifts the black-screen and time
@@ -4745,6 +4776,24 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # setup wizard on screen). From its dismissal, 120 s for the home.
             wm=0; [ \"\$(grep -c 'Dismissing bootanim' /data/local/tmp/ui_activator.log 2>/dev/null)\" -gt \"\${wmbase:-0}\" ] && wm=1
             [ \$wm = 1 ] && [ \$home = 0 ] && wmseen=\$((wmseen + 10))
+            # Guest memory 300 s after its home screen came, a RAM base before a ColorOS debloat
+            # (S25 Ultra, coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
+            # a12bf19e1931e81a). Once, in the background at nice 10, so nothing waits for it;
+            # nothing once this guest is gone (the return's oneos_rec_stop, or guest_mntns gone
+            # or another session's by then).
+            if [ \$home = 1 ] && [ -z \"\$memarm\" ]; then
+                memarm=1
+                ( mns=\$(cat $STAGE/guest_mntns 2>/dev/null); sleep 300
+                  SFP=\$(pidof surfaceflinger | awk '{print \$1}')
+                  [ -n \"\$SFP\" ] && [ -n \"\$mns\" ] && [ \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" = \"\$mns\" ] &&
+                      [ ! -f $STAGE/data/oneos_rec_stop ] || exit 0
+                  { echo \"# \$(date) guest memory, \$((\$(date +%s) - \$(stat -c %Y $STAGE/guest_mntns))) s after the guest start\"
+                    nice -n 10 timeout 30 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys meminfo </dev/null 2>&1
+                    echo '== pm list packages -d'
+                    nice -n 10 timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm list packages -d </dev/null 2>&1
+                  } | head -c 524288 > $STAGE/mem_300.log
+                ) </dev/null >/dev/null 2>&1 &
+            fi
             # Display diagnostics from inside the guest (its own screencap and
             # dumpsys talk to its own surfaceflinger), kept in the stage dir.
             dname=''
@@ -4992,7 +5041,9 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # - dexopt.txt: run 43's first boot failed to compile all 232
                         #   packages (NullPointerException in IArtd.maybeCreateSdc);
                         #   ColorOS's launcher too (com.android.launcher; S Ultra, X9U IN,
-                        #   session 146de99d left its dexopt status unknown);
+                        #   session 146de99d left its dexopt status unknown) and Samsung
+                        #   Camera (S25 Ultra, coloros17-findx9u-in-1105, sessions
+                        #   db475ad5017133c4 and a12bf19e1931e81a: run-from-apk);
                         # - frames.txt: launcher (Pixel's and ColorOS's) and Settings frame pacing;
                         # - comfort.txt: Comfort View settings, color matrix, bridge log;
                         # - signal_poll.txt, host_ril_props.txt (identifiers left out),
@@ -5009,9 +5060,18 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                           { grep -E 'missed frame count|usesDeviceComposition|composition=' \$D/surfaceflinger.txt | sed -e 's/^ *//' -e 's/layer=0x[0-9a-f]* //' | sort | uniq -c
                             echo \"composer rejections in the log: \$(timeout 10 logcat -d -b main -s SurfaceFlinger:E 2>/dev/null | grep -c -E 'executeCommands failed|presentOrValidate failed')\"
                             grep -h -E 'HW overlays|GPU composition' $STAGE/data/takeover.log 2>/dev/null; } > \$D/composition.txt 2>&1
-                          { for p in com.android.systemui com.google.android.apps.nexuslauncher com.android.launcher com.android.settings; do echo \"== pm art dump \$p\"; gx /system/bin/pm art dump \$p 2>&1 | head -n 30; done
+                          { for p in com.android.systemui com.google.android.apps.nexuslauncher com.android.launcher com.android.settings com.sec.android.app.camera; do echo \"== pm art dump \$p\"; gx /system/bin/pm art dump \$p 2>&1 | head -n 30; done
                             echo '== ArtService'; timeout 10 logcat -d -s ArtService 2>/dev/null | grep -m2 -A4 'Unexpected package-level'; } > \$D/dexopt.txt 2>&1
                           for p in com.google.android.apps.nexuslauncher com.android.launcher com.android.settings; do echo \"== \$p\"; gx /system/bin/dumpsys gfxinfo \$p 2>&1 | grep -E 'Total frames|Janky|percentile'; done > \$D/frames.txt 2>&1
+                          # Smoothness from here to the return (diag_end/smoothness.txt) for a
+                          # before/after comparison (S25 Ultra, coloros17-findx9u-in-1105, sessions
+                          # db475ad5017133c4 and a12bf19e1931e81a): ColorOS's launcher draws through
+                          # UniRenderSurface (0 frames in frames.txt), so SurfaceFlinger's timestats
+                          # and gfxinfo start counting now, with the reclaim and PSI lines as a base.
+                          [ \$dname = 90 ] && { date +%T; gx /system/bin/dumpsys SurfaceFlinger --timestats -clear -enable
+                            for p in com.android.systemui com.android.settings com.android.launcher; do gx /system/bin/dumpsys gfxinfo \$p reset >/dev/null; done
+                            grep -E '^(pgscan_kswapd|pgsteal_kswapd|allocstall|compact_stall|pswpin|pswpout)' /proc/vmstat
+                            for r in cpu memory io; do echo \$r: \$(cat /proc/pressure/\$r); done; } > \$D/smoothness.txt 2>&1
                           { for k in cv_enabled cv_preferred_intensity cv_dynamic_enabled; do echo \"\$k=\$(gx /system/bin/settings get system \$k 2>&1)\"; done
                             grep -i -E -A6 'color ?matrix|colortransform' \$D/surfaceflinger.txt | head -n 40
                             timeout 10 logcat -d -s OneOSComfortView DisplayTransformManager 2>/dev/null | tail -n 10; } > \$D/comfort.txt 2>&1

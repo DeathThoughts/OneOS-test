@@ -1045,6 +1045,48 @@ samcam_bind() {
     echo "Samsung Camera in the guest: $n files and folders bound onto $2 $(date +%T)"
     return 0
 }
+# Samsung Camera compiled into the guest's /data/dalvik-cache (S25 Ultra,
+# coloros17-findx9u-in-1105, sessions db475ad5017133c4 and a12bf19e1931e81a):
+# its app folders exist only in the system_ext overlay's 1 MiB tmpfs upper dir
+# and its APK was bound read-write from $SAMCAM_SRC on /data, so the guest's
+# artd put the odex next to the APK ("SELinux: setxattr failed:
+# .../SamsungCamera/oat" in the tmpfs) and dex2oat64 died with SIGBUS
+# (BUS_ADRERR in SwapAllocCompiledMethod) when the tmpfs ran out: run-from-apk
+# in every session. artd takes the dalvik-cache when the last mount above the
+# APK that is not an overlay is read-only, as for the patched SystemUI bound
+# read-only. The folders (each APK's own, from the same list) are made
+# read-only before samcam_bind binds into them, so nothing lands in the tmpfs.
+samcam_ro_dirs() { # <base>
+    local t d
+    [ -s "$SAMCAM_LIST" ] || return 0
+    for t in $(awk '$1 == "sysext" && $2 ~ /\.apk$/ { print $2 }' "$SAMCAM_LIST"); do
+        d="$1/${t%/*}"
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        if $BB mount --bind "$d" "$d"; then
+            $BB mount --make-rslave "$d" 2>/dev/null || true
+            if $BB mount -o remount,bind,ro "$d" "$d"; then
+                echo "Samsung Camera: $d read-only, so ART compiles it into /data/dalvik-cache (the 1 MiB overlay upper dir made dex2oat die with SIGBUS)"
+                continue
+            fi
+            $BB umount -l "$d"
+        fi
+        echo "Samsung Camera: $d left read-write (read-only bind refused)"
+    done
+    return 0
+}
+# The APK binds themselves read-only too, after samcam_bind: an APK's own bind
+# is the last mount above it, the one artd goes by.
+samcam_ro_apks() { # <base>
+    local k t s
+    [ -s "$SAMCAM_LIST" ] || return 0
+    while read -r k t s; do
+        [ "$k" = sysext ] || continue
+        case "$t" in *.apk) ;; *) continue ;; esac
+        [ -f "$1/$t" ] && [ ! -L "$1/$t" ] || continue
+        $BB mount -o remount,bind,ro "$s" "$1/$t" || echo "Samsung Camera: $1/$t stays read-write (remount refused)"
+    done < "$SAMCAM_LIST"
+    return 0
+}
 # Add the missing guest su mount point to an overlay before its read-only
 # system view is mounted. Modern guest images need not ship /system/xbin.
 guest_root_mountpoint() {
@@ -1546,7 +1588,8 @@ if { [ -d /system_ext/apex ] && [ -d "$GUEST_SYSTEM_EXT" ]; } || [ $INJ = 1 ] ||
         # Samsung Camera's mount points are in the overlay's own layer, so the
         # read-only form takes it as well.
         if [ $SAMCAM = 1 ]; then
-            if mount | grep -q " $GUEST_SYSTEM_EXT type overlay" && samcam_bind sysext "$GUEST_SYSTEM_EXT"; then SAMCAM_BOUND=1; else
+            if mount | grep -q " $GUEST_SYSTEM_EXT type overlay" && samcam_ro_dirs "$GUEST_SYSTEM_EXT" &&
+               samcam_bind sysext "$GUEST_SYSTEM_EXT"; then SAMCAM_BOUND=1; samcam_ro_apks "$GUEST_SYSTEM_EXT"; else
                 SAMCAM=0; echo "Samsung Camera in the guest: off (bind-mount onto $GUEST_SYSTEM_EXT failed)"
             fi
         fi
