@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="oneui_media_title">Фото One UI в ColorOS</string>
-    <string name="oneui_media_summary">Показывает альбомы One UI в ColorOS, каждый отдельным альбомом, только для чтения: ColorOS не может их изменить или удалить. Ничего из папки Android One UI не передаётся. Применяется при следующем переключении или перезапуске гостевой системы.</string>
     <string name="oneui_media_asking">Запрос к root…</string>
     <string name="oneui_media_problem">Ничего не изменено: %1$s</string>
     <string name="oneui_media_unread">Не прочитано: %1$s</string>
