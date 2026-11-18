@@ -3269,12 +3269,13 @@ fi
 #   (135 callers) stay enabled and unrestricted. An owner's own disabled/restricted
 #   state is never recorded or undone; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
 #   unrestricts only what OneOS recorded.
+#   A package the owner had disabled (or already restricted) is never listed or touched,
+#   in any of the three lists.
 rm -f "$STAGE/data/oneos_oplus_telemetry.sh"
 if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
     if [ "${ONEOS_GUEST_OPLUS_TELEMETRY:-0}" = 1 ]; then TELE_MODE=keep; else TELE_MODE=off; fi
     if [ "${ONEOS_GUEST_OPLUS_BLOAT:-0}" = 1 ]; then BLOAT_MODE=keep; else BLOAT_MODE=off; fi
     { echo "TELE_MODE=$TELE_MODE"; echo "BLOAT_MODE=$BLOAT_MODE"; cat <<'TELE'
-TELE_MODE=${TELE_MODE:-${MODE:-off}}
 BLOAT_MODE=${BLOAT_MODE:-off}
 TELE_PKGS="com.oplus.onetrace com.oplus.olc"
 TELE_REC=/data/oneos_oplus_telemetry_off
@@ -3453,16 +3454,27 @@ run_restrict() {
                 log "OPPO restricted apps: $p appop=unknown bucket=$b"
                 continue
             fi
+            # Record before changing anything (S25 Ultra, coloros17-findx9u-in-1105, review of the
+            # debloat branch): a recorded-but-not-yet-set entry is harmless (keep mode restores
+            # default/active), while a set with no record could never be undone.
+            added=0
+            if [ "$rec" = 0 ]; then
+                drop_link "$RESTRICT_REC"
+                if ! [ -L "$RESTRICT_REC" ] && ! { [ -f "$RESTRICT_REC" ] && grep -qxF "$p" "$RESTRICT_REC"; }; then
+                    echo "$p" >> "$RESTRICT_REC" && added=1
+                fi
+            fi
             if out=$(timeout 30 cmd appops set --user 0 "$p" RUN_ANY_IN_BACKGROUND ignore 2>&1 </dev/null); then
-                if [ "$rec" = 0 ]; then
-                    drop_link "$RESTRICT_REC"
-                    if ! [ -L "$RESTRICT_REC" ] && ! { [ -f "$RESTRICT_REC" ] && grep -qxF "$p" "$RESTRICT_REC"; }; then echo "$p" >> "$RESTRICT_REC"; fi
+                if ! out=$(timeout 30 am set-standby-bucket --user 0 "$p" restricted 2>&1 </dev/null); then
+                    log "$p: am set-standby-bucket restricted failed: $out"
                 fi
             else
                 log "$p: cmd appops set ignore failed: $out"
-            fi
-            if ! out=$(timeout 30 am set-standby-bucket --user 0 "$p" restricted 2>&1 </dev/null); then
-                log "$p: am set-standby-bucket restricted failed: $out"
+                # The appop did not change, so drop the entry this run added and leave the bucket alone.
+                if [ "$added" = 1 ] && [ -f "$RESTRICT_REC" ] && prep_tmp "$RESTRICT_REC"; then
+                    grep -vxF "$p" "$RESTRICT_REC" >> "$RESTRICT_REC.tmp"
+                    commit_tmp "$RESTRICT_REC"
+                fi
             fi
             m=$(appop_get "$p" || echo unknown)
             b=$(bucket_get "$p")

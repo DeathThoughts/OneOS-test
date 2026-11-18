@@ -169,7 +169,7 @@ STUBS = {
 
 
 class Guest:
-    def __init__(self, d, mode='off', bloat_mode='off', legacy_mode=False):
+    def __init__(self, d, mode='off', bloat_mode='off'):
         self.root = Path(d)
         self.st = self.root / 'st'
         self.bin = self.root / 'bin'
@@ -184,7 +184,7 @@ class Guest:
         self.bloat_rec = self.root / 'data/oneos_oplus_bloat_off'
         self.restrict_rec = self.root / 'data/oneos_oplus_restricted'
         self.script = self.root / 'tele.sh'
-        header = f'MODE={mode}\n' if legacy_mode else f'TELE_MODE={mode}\nBLOAT_MODE={bloat_mode}\n'
+        header = f'TELE_MODE={mode}\nBLOAT_MODE={bloat_mode}\n'
         text = header + BODY
         self.script.write_text(
             text.replace('/data/', f'{self.root.as_posix()}/data/'),
@@ -341,18 +341,6 @@ class Telemetry(unittest.TestCase):
             self.assertTrue(g.disabled('com.other.app'))
             self.assertIsNone(g.record())
             self.assertIn('1 turned back on', log)
-
-    def test_legacy_mode_fallback(self):
-        with tempfile.TemporaryDirectory() as d:
-            g = Guest(d, 'keep', legacy_mode=True)
-            g.pkg(ONT, disabled=True)
-            g.pkg(BLOAT_EXPECTED[0])
-            g.rec.write_text(ONT + '\n', encoding='utf-8', newline='\n')
-            log = g.run()
-            self.assertEqual(g.assert_exit0, 0)
-            self.assertFalse(g.disabled(ONT))
-            self.assertTrue(g.disabled(BLOAT_EXPECTED[0]))
-            self.assertIn('OPPO telemetry apps: kept, 1 turned back on, 0 failed', log)
 
     def test_keep_survives_a_pm_that_reads_stdin(self):
         # pm is cmd, which forwards stdin: it must not eat the rest of the record
@@ -589,6 +577,42 @@ class Restrict(unittest.TestCase):
             self.assertNotIn('set-standby-bucket', g.calls('am'))
             self.assertIsNone(g.restrict_record())
 
+    def test_off_appop_set_failure_records_nothing_and_skips_bucket(self):
+        # S25 Ultra, coloros17-findx9u-in-1105, review of the debloat branch
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d, bloat_mode='off')
+            g.pkg(GAMES, bucket='active')
+            (g.st / f'fail.appops_set.{GAMES}').write_text('', encoding='utf-8', newline='\n')
+            log = g.run()
+            self.assertEqual(g.assert_exit0, 0)
+            self.assertIn(f'{GAMES}: cmd appops set ignore failed: Error: appops set failed', log)
+            self.assertNotIn('set-standby-bucket', g.calls('am'))
+            self.assertEqual(g.bucket(GAMES), 'active')
+            self.assertNotIn(GAMES, g.restrict_record() or [])
+            self.assertFalse(g.restrict_rec.exists())
+
+    def test_off_appop_set_success_records_and_sets_bucket(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d, bloat_mode='off')
+            g.pkg(GAMES, bucket='active')
+            g.run()
+            self.assertEqual(g.restrict_record(), [GAMES])
+            self.assertEqual(g.appop(GAMES), 'ignore')
+            self.assertEqual(g.bucket(GAMES), 'restricted')
+            self.assertIn('set-standby-bucket --user 0 ' + GAMES + ' restricted', g.calls('am'))
+
+    def test_off_recorded_entry_with_appop_already_ignore_is_reapplied(self):
+        # OneOS's own earlier change must not be mistaken for the owner's restriction
+        with tempfile.TemporaryDirectory() as d:
+            g = Guest(d, bloat_mode='off')
+            g.pkg(GAMES, appop='ignore', bucket='active')
+            g.restrict_rec.write_text(GAMES + '\n', encoding='utf-8', newline='\n')
+            log = g.run()
+            self.assertNotIn('already restricted', log)
+            self.assertEqual(g.restrict_record(), [GAMES])
+            self.assertEqual(g.bucket(GAMES), 'restricted')
+            self.assertIn('appops set --user 0 ' + GAMES + ' RUN_ANY_IN_BACKGROUND ignore', g.calls('cmd'))
+
     def test_off_skips_not_installed(self):
         with tempfile.TemporaryDirectory() as d:
             g = Guest(d, bloat_mode='off')
@@ -708,6 +732,10 @@ class SymlinksAndModes(unittest.TestCase):
                         self.assertIn('was a symlink', log)
                         self.assertEqual(victim.read_text(encoding='utf-8'), victim_text)
                         self.assertFalse(link_exists(link_target))
+                        if mode == 'off':
+                            # Off mode must still record what it changed after refusing the link
+                            # (the old test_symlinked_record_is_refused asserted [ONT]).
+                            self.assertEqual({'telemetry': g.record, 'bloat': g.bloat_record, 'restrict': g.restrict_record}[label](), [pkg_name])
                         if target_kind == 'rec' and mode == 'keep':
                             if kind == 'disable':
                                 self.assertTrue(g.disabled(pkg_name))
