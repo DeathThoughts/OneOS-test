@@ -230,7 +230,7 @@ def update_make_overlays_text(
 
 def resolve_and_update_for_image(
     *, system_img, make_overlays_path, build_label, dexdump_path,
-    debugfs_path, extract_erofs_path,
+    debugfs_path, extract_erofs_path, diagnostics_dir=None,
 ):
     """Inspect a merged ext4 guest and register native patch sites.
 
@@ -288,7 +288,19 @@ def resolve_and_update_for_image(
             raise ValueError(f"Expected exactly one crashrecovery APEX, found {[x[0] for x in apexes]}")
         apex_name, apex = apexes[0]
 
-        name_off, try_off = resolve_vold_sites(vold)
+        try:
+            name_off, try_off = resolve_vold_sites(vold)
+        except ValueError:
+            if diagnostics_dir is not None:
+                import json
+                target_dir = Path(diagnostics_dir)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                report = diagnose_vold_sites(vold)
+                (target_dir / "twinity-vold-native-diagnostics.json").write_text(
+                    json.dumps(report, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            raise
         inc_segs = _segments(incremental)
         inc_refs = _name_references(incremental, inc_segs, b"vold")
         inc_names = sorted({name for _, name in inc_refs})
