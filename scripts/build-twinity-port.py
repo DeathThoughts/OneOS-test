@@ -306,7 +306,7 @@ def lpunpack_super(
         # when the runner has no standalone lpunpack binary installed.
         extractor_cmd = (
             [standalone] if standalone
-            else [sys.executable, str(SCRIPT_DIR / "unpack-twinity-super.py")]
+            else [os.environ.get("MYSTIC_PYTHON") or sys.executable, str(SCRIPT_DIR / "unpack-twinity-super.py")]
         )
 
     guest_out_dir.mkdir(parents=True, exist_ok=True)
