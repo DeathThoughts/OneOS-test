@@ -160,7 +160,7 @@ def update_make_overlays_text(
         # Do not quietly overwrite an existing hash with a different offset.
         if f'"{sf_sha12.lower()}":' in source:
             raise ValueError("Conflicting SurfaceFlinger site already registered")
-        match = re.search(r"(?m)^(\\s*)SITES = \\{", source)
+        match = re.search(r"(?m)^(\s*)SITES = \{", source)
         if not match:
             raise ValueError("Cannot find SurfaceFlinger SITES table")
         loc = match.end()
