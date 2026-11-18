@@ -9,6 +9,7 @@ on:
       - "scripts/build-twinity-image.py"
       - "scripts/mysticgsi-from-images.py"
       - "scripts/package-twinity-image.py"
+      - "scripts/publish-twinity-payloads.py"
       - "scripts/test-twinity-*.py"
       - "scripts/make-overlays.sh"
       - "scripts/apk-replace-dex.py"
@@ -85,7 +86,9 @@ jobs:
           {
             python3 scripts/test-twinity-image.py
             python3 scripts/test-twinity-services-dex.py
+            python3 scripts/test-twinity-surfaceflinger.py
             python3 scripts/test-twinity-package.py
+            python3 scripts/test-twinity-publisher.py
           } 2>&1 | tee out/twinity-logs/tests.log
 
       - name: Download pinned Twinity source parts
@@ -135,6 +138,15 @@ jobs:
             sh scripts/make-overlays.sh out/twinity-image/system.img out/twinity-overlays
           } 2>&1 | tee out/twinity-logs/overlays.log
 
+      - name: Build and publish Twinity payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/publish-twinity-payloads.py --existing-overlays out/twinity-overlays \
+            --image-metadata out/twinity-image/system.json --metadata out/twinity-payload-metadata \
+            --target "$GITHUB_SHA" --publish 2>&1 | tee out/twinity-logs/payloads.log
+
       - name: Package and publish Twinity image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -153,6 +165,7 @@ jobs:
           path: |
             out/twinity-logs/
             out/twinity-image/system.json
+            out/twinity-payload-metadata/
             out/twinity-package/inventory.json
             out/twinity-package/release-notes.md
 
