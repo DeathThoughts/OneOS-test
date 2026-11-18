@@ -837,7 +837,11 @@ fi
 # their names are not confirmed from an S23 Ultra (the Fold8 has none of the
 # four), and a name One UI lacks is left out as always. If the picture still
 # fails there, the dlopen line names the next library.
-SAMCAM_JNI="libAEBHDR_wrapper.camera.samsung.so libAIQSolution_MPI.camera.samsung.so libAIQSolution_MPISingleRGB40.camera.samsung.so \
+# libDLInterface_aidl (0.5.20): video recording loads it (with libsnap_aidl and the snap HAL's NDK
+# interface, which it links) and aborts without it: "Dynamic loading of libDLInterface failed"
+# (A36 ColorOS, photo fine, video closed the camera).
+SAMCAM_JNI="libDLInterface_aidl.camera.samsung.so libsnap_aidl.snap.samsung.so vendor.samsung.hardware.snap-V3-ndk.so \
+    libAEBHDR_wrapper.camera.samsung.so libAIQSolution_MPI.camera.samsung.so libAIQSolution_MPISingleRGB40.camera.samsung.so \
     libDeflickerHDR.camera.samsung.so libDocMagnetEngine.camera.samsung.so \
     libDocRectifyWrapper.camera.samsung.so libDualCamBokehCapture.camera.samsung.so \
     libEventDetector.camera.samsung.so libFaceRestoration.camera.samsung.so libFoodDetector.camera.samsung.so \
@@ -1094,6 +1098,9 @@ guest_root_mountpoint() {
 }
 # The guest's PackageManager takes android.hardware.biometrics.face and
 # android.hardware.fingerprint from <feature> files in a permissions folder.
+# Settings shows fingerprint and face entries only when they are declared
+# (0.5.17, from vdcoolok's pull request #152 branch: Nothing OS, a Galaxy is not
+# a Nothing phone, declared neither: no fingerprint entry at all, owner, A36).
 # HyperOS/MIUI Settings picks the standard FaceManager only when the face
 # feature is declared (KeyguardSettingsFaceUnlockManager.isUseNewFaceApi) and
 # otherwise binds the vendor miui_face service, which no GSI image ships, so
@@ -1103,7 +1110,24 @@ guest_root_mountpoint() {
 # declares both in its own /system/etc/permissions; the guest image replaces
 # /system, so the files go into whichever read-only top layer this prepare
 # already builds, or a private one below.
-face_features_into() { # <overlay top layer>
+#
+# BIO_GUARD is the one answer for both this and the carry of One UI's enrollment
+# lists ("Guest biometrics" below), so they can never disagree: 1 only when the
+# set's services_patched.jar cannot remove or enroll a print or face, that is its
+# guards.txt has upstream's "# biometric-remove guard" line (patches/
+# guest_no_biometric_remove.py) or names the biowrites guard in its first header
+# line (patches/guest_no_biometric_writes.py: the x9u-in-1105-sultra set, whose
+# jar fails enroll AND removal), and ONEOS_GUEST_BIOMETRICS is not 0. A guest that
+# lists One UI's prints without either guard would delete one from the phone when
+# "Delete" is tapped, so every other set declares nothing and keeps empty lists.
+BIO_GUARD=0
+if [ "${ONEOS_GUEST_BIOMETRICS:-1}" = 1 ] &&
+   { grep -q '^# biometric-remove guard' "$STAGE/guards.txt" 2>/dev/null ||
+     head -n 1 "$STAGE/guards.txt" 2>/dev/null | grep -q '[ ,]biowrites[ ,]'; }; then
+    BIO_GUARD=1
+fi
+bio_features_into() { # <overlay top layer>
+    [ "$BIO_GUARD" = 1 ] || return 0
     mkdir -p "$1/etc/permissions" || return 1
     printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<permissions>' '    <feature name="android.hardware.fingerprint" />' '</permissions>' \
         > "$1/etc/permissions/android.hardware.fingerprint.xml" &&
@@ -1128,8 +1152,7 @@ elif [ -d "$SAMCAM_SRC" ] && [ "${ONEOS_GUEST_SAMSUNG_CAMERA:-1}" = 1 ]; then
         SOV="$STAGE/system_ov"
         mkdir -p "$SOV"
         mount | grep -q " $SOV " || $BB mount -t tmpfs -o size=1m,mode=755 tmpfs "$SOV"
-        rm -rf "$SOV/up" && mkdir -p "$SOV/up" &&
-            face_features_into "$SOV/up"
+        rm -rf "$SOV/up" && mkdir -p "$SOV/up" && bio_features_into "$SOV/up"
         echo "Samsung Camera: overlay $(date +%T)"
         if samcam_mountpoints "$SOV/up" sys && guest_root_mountpoint "$SOV/up" &&
            $BB mount -t overlay overlay -o "ro,lowerdir=$SOV/up:$ROOTFS/system" "$ROOTFS/system"; then
@@ -1157,7 +1180,7 @@ if [ -f "$STAGE/data/oneos_root/enabled" ] && [ ! -d "$ROOTFS/system/xbin" ]; th
     $BB mount --make-private "$GRO" || exit 3
     mkdir -p "$GRO/up"
     guest_root_mountpoint "$GRO/up" || exit 3
-    face_features_into "$GRO/up"
+    bio_features_into "$GRO/up"
     $BB chcon -R u:object_r:system_file:s0 "$GRO/up" 2>/dev/null || true
     if $BB mount -t overlay overlay -o "ro,lowerdir=$GRO/up:$ROOTFS/system" "$ROOTFS/system"; then
         echo 'Guest root: missing system/xbin supplied by a private read-only overlay'
@@ -1201,24 +1224,26 @@ if [ -f "$STAGE/data/oneos_root/enabled" ] && [ ! -d "$ROOTFS/system/xbin" ]; th
     fi
     [ -d "$ROOTFS/system/xbin" ] || { echo 'ERROR: guest su mount point missing after overlay'; exit 3; }
 fi
-# The camera and guest-root layers above carry the feature files whenever they
-# run. A stage with no samcam set, or an image that needs neither, keeps its own
-# /system, so the features get a private read-only layer of their own.
-if [ ! -e "$ROOTFS/system/etc/permissions/android.hardware.biometrics.face.xml" ]; then
+# The camera and guest-root layers above carry the feature files whenever they run. A stage with no
+# samcam set, or an image that needs neither, keeps its own /system, so the features get a private
+# read-only layer of their own.
+if [ "$BIO_GUARD" = 1 ] && [ ! -e "$ROOTFS/system/etc/permissions/android.hardware.fingerprint.xml" ]; then
     if mount | grep -q " $ROOTFS/system type overlay"; then
-        echo "Face features: $ROOTFS/system is an overlay this step did not make; the guest declares what that layer has"
+        echo "Biometric features: $ROOTFS/system is an overlay this step did not make; left as it is"
     else
-        FEO="$STAGE/face_ov"
-        if [ -L "$FEO" ]; then echo 'ERROR: face overlay is a symlink'; exit 3; fi
-        mkdir -p "$FEO"
-        mount | grep -q " $FEO " || $BB mount -t tmpfs -o size=1m,mode=755 tmpfs "$FEO"
-        if rm -rf "$FEO/up" && mkdir -p "$FEO/up" && face_features_into "$FEO/up" &&
-           $BB mount -t overlay overlay -o "ro,lowerdir=$FEO/up:$ROOTFS/system" "$ROOTFS/system"; then
-            echo "Face features: android.hardware.biometrics.face and android.hardware.fingerprint in a private /system layer"
+        BFO="$STAGE/bio_features_ov"
+        if [ -L "$BFO" ]; then echo 'ERROR: biometric features overlay is a symlink'; exit 3; fi
+        mkdir -p "$BFO"
+        mount | grep -q " $BFO " || $BB mount -t tmpfs -o size=1m,mode=755 tmpfs "$BFO"
+        if rm -rf "$BFO/up" && mkdir -p "$BFO/up" && bio_features_into "$BFO/up" &&
+           $BB mount -t overlay overlay -o "ro,lowerdir=$BFO/up:$ROOTFS/system" "$ROOTFS/system"; then
+            echo "Biometric features: fingerprint and face declared in a private /system layer"
         else
-            echo "Face features: the private /system layer was refused; the guest keeps its own feature list"
+            echo "Biometric features: the private /system layer was refused; no fingerprint or face settings"
         fi
     fi
+elif [ "$BIO_GUARD" = 1 ]; then
+    echo "Biometric features: fingerprint and face declared"
 fi
 # One UI's product APEXes: host apexd reports Google's Play system module as
 # /product/apex/com.google.android.gmssystem.prodvic.apex, and the guest's package
@@ -2410,6 +2435,37 @@ apm_copy() {
     [ -s "$2" ]
 }
 
+# apm_variants <copy> binds the guest's policy copy over the Bluetooth-offload
+# variants of the policy file that this phone's vendor ships. AOSP's
+# audio_get_audio_policy_config_file() (and Xiaomi's loader) takes
+# audio_policy_configuration_le_offload_disabled.xml (or the a2dp_offload_disabled
+# / bluetooth_legacy_hal one) before the plain name when the Bluetooth offload
+# props ask for it. Newer S24 / S24+ firmware has the LE one in /vendor/etc: it
+# is One UI's file, whose volume curves are flat (0 to 0.15 dB: Samsung's HAL
+# sets the volume itself), so Nothing OS, LineageOS and HyperOS played at full
+# volume at any slider position ("Config source: ..._le_offload_disabled.xml",
+# S24+ reports d98f425d, 5d625e0e, 8ca56b25, 61e4af7b), while ColorOS read our
+# copy of the plain file and had working curves (134b27b7). Only variants that
+# exist are covered; One UI's /vendor is not touched (a bind in the guest's view).
+# ONEOS_GUEST_APM_VARIANTS=0 leaves them.
+apm_variants() {
+    [ "${ONEOS_GUEST_APM_VARIANTS:-1}" = 1 ] && [ -s "$1" ] || return 0
+    for v in audio_policy_configuration_le_offload_disabled.xml \
+             audio_policy_configuration_a2dp_offload_disabled.xml \
+             audio_policy_configuration_bluetooth_legacy_hal.xml; do
+        for f in /vendor/etc/$v /vendor/etc/audio/$v; do
+            [ -f "$ROOTFS$f" ] && [ ! -L "$ROOTFS$f" ] || continue
+            mount | grep -q " $ROOTFS$f " && continue
+            if $BB mount --bind "$1" "$ROOTFS$f"; then
+                $BB mount -o remount,ro,bind "$ROOTFS$f" 2>/dev/null || true
+                echo "Guest audio policy: the same copy on $f (read before the plain file when Bluetooth offload is off)"
+            else
+                echo "!!! WARNING: guest audio policy: the bind on $f was refused; the guest may read One UI's file there (volume at its maximum)"
+            fi
+        done
+    done
+}
+
 # HyperOS: Xiaomi's miui-services.jar (recovery, factory resets, preinstall
 # copiers, vold, netd) and apprecovery.proinstaller.jar (installs apps by
 # itself), both on the system server class path, guarded like
@@ -2667,6 +2723,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
                $BB mount -t overlay overlay -o "ro,lowerdir=$APM_OV/up:$ROOTFS$APM_D" "$ROOTFS$APM_D"; then
                 echo "HyperOS audio policy: $APM_X as $APM_D/audio_policy_configuration_mi.xml (no AIDL audio HAL)${APM_NOTE:+; $APM_NOTE}${APM_USB:+; $APM_USB}"
                 case "$APM_NOTE" in *"vendor's Bluetooth module"*) hyperos_apm_sw ;; esac
+                apm_variants "$APM_OV/up/audio_policy_configuration_mi.xml"
             else
                 echo "!!! WARNING: HyperOS audio policy: the overlay on $APM_D was refused; HyperOS keeps its default (speaker only, no Bluetooth audio)"
             fi
@@ -2716,6 +2773,7 @@ if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" 
                 if $BB mount --bind "$GAPM_OV/audio_policy_configuration.xml" "$ROOTFS$GAPM"; then
                     $BB mount -o remount,ro,bind "$ROOTFS$GAPM" 2>/dev/null || true
                     echo "Guest audio policy: $GAPM with $GAPM_SAID (no AIDL audio HAL)"
+                    apm_variants "$GAPM_OV/audio_policy_configuration.xml"
                     case "$APM_NOTE" in
                         *"vendor's Bluetooth module"*)
                             # Software A2DP for the module's stream on Qualcomm (see apm_a2dp).
@@ -3510,10 +3568,22 @@ fi
 # SystemUI and the launcher at start (pixel-f8: Fold8PixelUnfold.apk, which also
 # has the Fold8's 48dp bar and AOD; pixel-f8u: OneOSPixelUnfold.apk, the gates only).
 UNFOLD_RRO=""
+if [ "${ONEOS_PROFILE:-}" = f8 ] && grep -q '^  "image": "infinityx41-findx9u",$' "$STAGE/.oneos_stage"; then
+    UNFOLD_RRO=Fold8InfinityUnfold.apk
+fi
+if [ "${ONEOS_PROFILE:-}" = f8 ] && grep -q '^  "image": "lineage24-infiniti",$' "$STAGE/.oneos_stage"; then
+    UNFOLD_RRO=Fold8LineageUnfold.apk
+fi
 if [ "${ONEOS_PROFILE:-}" = f8 ] && grep -q '^  "set": "pixel-f8",$' "$STAGE/.oneos_stage"; then
     UNFOLD_RRO=Fold8PixelUnfold.apk
 elif [ "${ONEOS_PROFILE:-}" = f8u ] && grep -q '^  "set": "pixel-f8u",$' "$STAGE/.oneos_stage"; then
     UNFOLD_RRO=OneOSPixelUnfold.apk
+fi
+if [ "${ONEOS_PROFILE:-}" = f8 ] && grep -q '^  "image": "\(lineage24-infiniti\|infinityx41-findx9u\)",$' "$STAGE/.oneos_stage" && [ -f "$STAGE/OneOSSettingsSplit.apk" ]; then
+    mkdir -p "$STAGE/oem/overlay" &&
+        cp "$STAGE/OneOSSettingsSplit.apk" "$STAGE/oem/overlay/" &&
+        chmod 644 "$STAGE/oem/overlay/OneOSSettingsSplit.apk" &&
+        OEM_FILES="$OEM_FILES overlay/OneOSSettingsSplit.apk"
 fi
 if [ -n "$UNFOLD_RRO" ] && [ -f "$STAGE/$UNFOLD_RRO" ]; then
     mkdir -p "$STAGE/oem/overlay" &&
@@ -3671,6 +3741,131 @@ for pair in libcamera_client_patched.so:libcamera_client.so libcameracompatbilit
         echo "Bound ${pair%%:*} -> $ROOTFS/system/lib64/${pair#*:}"
     fi
 done
+# Fingerprint and face unlock from One UI's own enrolments (0.5.18, owner: "if we cant give alternate fix for
+# fp/face we have to take from OneUI"; from vdcoolok's pull request #152 branch). Only the lists (names and ids)
+# are copied; the templates stay in the phone's secure hardware. The guest's services.jar never removes a
+# template (guest_no_biometric_cleanup.py, guest_no_biometric_remove.py). Off by default since the A36 test (0.5.17):
+# its in-display sensor needs SystemUI's UDFPS events in the Samsung way ("onUdfpsUiEvent received during client:
+# null", 3 touches acquired, none matched). ONEOS_GUEST_BIOMETRICS=1: on.
+# Only a set whose services.jar refuses removals copies the lists (BIO_GUARD, set above where the feature
+# files are declared: upstream's removal guard or our biowrites guard): a guest that lists One UI's fingerprints
+# without one would delete one from the phone when "Delete" is tapped. Every other set keeps its empty lists
+# (the else below). The guest enrolls and removes nothing of its own: enrollment is One UI's only.
+if [ "$BIO_GUARD" = 1 ]; then
+    # ColorOS can only use the biometrics the phone's TEE already holds. Enrolling
+    # inside the guest needs a HardwareAuthToken, and the guest has no gatekeeper
+    # to mint one (its PIN is verified locally), so ColorOS's "Add" does nothing.
+    # Carry One UI's enrollment metadata across instead: the templates never leave
+    # the TEE, and no credential, gatekeeper handle or SP blob is read.
+    #
+    # The file name is the image's choice, so both are written. AOSP's
+    # FingerprintProvider reads settings_fingerprint_<sensorId>.xml (One UI writes
+    # _0, and MIUI migrates a legacy file to that name); ColorOS reads the legacy
+    # settings_fingerprint.xml. Same content, two names, mirror semantics: a print
+    # removed in One UI is removed here.
+    BIO_DST=$STAGE/data/system/users/0
+    mkdir -p "$BIO_DST" || true
+    rm -f "$BIO_DST"/settings_fingerprint*.xml
+    bio=0
+    for f in /data/system/users/0/settings_fingerprint*.xml; do
+        [ -f "$f" ] || continue
+        out=${f##*/}
+        cp -f "$f" "$BIO_DST/$out" &&
+            chown 1000:1000 "$BIO_DST/$out" 2>/dev/null &&
+            chmod 644 "$BIO_DST/$out" 2>/dev/null &&
+            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$out" 2>/dev/null
+        bio=$((bio + 1))
+    done
+    # The legacy name: sensor 0's file when One UI writes the numbered name, else
+    # the phone's own legacy file when it does not.
+    if [ -f /data/system/users/0/settings_fingerprint_0.xml ]; then
+        cp -f /data/system/users/0/settings_fingerprint_0.xml "$BIO_DST/settings_fingerprint.xml" &&
+            chown 1000:1000 "$BIO_DST/settings_fingerprint.xml" 2>/dev/null &&
+            chmod 644 "$BIO_DST/settings_fingerprint.xml" 2>/dev/null &&
+            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/settings_fingerprint.xml" 2>/dev/null &&
+            bio=$((bio + 1))
+    elif [ -f /data/system/users/0/settings_fingerprint.xml ] && [ ! -f "$BIO_DST/settings_fingerprint_0.xml" ]; then
+        cp -f /data/system/users/0/settings_fingerprint.xml "$BIO_DST/settings_fingerprint_0.xml" &&
+            chown 1000:1000 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
+            chmod 644 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
+            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
+            bio=$((bio + 1))
+    fi
+    # Face: Samsung's face HAL holds One UI's face (facehal-rs is never started), so the guest's FaceService
+    # lists it from the same two files One UI keeps.
+    for f in settings_face.xml face_enrolled_position_0.xml; do
+        if [ -f "/data/system/users/0/$f" ]; then
+            cp -f "/data/system/users/0/$f" "$BIO_DST/$f" &&
+                chown 1000:1000 "$BIO_DST/$f" 2>/dev/null &&
+                chmod 644 "$BIO_DST/$f" 2>/dev/null &&
+                $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$f" 2>/dev/null
+            bio=$((bio + 1))
+        else
+            # A print or face removed in One UI must not stay listed here.
+            rm -f "$BIO_DST/$f"
+        fi
+    done
+    [ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's $bio enrollment file(s) into the guest"
+    # 0.5.18: the in-display sensor's place (OneOSUdfps; Samsung's HAL gives the guest none). Samsung's sysfs gives it
+    # in mm: margin from the panel's bottom edge, offset from the middle, area width and height, ...; the centre is
+    # half the area height above that margin, as One UI's SemUdfpsHelper has it (the margin alone put the A36's
+    # circle 69 px under the panel's bright spot); One UI's display line gives the panel's native size and physical dpi. x y radius in native pixels.
+    UPOS=$(head -n 1 /sys/class/fingerprint/fingerprint/position 2>/dev/null)
+    ULINE=$(grep 'type INTERNAL' "$STAGE/display_host.txt" 2>/dev/null | grep 'FLAG_ALLOWED_TO_BE_DEFAULT_DISPLAY' | head -n 1)
+    UWH=$(printf '%s\n' "$ULINE" | sed -n 's/.*physicalDisplayWidth=\([0-9]*\) physicalDisplayHeight=\([0-9]*\).*/\1 \2/p')
+    UDPI=$(printf '%s\n' "$ULINE" | sed -n 's/.*density [0-9]*, \([0-9.]*\) x [0-9.]* dpi.*/\1/p')
+    UGEO=''; [ -n "$UWH" ] && [ -n "$UDPI" ] && UGEO="$UWH $UDPI"
+    # The guest's /data/system (BIO_DST is its users/0: one level up was users/, where OneOSUdfps never looked).
+    UFILE=$STAGE/data/system/oneos_udfps
+    rm -f "$UFILE" "$STAGE/data/system/users/oneos_udfps"
+    if [ -n "$UPOS" ] && [ -n "$UGEO" ]; then
+        UXYR=$(echo "$UPOS $UGEO" | awk '{ n = split($1, p, ","); w = $2; h = $3; dpi = $4;
+            if (n < 6 || w < 100 || h < 100 || dpi < 100) exit; ppm = dpi / 25.4;
+            x = int(w / 2 + p[2] * ppm + 0.5); y = int(h - (p[1] + p[4] / 2) * ppm + 0.5); r = int(p[5] / 2 * ppm + 0.5);
+            if (p[1] > 0 && y > 0 && y < h && x > 0 && x < w && r > 10) print x, y, r }')
+        if [ -n "$UXYR" ]; then
+            echo "$UXYR" > "$UFILE" && chown 1000:1000 "$UFILE" && chmod 644 "$UFILE" &&
+                $BB chcon u:object_r:system_data_file:s0 "$UFILE" 2>/dev/null
+            echo "Guest biometrics: in-display sensor at $UXYR (x y radius px; from '$UPOS' and $UGEO)"
+        fi
+    fi
+    # An optical sensor with the panel's local HBM (One UI's floating features, as its fingerprint service reads
+    # them): OneOSSehTouch (patches/guest_seh_touch.py) lights the spot and tells Samsung's HAL of each touch, as One
+    # UI does; without both every capture failed (A36). The marker is what it looks for.
+    LFILE=$STAGE/data/system/oneos_fp_lhbm
+    rm -f "$LFILE"
+    FF=/system/etc/floating_feature.xml
+    if grep -q '<SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>1</SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>' "$FF" 2>/dev/null &&
+       grep -q '<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>[^<]*optical' "$FF" 2>/dev/null &&
+       [ -e /sys/class/lcd/panel/local_hbm ]; then
+        : > "$LFILE" && chown 1000:1000 "$LFILE" && chmod 644 "$LFILE" && $BB chcon u:object_r:system_data_file:s0 "$LFILE" 2>/dev/null
+        echo "Guest biometrics: optical sensor with local HBM: the spot and Samsung's touch request on each touch"
+    fi
+    # A guest whose SystemUI never reports the finger (ColorOS: OPPO's panel driver tells OPPO's HAL, which a
+    # Galaxy has not; 0.5.20, A36: the icon did nothing): OneOSFpTouch in services_patched.jar
+    # (guest_fp_touchwatch.py) reads the touch panel. "<evdev node> <max x> <max y> <panel width> <panel height>".
+    TFILE=$STAGE/data/system/oneos_fp_touch
+    rm -f "$TFILE"
+    if [ -f "$LFILE" ] && [ -f "$UFILE" ] && [ -e "$ROOTFS/system/framework/oplus-services.jar" ] &&
+       [ "${ONEOS_GUEST_FP_TOUCHWATCH:-1}" = 1 ]; then
+        TDEV=''
+        for e in /sys/class/input/event*; do
+            case "$(cat "$e/device/name" 2>/dev/null)" in sec_touchscreen|*_touchscreen) TDEV=/dev/input/${e##*/}; break ;; esac
+        done
+        TMAX=$([ -n "$TDEV" ] && getevent -p "$TDEV" 2>/dev/null | awk '$1 == "0035" { for (i = 1; i <= NF; i++) if ($i == "max") x = $(i + 1) }
+            $1 == "0036" { for (i = 1; i <= NF; i++) if ($i == "max") y = $(i + 1) } END { gsub(",", "", x); gsub(",", "", y); if (x > 0 && y > 0) print x, y }')
+        if [ -n "$TMAX" ] && [ -n "$UWH" ]; then
+            echo "$TDEV $TMAX $UWH" > "$TFILE" && chown 1000:1000 "$TFILE" && chmod 644 "$TFILE" &&
+                $BB chcon u:object_r:system_data_file:s0 "$TFILE" 2>/dev/null
+            echo "Guest biometrics: finger on the sensor from the touch panel ($(cat "$TFILE"))"
+        else
+            echo "Guest biometrics: touch panel not found for the sensor watcher (device '$TDEV', range '$TMAX')"
+        fi
+    fi
+else
+    # No removal guard in this set (or turned off): no copied lists may stay from an earlier stage.
+    rm -f "$STAGE/data/system/users/0"/settings_fingerprint*.xml "$STAGE/data/system/users/0/settings_face.xml" "$STAGE/data/system/users/0/face_enrolled_position_0.xml" 2>/dev/null
+fi
 # Bluetooth on OxygenOS 16 (the CPH2745 build's libbluetooth_jni.so only; 0.5.17, from a tester's own module
 # on his Galaxy A17: "Guest-only BQR crash bypass"): bluetooth::bqr::vendor_specific_event_callback returns at
 # once, so a vendor-specific Bluetooth quality report event (diagnostics only) from a Galaxy's chip no longer
@@ -4613,6 +4808,12 @@ else
 fi
 mkdir -p "$STAGE/data/user/0" "$STAGE/data/user_de/0"
 mkdir -p "$STAGE/data/system/users/0" "$STAGE/data/system_de/0/spblob" "$STAGE/data/system_ce/0"
+# The fingerprint framework sets its active user before vendor code can create
+# this directory. Without it the sensor is registered but never opened.
+mkdir -p "$STAGE/data/vendor_de/0/fpdata"
+chown 1000:1000 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
+chmod 700 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
+$BB chcon u:object_r:fingerprint_vendor_data_file:s0 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 # A guest lock state from before the weaver guard (patches/guest_no_weaver.py)
 # holds protectors in the phone's weaver slots, which the guarded framework
 # can no longer read, so the guest could not unlock its own user 0. Only the
@@ -4702,61 +4903,8 @@ chown 1000:1000 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 chmod 700 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 $BB chcon u:object_r:fingerprint_vendor_data_file:s0 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
 
-# The guest's fingerprint and face are One UI's: the templates stay in the
-# phone's TEE and the guest enrolls or removes nothing of its own (the guest
-# framework patches refuse it). Carry One UI's
-# enrollment metadata across on every switch so the guest unlocks with them
-# through the phone's own HALs; no credential, gatekeeper handle or SP blob is
-# read.
-#
-# The file name is the image's choice, so both are written. AOSP's
-# FingerprintProvider reads settings_fingerprint_<sensorId>.xml (One UI writes
-# _0, and MIUI migrates a legacy file to that name); ColorOS reads the legacy
-# settings_fingerprint.xml. Same content, two names, mirror semantics: a print
-# removed in One UI is removed here.
-BIO_DST=$STAGE/data/system/users/0
-mkdir -p "$BIO_DST" || true
-rm -f "$BIO_DST"/settings_fingerprint*.xml
-bio=0
-for f in /data/system/users/0/settings_fingerprint*.xml; do
-    [ -f "$f" ] || continue
-    out=${f##*/}
-    cp -f "$f" "$BIO_DST/$out" &&
-        chown 1000:1000 "$BIO_DST/$out" 2>/dev/null &&
-        chmod 644 "$BIO_DST/$out" 2>/dev/null &&
-        $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$out" 2>/dev/null
-    bio=$((bio + 1))
-done
-# The legacy name: sensor 0's file when One UI writes the numbered name, else
-# the phone's own legacy file when it does not.
-if [ -f /data/system/users/0/settings_fingerprint_0.xml ]; then
-    cp -f /data/system/users/0/settings_fingerprint_0.xml "$BIO_DST/settings_fingerprint.xml" &&
-        chown 1000:1000 "$BIO_DST/settings_fingerprint.xml" 2>/dev/null &&
-        chmod 644 "$BIO_DST/settings_fingerprint.xml" 2>/dev/null &&
-        $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/settings_fingerprint.xml" 2>/dev/null &&
-        bio=$((bio + 1))
-elif [ -f /data/system/users/0/settings_fingerprint.xml ] && [ ! -f "$BIO_DST/settings_fingerprint_0.xml" ]; then
-    cp -f /data/system/users/0/settings_fingerprint.xml "$BIO_DST/settings_fingerprint_0.xml" &&
-        chown 1000:1000 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
-        chmod 644 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
-        $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/settings_fingerprint_0.xml" 2>/dev/null &&
-        bio=$((bio + 1))
-fi
-# Face: Samsung's face HAL holds One UI's face (facehal-rs is never started),
-# so the guest's FaceService lists it from the same two files One UI keeps.
-for f in settings_face.xml face_enrolled_position_0.xml; do
-    if [ -f "/data/system/users/0/$f" ]; then
-        cp -f "/data/system/users/0/$f" "$BIO_DST/$f" &&
-            chown 1000:1000 "$BIO_DST/$f" 2>/dev/null &&
-            chmod 644 "$BIO_DST/$f" 2>/dev/null &&
-            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$f" 2>/dev/null
-        bio=$((bio + 1))
-    else
-        # A print or face removed in One UI must not stay listed here.
-        rm -f "$BIO_DST/$f"
-    fi
-done
-[ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's $bio enrollment file(s) into the guest"
+# The guest's fingerprint and face are One UI's: the carry of One UI's enrollment lists (one block, gated by
+# BIO_GUARD) is in "Guest biometrics" above, where upstream 0.5.18's in-display sensor files are written too.
 
 # OneOS: without OneLineage's LineageOS packages (Launcher3, LatinIME,
 # LineageSettings; ColorOS has none of them) and with the OneOS app in place
@@ -5702,6 +5850,7 @@ echo "=== 5d. $(date +%T) Bridging host /data app and storage trees into the sta
 # destroyUserData(0) went through the host installd into One UI's real
 # /data/data and /data/media. Host path:stage path.
 # $BRIDGES comes from bridges.sh (sourced at the top).
+rm -f "$STAGE/share_holder.pid"
 for pair in $BRIDGES; do
     h=${pair%%:*}; s=${pair#*:}
     mkdir -p "$STAGE/data/$s" 2>/dev/null || true
@@ -6212,14 +6361,52 @@ cat > "$STAGE/data/local/tmp/app_storage_loop.sh" <<'APPLOOP'
 # the launcher re-query so the app actually shows up.
 last=""
 idle=0
+up=0
 while true; do
     sleep 10
     case "$(getprop sys.boot_completed)" in 1) ;; *) continue ;; esac
+    # 0.5.18 (owner, A36: Nothing OS sluggish, "on Nothing Phone 3a it's smooth"): 217 of 242 guest apps ran
+    # uncompiled (dexopt status verify): a guest's apps are compiled by the background dexopt job, which waits for
+    # an idle phone on its charger, rare in a session, and compiles only apps with a usage profile (22 of 242);
+    # the images' own precompiled code does not hold with OneOS's patched framework. Owner: "It should compile apps
+    # fully for all OS'es and all devices": once per framework (a set update changes it), two minutes after boot,
+    # every app is compiled fully (speed), in the background so the ensure_app_storage pace below is kept.
+    up=$((up + 1))
+    if [ $up -eq 12 ]; then
+        # Keyed on the boot class path's framework.jar only: the apps' compiled code depends on it, never on
+        # services.jar (0.5.20: a services-only set update, the ColorOS fingerprint fix, started all 486 again).
+        # An app whose code is still up to date is skipped by compile itself.
+        key=$(cat /system/framework/framework.jar 2>/dev/null | md5sum | cut -d' ' -f1)
+        # The 0.5.18-0.5.19 key (framework.jar and services.jar together) of a finished run counts as this one.
+        okey=$(cat /system/framework/framework.jar /system/framework/services.jar 2>/dev/null | md5sum | cut -d' ' -f1)
+        [ -n "$key" ] && [ "$(cat /data/oneos_dexopt.done 2>/dev/null)" = "$okey" ] && echo "$key" > /data/oneos_dexopt.done
+        if [ -n "$key" ] && [ "$(cat /data/oneos_dexopt.done 2>/dev/null)" != "$key" ]; then
+            # App by app, with its progress in a notification (owner: show that it is optimizing); the last one
+            # says it is done and is swiped away (a shell notification cannot be withdrawn).
+            # As the shell user: a notification root posts names the package "root" and the notification
+            # service drops it ("Cannot fix notification ... NameNotFoundException: root"; A36 ColorOS and
+            # Nothing OS, 0.5.19: the progress never showed).
+            ( note() { if [ -x /data/oneos_bin/busybox ]; then /data/oneos_bin/busybox setuidgid 2000 cmd notification post -S bigtext -t "$1" oneos_dexopt "$2"; else cmd notification post -S bigtext -t "$1" oneos_dexopt "$2"; fi > /dev/null 2>&1; }
+              pkgs=$(pm list packages 2>/dev/null | sed -n 's/^package://p')
+              total=$(printf '%s\n' "$pkgs" | grep -c .)
+              echo "$(date) dexopt: compiling all $total apps fully for this framework" >> /data/app_storage.log
+              note "Optimizing apps for this system" "0 / $total · the phone may be warm and slower until it is done"
+              i=0; : > /data/oneos_dexopt.log
+              for p in $pkgs; do
+                  i=$((i + 1))
+                  cmd package compile -m speed "$p" >> /data/oneos_dexopt.log 2>&1
+                  [ $((i % 5)) -eq 0 ] && note "Optimizing apps for this system" "$i / $total · the phone may be warm and slower until it is done"
+              done
+              echo "$key" > /data/oneos_dexopt.done
+              note "Apps optimized ✓" "All $total apps are compiled for this system."
+              echo "$(date) dexopt: done" >> /data/app_storage.log ) < /dev/null > /dev/null 2>&1 &
+        fi
+    fi
     # No net_fix.sh here: oneos_switch.sh's net_watch runs it from the host
     # every 10 s for the whole session, before the guest boots until the
     # return, on the same network namespace. A second copy here was about 30
     # forks a round and could race it on table 4242 (coloros native audit
-    # 2026-11-16, S25 Ultra).
+    # 2026-11-16, S25 Ultra). Upstream 0.5.18-0.5.20 ran it here too; not taken.
     cur=$(md5sum /data/system/packages.list 2>/dev/null | cut -d' ' -f1)
     # ensure_app_storage.sh stats every package's dirs (coloros native audit
     # 2026-11-16, S25 Ultra: ~2,440 stat calls every 10 s with nothing

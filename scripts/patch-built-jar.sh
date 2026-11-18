@@ -49,6 +49,16 @@ with zipfile.ZipFile(jar) as src, zipfile.ZipFile(tmp, "w") as dst:
         dst.write(dex, name, compress_type=zipfile.ZIP_STORED)
 os.replace(tmp, jar)
 PY
+    # The jar tool's check from the upstream merge: the dex must be stored (ART maps it) and the jar sound.
+    python3 - "$W/out.jar" "$DEX" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    info = archive.getinfo(sys.argv[2])
+    if info.compress_type != zipfile.ZIP_STORED:
+        raise SystemExit(f"{sys.argv[2]} is not stored")
+    if archive.testzip() is not None:
+        raise SystemExit("rebuilt jar failed its ZIP integrity check")
+PY
     echo "replaced $DEX"
 done
 python3 "$ROOT/scripts/check-dex.py" "$W/out.jar" >&2 || true

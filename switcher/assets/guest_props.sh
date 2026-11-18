@@ -128,6 +128,34 @@ drop_stale_memory_lists() {
     return 0
 }
 
+# frp_format <file> <size>: a persistent data block as the guest's PersistentDataBlockService formats one
+# (formatPartitionLocked; see the FRP block in add). Offsets from the block's end: OEM unlock 1 byte, FRP
+# credential 1000, test harness 10000, FRP secret 32, FRP secret magic 8.
+frp_format() {
+    ff=$1; fs=$2
+    dd if=/dev/zero of="$ff" bs=4096 count=$((fs / 4096)) 2>/dev/null || return 1
+    printf '\031\220\030\163' | dd of="$ff" bs=1 seek=32 conv=notrunc 2>/dev/null || return 1
+    printf '\332\302\374\315\271\033\011\210' | dd of="$ff" bs=1 seek=$((fs - 1 - 1000 - 10000 - 32 - 8)) conv=notrunc 2>/dev/null || return 1
+    fd=$( { dd if=/dev/zero bs=32 count=1 2>/dev/null; dd if="$ff" bs=32 skip=1 2>/dev/null; } | sha256sum | cut -d' ' -f1)
+    case "$fd" in [0-9a-f]*) [ ${#fd} = 64 ] || return 1 ;; *) return 1 ;; esac
+    printf "$(echo "$fd" | sed 's/\(..\)/\\x\1/g')" > "$ff.d" 2>/dev/null
+    if [ "$(stat -c %s "$ff.d" 2>/dev/null)" != 32 ]; then
+        fo=""; fh=$fd
+        while [ -n "$fh" ]; do fo="$fo\\$(printf %03o $((0x$(echo "$fh" | cut -c1-2))))"; fh=${fh#??}; done
+        printf "$fo" > "$ff.d" 2>/dev/null
+    fi
+    [ "$(stat -c %s "$ff.d" 2>/dev/null)" = 32 ] && dd if="$ff.d" of="$ff" bs=32 count=1 conv=notrunc 2>/dev/null
+    r=$?; rm -f "$ff.d"; return $r
+}
+
+# frp_valid <node> <size>: the block reads back whole, with the marker and the digest the guest's service checks.
+frp_valid() {
+    [ "$(dd if="$1" bs=4096 2>/dev/null | wc -c)" = "$2" ] || return 1
+    [ "$(dd if="$1" bs=4 skip=8 count=1 2>/dev/null | od -A n -t x1 | tr -d ' \n')" = 19901873 ] || return 1
+    vd=$( { dd if=/dev/zero bs=32 count=1 2>/dev/null; dd if="$1" bs=32 skip=1 2>/dev/null; } | sha256sum | cut -d' ' -f1)
+    [ "$(dd if="$1" bs=32 count=1 2>/dev/null | od -A n -t x1 | tr -d ' \n')" = "$vd" ]
+}
+
 case "$1" in
 add)
     echo "guest_props add: start $(date +%T)"
@@ -293,6 +321,62 @@ add)
                 echo "$k=${tl##*:}" >> "$NEW"
             done
             echo "guest_props: log level W for the session (Full session logs off)"
+        fi
+    fi
+    # The guest's own FRP block (0.5.18). ro.frp.pst is One UI's FRP partition; the guest's
+    # PersistentDataBlockService read it (its writes go to /dev/null, guest_pdb_readonly.py), so a fresh
+    # guest found One UI's Google account in it and its setup wizard stopped at "Verify your account" with
+    # no way to skip (A36, Nothing OS after Reset data). For the session the property names a loop device
+    # on $STAGE/data/oneos_frp.img: zeros the size of the real partition, the guest's own (Reset data and
+    # Remove take it with the rest of its data), so the guest never reads One UI's FRP record at all.
+    # One UI's value is on the override list (remove puts it back) and in host_frp_pst for the host-state
+    # check at the return. ONEOS_GUEST_OWN_FRP=0 leaves the property alone.
+    FRPK=ro.frp.pst
+    FRPV=$(getprop "$FRPK")
+    case "$FRPV" in ""|/dev/block/loop*|/dev/block/oneos_frp) ;; *) echo "$FRPV" > "$STAGE/host_frp_pst" ;; esac
+    # Only with SELinux permissive (oneos_switch.sh's setenforce 0): enforcing, the loop's kernel reads of the
+    # image are refused (A36: avc denied { read } for kworker on oneos_frp_test.img) and the guest could not boot.
+    if [ "$(getenforce 2>/dev/null)" != Permissive ]; then
+        echo "guest_props: SELinux is $(getenforce 2>/dev/null): $FRPK left as One UI's"
+    elif [ "${ONEOS_GUEST_OWN_FRP:-1}" = 1 ] && [ -n "$FRPV" ] && [ "${FRPV#/dev/block/loop}" = "$FRPV" ] && [ "$FRPV" != /dev/block/oneos_frp ]; then
+        FRPD=$(readlink -f "$FRPV" 2>/dev/null)
+        FRPS=$(blockdev --getsize64 "$FRPD" 2>/dev/null)
+        FRPI="$STAGE/data/oneos_frp.img"
+        case "$FRPS" in ''|0|*[!0-9]*) FRPS="" ;; esac
+        if [ -n "$FRPS" ] && [ $((FRPS % 4096)) = 0 ] && [ "$FRPS" -le 67108864 ]; then
+            # Laid out as the guest's PersistentDataBlockService.formatPartitionLocked writes it (the guest cannot
+            # write it itself: its writes go to /dev/null): the partition marker 0x19901873 and data size 0 after
+            # the 32-byte digest, FRP_SECRET_MAGIC before the all-zero default secret (FRP inactive: the service
+            # deactivates FRP with the default secret), zeros elsewhere, and the digest computeDigestLocked
+            # checks, SHA-256 of 32 zero bytes and the rest of the block. A zeroed block failed its checksum and
+            # took system_server down at boot phase 500 (TestHarnessModeService: "invalid checksum").
+            # Remade every session: nothing in it changes.
+            rm -f "$FRPI"
+            if frp_format "$FRPI" "$FRPS"; then chmod 600 "$FRPI"; else rm -f "$FRPI"; echo "guest_props: could not make $FRPI; $FRPK left as One UI's"; fi
+            FRPL=""
+            [ -f "$FRPI" ] && FRPL=$(losetup -s -f "$FRPI" 2>/dev/null)
+            # The loop's own node is root's 0600 and the guest's system_server (uid 1000) could not open it:
+            # every read failed and the service took that as a bad checksum (builds 148 and 149 never booted;
+            # A36 test in a running session: root-only loop node "Permission denied" as uid 1000, this node
+            # read). $FRPN has the real partition's owner, mode and label.
+            FRPN=/dev/block/oneos_frp
+            rm -f "$FRPN"
+            fmm=$(stat -L -c '%t %T' "$FRPL" 2>/dev/null)
+            if [ -b "$FRPL" ] && [ -n "$fmm" ] &&
+               mknod "$FRPN" b $((0x${fmm% *})) $((0x${fmm#* })) 2>/dev/null &&
+               chown 1000:1000 "$FRPN" && chmod 0600 "$FRPN" &&
+               chcon u:object_r:frp_block_device:s0 "$FRPN" 2>/dev/null &&
+               [ "$(stat -c '%u %a' "$FRPN" 2>/dev/null)" = "1000 600" ] && frp_valid "$FRPN" "$FRPS" &&
+               "$RP" -n "$FRPK" "$FRPN" 2>/dev/null; then
+                echo "$FRPK=$FRPV" >> "$OVR"
+                echo "guest_props: $FRPK=$FRPV overridden to $FRPN ($FRPL) for the session (the guest's own FRP block, $FRPS bytes)"
+            else
+                rm -f "$FRPN"
+                [ -b "$FRPL" ] && losetup -d "$FRPL" 2>/dev/null
+                echo "guest_props: no FRP node for $FRPI ('$FRPL'); $FRPK left as One UI's"
+            fi
+        else
+            echo "guest_props: $FRPK $FRPV ($FRPD) size '$FRPS' not usable; left as One UI's"
         fi
     fi
     # Window-level blur (run 31: glass UI flat in places). The Find N6 turns
@@ -760,44 +844,82 @@ add)
     # Qualcomm layout past their end: "bqr data length is invalid" 8,544 times
     # in the second session, then GWP-ASan's "0 bytes right of a 48-byte
     # allocation" or a plain SEGV, the process restarts, the headset
-    # reconnects, and so on. The stack has its own switch for Android's
-    # original behaviour, persist.sys.oplus.bt.use_origin
-    # (is_oplus_bt_use_origin in libbluetooth_jni.so, OplusUtils.USE_ORIGIN in
-    # the Bluetooth app; both only read it). With it CategorizeBqrEvent takes
-    # Android's parser, which reads the 48 bytes and tests the length before
-    # every longer layout, and ConfigureBqr takes Android's path (its fatal
-    # checks do not fire: the mask stays below 0x80080000, the action below 3).
-    # The switch is broad: the library asks it at 425 places (codecs, AVRCP,
-    # HCI, L2CAP), and nobody has run a session with it. So it is on only
-    # where the crash is proven, ro.soc.model MT6789 (A16 4G, A15 4G, A07);
-    # the A34 (MT6877) reports ColorOS's Bluetooth working without it, and the
-    # Exynos phones' 56-byte events crash nothing. In memory for the session
-    # (remove deletes it). ONEOS_GUEST_BT_ORIGIN=1 sets it on any phone, =0 on none.
+    # reconnects, and so on.
+    #
+    # 0.4.96 used persist.sys.oplus.bt.use_origin=true as the guard. That flag
+    # is read in 425 places, not just BQR. On the Galaxy A15 (Infinity-X,
+    # MT6789) it also changes the A2DP session lifecycle: the first temporary
+    # stream is stopped while AudioFlinger reopens it with the negotiated
+    # format, and the replacement stays DISABLED forever. A live comparison
+    # on the same connection changed only use_origin to false and restarted
+    # Bluetooth: the replacement session reached STARTED and audio played.
+    #
+    # Disable the dangerous reports themselves instead. Android's BQR client
+    # honors persist.bluetooth.bqr.event_mask=0: the A15 controller confirmed
+    # ConfigureBqr mask 0 after the restart, with no reports or Bluetooth
+    # process restart while A2DP played. Keep OPPO's normal path explicitly on
+    # these phones in case the image defines use_origin=true. Both properties
+    # are in memory for the session and are restored/removed on return.
+    # ONEOS_GUEST_BT_ORIGIN=1 remains an explicit diagnostic override on any
+    # ColorOS guest; any other explicit value leaves phones alone. The family
+    # is all of MediaTek, not MT6789 alone: OPPO's parser reads Qualcomm's BQR
+    # layout on every MediaTek controller, and ro.soc.model alone misses
+    # builds that leave it empty or suffix it (the four-property match is the
+    # one the A2DP recovery in guest_start.sh uses). MT6789 keeps its own
+    # branch: its behavior is device-confirmed on the A15/A16 4G.
     BTO=persist.sys.oplus.bt.use_origin
+    BTQ=persist.bluetooth.bqr.event_mask
     if [ "$GUEST_OPLUS" = 1 ]; then
         soc=$(getprop ro.soc.model)
-        case "${ONEOS_GUEST_BT_ORIGIN:-auto}:$soc" in
-            1:*) why="ONEOS_GUEST_BT_ORIGIN=1" ;;
-            # 0.5.07: no longer by default. With it, OPPO's libbluetooth_jni.so registers only
-            # Android's original natives, but the Bluetooth app still calls OPPO's own at
-            # start (OplusBtNativeChannelUtils.classInitNative): UnsatisfiedLinkError, and
-            # com.android.bluetooth died at every start, so Bluetooth never turned on at all
-            # (A16 4G dbd78088 "Bluetooth doesn't even turn on", A15 d1d7cd5a, A16 0b151c94;
-            # 14 and 22 crashes). The reconnect loop it was for is the lesser harm.
-            # ONEOS_GUEST_BT_ORIGIN=1 still sets it.
-            *) why="" ;;
+        # 0.5.07 upstream removed use_origin's default, but MediaTek phones still need the
+        # BQR off. Keep the family gate; MT6789 stays device-confirmed on the A15/A16 4G.
+        bt_mtk=
+        case "$(getprop ro.board.platform)$(getprop ro.hardware)$(getprop ro.soc.manufacturer)$(getprop ro.soc.model)" in
+            *mt[0-9]*|*MT[0-9]*|*[Mm]edia[Tt]ek*) bt_mtk=1 ;;
         esac
-        if [ -n "$why" ]; then
+        case "${ONEOS_GUEST_BT_ORIGIN:-auto}:$soc" in
+            1:*) bt_origin=true; bt_q=""; why="ONEOS_GUEST_BT_ORIGIN=1" ;;
+            auto:MT6789*|0:MT6789*)
+                bt_origin=false; bt_q=0
+                why="$soc: disable incompatible Bluetooth quality reports without changing A2DP"
+                ;;
+            auto:*|0:*)
+                bt_origin=""; bt_q=""; why=""
+                if [ -n "$bt_mtk" ]; then
+                    bt_origin=false; bt_q=0
+                    if [ -n "$soc" ]; then
+                        why="$soc: disable incompatible Bluetooth quality reports without changing A2DP"
+                    else
+                        why="MediaTek SoC: disable incompatible Bluetooth quality reports without changing A2DP"
+                    fi
+                fi
+                ;;
+            *) bt_origin=""; bt_q=""; why="" ;;
+        esac
+        if [ -n "$bt_origin" ]; then
             if grep -qxF "$BTO" "$HOST"; then
                 hv=$(getprop "$BTO")
-                if [ "$hv" != true ] && "$RP" -n "$BTO" true 2>/dev/null; then
+                if [ "$hv" != "$bt_origin" ] && "$RP" -n "$BTO" "$bt_origin" 2>/dev/null; then
                     echo "$BTO=$hv" >> "$OVR"
-                    echo "guest_props: $BTO=$hv overridden to true for the session ($why)"
+                    echo "guest_props: $BTO=$hv overridden to $bt_origin for the session ($why)"
                 fi
             else
                 sed -i "/^persist\.sys\.oplus\.bt\.use_origin=/d" "$NEW"
-                echo "$BTO=true" >> "$NEW"
-                echo "guest_props: $BTO=true for the session ($why)"
+                echo "$BTO=$bt_origin" >> "$NEW"
+                echo "guest_props: $BTO=$bt_origin for the session ($why)"
+            fi
+        fi
+        if [ -n "$bt_q" ]; then
+            if grep -qxF "$BTQ" "$HOST"; then
+                hv=$(getprop "$BTQ")
+                if [ "$hv" != "$bt_q" ] && "$RP" -n "$BTQ" "$bt_q" 2>/dev/null; then
+                    echo "$BTQ=$hv" >> "$OVR"
+                    echo "guest_props: $BTQ=$hv overridden to $bt_q for the session ($why)"
+                fi
+            else
+                sed -i "/^persist\.bluetooth\.bqr\.event_mask=/d" "$NEW"
+                echo "$BTQ=$bt_q" >> "$NEW"
+                echo "guest_props: $BTQ=$bt_q for the session ($why)"
             fi
         fi
     fi
@@ -1410,7 +1532,14 @@ add)
         fp_dpi=$(panel_dpi "$STAGE/display_modes_host.log")
         [ -n "$fp_dpi" ] || fp_dpi=501.0411
         fp_loc=$(awk -v mb="$fp_mb" -v ah="$fp_ah" -v dpi="$fp_dpi" 'BEGIN { printf "%.0f", (mb + ah / 2) * dpi / 25.4 }')
-        for kv in persist.vendor.fingerprint.sensor_type=ultrasonic \
+        # The sensor kind from One UI's floating features (0.5.20 upstream, Galaxy A36: its in-display sensor is
+        # optical, OPPO's fingerprint service and SystemUI read the kind from this property); ultrasonic, as
+        # before, for the S25 Ultra and whenever the features do not say. The icon centre above is the same
+        # formula for both kinds.
+        FF=/system/etc/floating_feature.xml
+        fpf=$(sed -n 's/.*<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>\([^<]*\)<.*/\1/p' "$FF" 2>/dev/null | head -n 1)
+        case "$fpf" in *ultrasonic*) fp_type=ultrasonic ;; *optical*) fp_type=optical ;; *) fp_type=ultrasonic ;; esac
+        for kv in persist.vendor.fingerprint.sensor_type=$fp_type \
                   persist.vendor.fingerprint.optical.iconlocation="$fp_loc" \
                   persist.vendor.fingerprint.optical.iconsize=196; do
             key=${kv%%=*}; value=${kv#*=}
@@ -1424,7 +1553,16 @@ add)
                 echo "$key=$value" >> "$NEW"
             fi
         done
-        echo "guest_props: ColorOS fingerprint icon ${fp_loc}px from the bottom (${fp_mb}mm + ${fp_ah}mm/2 at ${fp_dpi} dpi)"
+        echo "guest_props: ColorOS fingerprint icon ${fp_loc}px from the bottom (${fp_mb}mm + ${fp_ah}mm/2 at ${fp_dpi} dpi), $fp_type sensor"
+        # The panel lights the spot itself (local HBM, as One UI's fingerprint service reads it): ColorOS's lock
+        # screen then keeps its brightness instead of its dim layer (patch-coloros-keyguard-lhbm.py, 0.5.20
+        # upstream; only an optical sensor with the panel's local HBM).
+        if [ "$fp_type" = optical ] && [ -e /sys/class/lcd/panel/local_hbm ] &&
+           grep -q '<SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>1</SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>' "$FF" 2>/dev/null; then
+            drop_new ro.oneos.fp_lhbm
+            echo "ro.oneos.fp_lhbm=1" >> "$NEW"
+            echo "guest_props: ro.oneos.fp_lhbm=1 (the panel lights the fingerprint spot itself)"
+        fi
     fi
     echo "guest_props add: batch $(date +%T)"
     if "$RP" -n -f "$NEW" 2>/dev/null; then
@@ -1580,6 +1718,8 @@ add)
 remove)
     # Host values add overrode for the session (blur, sound names, audio HAL
     # extension, isolated compilation).
+    # The guest's FRP node (add): its loop is detached with the stage's others by return_to_oneui.sh.
+    rm -f /dev/block/oneos_frp 2>/dev/null
     if [ -f "$OVR" ]; then
         while IFS= read -r line; do
             "$RP" -n "${line%%=*}" "${line#*=}" 2>/dev/null && echo "guest_props: restored host ${line%%=*}=${line#*=}"
