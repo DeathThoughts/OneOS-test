@@ -170,9 +170,11 @@ guest-local PIN. `FingerprintEnrollClient.doEnroll` sends a gatekeeper
 `HardwareAuthToken` to `ISession.enroll`, and ColorOS gets that token from a
 successful credential confirmation. The guest has a gatekeeper service but no
 credential in it (`/data/system/gatekeeper.password.key` absent, since the PIN
-is verified locally), so there is no token and enrollment stops. Minting one
-would need the phone's gatekeeper, which is the host-delegated path this branch
-removes. Enroll in One UI; the guest imports the result on the next switch.
+is verified locally), so there is no real token and enrollment stops. Minting
+one would need the phone's gatekeeper, which is the host-delegated path this
+branch removes. (Later: the guest lock hands guest Settings a placeholder token
+of its own, which the phone's HAL refuses; see `docs/guest-screen-lock.md`.)
+Enroll in One UI; the guest imports the result on the next switch.
 
 Tested on the S25 Ultra: with the guest's `settings_fingerprint.xml` and
 `settings_face.xml` deleted, the next switch logged `Guest biometrics: carried

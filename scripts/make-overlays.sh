@@ -343,7 +343,13 @@ for g in guest_no_gatekeeper guest_pdb_readonly guest_pdb_frp_writes_fail guest_
 done
 # The guest's own screen lock: a PIN, pattern or password kept in the guest's own
 # /data/system and checked there, without the phone's gatekeeper, weaver or keystore
-# (patches/guest_local_lock.py, helper OneOSGuestLock). It goes in front of
+# (patches/guest_local_lock.py, helper OneOSGuestLock). A matched credential is answered
+# with the guest lock's own gatekeeper-password handle, which
+# LockSettingsService.verifyGatekeeperPasswordHandle turns into a placeholder
+# token: guest Settings needs one before any biometric page (Nothing OS's Settings
+# crashed on Fingerprint without it). The phone's HAL checks a token's MAC and refuses
+# the placeholder, and guest_no_biometric_writes.py above fails every enroll and
+# removal before the HAL. The two patchers touch different classes. It goes in front of
 # guest_no_gatekeeper's guard, so it runs after that loop; a framework of another
 # shape is left as it is (no guest lock there, as before).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_local_lock.py" "$WORK/services")"
