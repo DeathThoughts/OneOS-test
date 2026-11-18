@@ -1,0 +1,17 @@
+# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets, ksuappid, mediahold, udfps, sehtouch and fptouch guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)
+# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)
+# services_patched.jar r6: patches/guest_media_mount_hold.py (mediahold: MediaProvider's mount scan waits up to 15 s for OneOS's One UI albums)
+# services_patched.jar r7: r6 re-patched in place (classes.dex and classes2.dex only) by patches/guest_local_lock_hat.py (the guest lock answers a matched credential with its own gatekeeper-password handle and a placeholder token, so Settings' fingerprint page opens; nothing of the phone's gatekeeper is reached), patches/guest_udfps_location.py (udfps), patches/guest_seh_touch.py (sehtouch) and patches/guest_fp_touchwatch.py (fptouch); the sensor place, local HBM and touch watcher act only when guest_prepare.sh writes /data/system/oneos_udfps, oneos_fp_lhbm and oneos_fp_touch, which it does for an optical sensor only
+# framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py)
+# telephony-common_patched.jar: the SMS service centre as an international number (patches/guest_smsc_international.py); SEND_SMS error 66 (sent, no result payload) counted as sent (patches/guest_sms_invalid_response.py)
+# libcamera_client_patched.so, libcameracompatbilityinfo_patched.so: the native camera client with One UI's codes (patches/pixel_camera_native.py)
+# oplus-framework_patched.jar: outgoing calls over IMS where the carrier asks for VoLTE provisioning (patches/oplus_ims_provision.py; Samsung's IMS answers 0), 0.5.05
+# biometric-remove guard: services_patched.jar never removes or enrolls a fingerprint or face template (patches/guest_no_biometric_writes.py: the four enroll and removal clients fail at their entry before Samsung's HAL; biowrites); the guest lock with its gatekeeper-password handle and placeholder token (patches/guest_local_lock_hat.py); the fingerprint sensor through AIDL (patches/guest_force_aidl_fingerprint.py, from pull request #152); the in-display sensor's place (patches/guest_udfps_location.py), local HBM and Samsung's touch request (patches/guest_seh_touch.py), and a finger on the optical sensor from the touch panel (patches/guest_fp_touchwatch.py, 0.5.20 r4)
+20da913084bebddc0cbf10f17ec91f246eebcc85bfa662910ecb83b87c5591b6  services_patched.jar
+9fcaf57457d45a27226ad2bbb5753a7963ab1f2093cf832bfc79660194eaadf9  oplus-services_patched.jar
+9db563d25f5afd9a205e726da2e525933f6c86b1e5ca40fa0dfdc82350e01722  vold_patched
+e0c49883974c10f5601950c0f54c3da29658dda1ce17c08c5af1364bbd31bdd8  service.incremental_patched.so
+5d77770303ce3ec78bf5c035abc83222ca9b57a3471a298eacd79f9baa1d49c9  framework_patched.jar
+48f1c98d6bdd26249419047cc58aaa6683d270c65c30de83dd4e01dbbeed5bd1  telephony-common_patched.jar
+fae755c0225bb9cdd3553fc26a11092fd035984c8432adbf22c3c8d70275fa30  libcamera_client_patched.so
+19197cd651ef155142d37e40fdeab0ef5e8ba1177bfa1fdde3b21dfdef545d0d  oplus-framework_patched.jar
