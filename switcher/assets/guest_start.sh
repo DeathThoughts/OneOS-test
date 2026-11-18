@@ -22,6 +22,7 @@ echo "[Pivoted Root] time $($BB date +%T) start"
 echo "[Pivoted Root] Preparing pivot..."
 cd /data/local/tmp/oneos/rootfs
 oneos_media_enabled=0
+oneos_media_share_off=0
 # Every failed media check sets oneos_media_why and the skip line prints it:
 # each prototype test is a single phone run, so takeover.log alone has to
 # name the cause (the root manager's busybox may lack nosymfollow, say).
@@ -37,6 +38,13 @@ oneos_media_opt=/data/local/tmp/oneos-oneui-media
 if [ -e "$oneos_media_opt" ] || [ -L "$oneos_media_opt" ]; then
     if [ -n "$oneos_media_why" ]; then
         :
+    elif [ "${ONEOS_SHARE_FILES:-0}" = 1 ]; then
+        # Share my files (0.5.20) puts One UI's DCIM, Pictures, Download, Documents, Movies and Music over the
+        # guest's own folders for this boot: the album prototype would list the same photos a second time, once
+        # under OneUI/ and once in the shared folders. It stays off for the boot, and with it the media hold
+        # (no prototype, no hold, below).
+        oneos_media_share_off=1
+        echo "[Pivoted Root] Media prototype: off (Share my files is on; its folders carry the same photos)"
     elif [ -L "$oneos_media_opt" ]; then
         oneos_media_why="opt-in marker $oneos_media_opt is a symlink"
     elif [ ! -d "$oneos_media_opt" ]; then
@@ -66,7 +74,7 @@ if [ -e "$oneos_media_opt" ] || [ -L "$oneos_media_opt" ]; then
             oneos_media_enabled=1
         fi
     fi
-    [ "$oneos_media_enabled" = 1 ] ||
+    [ "$oneos_media_enabled" = 1 ] || [ "$oneos_media_share_off" = 1 ] ||
         echo "[Pivoted Root] Media prototype off: ${oneos_media_why:-unknown reason}"
 fi
 if ! $BB pivot_root . postinstall; then

@@ -566,6 +566,31 @@ class GuestMediaGate(Base):
         self.assertEqual(["[Pivoted Root] Media prototype off: image is not ColorOS "
                           "(stage marker image 'lineage24-test')"], self.lines(result))
 
+    def test_share_my_files_keeps_the_album_prototype_off_for_the_boot(self):
+        # 0.5.20 upstream's Share my files binds One UI's DCIM, Pictures, ... over the guest's folders; the
+        # albums would list the same photos twice, so ONEOS_SHARE_FILES=1 turns the prototype (and, by the
+        # existing no-prototype rule, the media hold) off even with the opt-in marker in place.
+        self.photo("Pictures/X", "a.webp")
+        result = self.boot(env={"ONEOS_SHARE_FILES": "1"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], self.mounts())
+        self.assertEqual([], list((self.work / "data").glob("oneos_media_hold.*")))
+        self.assertEqual(
+            ["[Pivoted Root] Media prototype: off (Share my files is on; its folders carry the same photos)",
+             "[Pivoted Root] Media hold: off (the media prototype does not run this boot)"],
+            result.stdout.splitlines())
+        log = (self.work / "setprop.log").read_text().splitlines()
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], [l for l in log if l.startswith("oneos.media.")])
+        # Off (0) or absent: the prototype runs as before.
+        for env in ({"ONEOS_SHARE_FILES": "0"}, {}):
+            result = self.boot(env=env)
+            self.assertNotIn("Share my files", result.stdout)
+            self.assertIn("Media prototype: One UI's media/0 pinned read-only", result.stdout)
+        # Without the opt-in marker nothing about the prototype is printed, shared files or not.
+        self.opt_in.rmdir()
+        result = self.boot(env={"ONEOS_SHARE_FILES": "1"})
+        self.assertNotIn("Media prototype", result.stdout)
+
     def test_off_reasons_name_the_gate_check(self):
         self.opt_in.chmod(0o755)
         result = self.boot()
