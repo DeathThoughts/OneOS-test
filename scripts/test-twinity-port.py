@@ -491,5 +491,43 @@ class WireRepositoryAndRestartHomeTest(unittest.TestCase):
             subprocess.run([sys.executable, str(repo / "scripts/test-restart-home.py")], cwd=repo, check=True)
 
 
+
+class RealImageResolverGuardTest(unittest.TestCase):
+    def test_rejects_non_ext4_before_touching_overlays(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            img = root / "system.img"
+            img.write_bytes(b"not a real filesystem" + bytes(2048))
+            overlays = root / "make-overlays.sh"
+            original = "BUILDS = [\\n]\\nSITES = {}\\n"
+            overlays.write_text(original)
+            with self.assertRaisesRegex(ValueError, "raw ext4"):
+                twinity_elf_sites.resolve_and_update_for_image(
+                    system_img=img, make_overlays_path=overlays,
+                    build_label="Twinity invalid", dexdump_path="unused",
+                    debugfs_path="unused", extract_erofs_path="unused")
+            self.assertEqual(original, overlays.read_text())
+
+    def test_missing_native_files_never_changes_overlays(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            img = root / "system.img"
+            raw = bytearray(2048)
+            raw[1080:1082] = bytes.fromhex("53ef")
+            img.write_bytes(raw)
+            overlays = root / "make-overlays.sh"
+            original = "BUILDS = [\\n]\\nSITES = {}\\n"
+            overlays.write_text(original)
+            with patch.object(twinity_elf_sites.subprocess, "run") as fake:
+                fake.return_value = subprocess.CompletedProcess([], 0, "", "")
+                with self.assertRaisesRegex(ValueError, "Missing native"):
+                    twinity_elf_sites.resolve_and_update_for_image(
+                        system_img=img, make_overlays_path=overlays,
+                        build_label="Twinity incomplete", dexdump_path="unused",
+                        debugfs_path="unused", extract_erofs_path="unused")
+            self.assertEqual(original, overlays.read_text())
+
+
 if __name__ == "__main__":
     unittest.main()
