@@ -1227,8 +1227,8 @@ class GuestMediaShareOrder(unittest.TestCase):
             return found[0]
         stage = at('if [ "$oneos_media_enabled" = 1 ] && ! oneos_media_stage; then')
         detach = at("$BB umount -l /postinstall 2>/dev/null")
-        chown = at("chown -R 1023:1023 /data/media 2>/dev/null || true")
-        chmod = at("chmod -R 777 /data/media 2>/dev/null || true")
+        chown = at('chown -R 1023:1023 "$d" 2>/dev/null || true')
+        chmod = at('chmod -R 777 "$d" 2>/dev/null || true')
         launch = at("( oneos_media_late ) </dev/null &")
         zygote = at('echo "[Pivoted Root] time $($BB date +%T) zygote"')
         self.assertLess(stage, detach)

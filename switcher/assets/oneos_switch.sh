@@ -2369,7 +2369,32 @@ while true; do
             fi
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system haptic_feedback_enabled 1
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate 120.0
-            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 120.0
+            # On ColorOS, panel_keeper and /data/oneos_sf_kick.sh already cure the
+            # 24 Hz start without pinning; forcing min_refresh_rate 120.0 held
+            # PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE at 120 Hz all session over
+            # OplusRefreshRateService (S25 Ultra, coloros17-findx9u-in-1105,
+            # sessions db19aee410bd79ff and 75e538ac0ed725df: diag_90_display.txt).
+            # Once per stage, delete a forced 120/120.0 floor; any other value stays.
+            if [ $GUEST_OPLUS = 1 ]; then
+                if [ -L $STAGE/data/oneos_min_refresh_reset ]; then
+                    echo '[UI Activator] min refresh rate: data/oneos_min_refresh_reset is a link, not made by OneOS; left alone'
+                elif [ ! -e $STAGE/data/oneos_min_refresh_reset ]; then
+                    MRR=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system min_refresh_rate 2>/dev/null)
+                    case \"\$MRR\" in
+                        120|120.0)
+                            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings delete system min_refresh_rate >/dev/null 2>&1 &&
+                                mkdir $STAGE/data/oneos_min_refresh_reset 2>/dev/null &&
+                                echo \"[UI Activator] min refresh rate: was min_refresh_rate=\$MRR; the forced floor reset once\" ;;
+                        '')
+                            echo '[UI Activator] min refresh rate: not read; will check next boot' ;;
+                        *)
+                            mkdir $STAGE/data/oneos_min_refresh_reset 2>/dev/null
+                            echo \"[UI Activator] min refresh rate: was min_refresh_rate=\$MRR; left alone (once per stage)\" ;;
+                    esac
+                fi
+            else
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 120.0
+            fi
             # ColorOS's touch idle (OTI) pushes SurfaceFlinger to 240/60 Hz over the
             # 120 Hz policy on this panel (run 29); also staged off by guest_prepare.sh.
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys oplus_vrr_service oti false >/dev/null 2>&1 && echo '[UI Activator] refresh rate: ColorOS touch idle off'
