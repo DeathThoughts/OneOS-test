@@ -198,6 +198,22 @@ class TwinityElfSitesTest(unittest.TestCase):
         self.assertEqual(0x1000 + 6, name_off)
         self.assertEqual(0x2000 + 20, try_off)
 
+    def test_unknown_vold_produces_bounded_diagnostics_without_patch(self):
+        rodata = b"prefix\x00vold\x00suffix"
+        adrp = 0x90000081
+        add = 0x91000021 | (7 << 10)
+        # This unknown build retains a name reference but lacks the validated
+        # branch; do not turn a nearby TBZ into a guessed patch location.
+        code = struct.pack("<4I", adrp, add, 0x2A0003F3, 0x360000B3)
+        elf = self._build_minimal_elf64(0x20000, rodata, 0x10000, code)
+        with self.assertRaisesRegex(ValueError, "try_start"):
+            twinity_elf_sites.resolve_vold_sites(elf)
+        report = twinity_elf_sites.diagnose_vold_sites(elf)
+        self.assertEqual(1, report["service_reference_count"])
+        self.assertEqual(0, report["expected_tbz_exact_count"])
+        self.assertGreaterEqual(report["tbz_w19_count"], 1)
+        self.assertIn("DO NOT PATCH", report["warning"])
+
     def test_surfaceflinger_cbz_site_resolved(self):
         # Stub1 at 0x10100 (AIBinder_getExtension), Stub2 at 0x10110 (fromBinder)
         # At 0x10000: bl 0x10100 (+0x100 -> imm26=0x40 -> 0x94000040)

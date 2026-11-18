@@ -2,7 +2,7 @@ name: Twinity ELF Unit Tests
 
 on:
   push:
-    branches: [fix/twinity-ci-preflight, fix/twinity-lpunpack, fix/twinity-mystic-python]
+    branches: [fix/twinity-ci-preflight, fix/twinity-lpunpack, fix/twinity-mystic-python, fix/twinity-vold-diagnostics]
   workflow_dispatch:
 
 permissions:

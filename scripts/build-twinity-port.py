@@ -1095,6 +1095,7 @@ def main() -> int:
                 dexdump_path=dexdump,
                 debugfs_path=debugfs,
                 extract_erofs_path=extract_erofs,
+                diagnostics_dir=metadata,
             )
             make_overlays_diff = subprocess.check_output(
                 ["git", "diff", "scripts/make-overlays.sh"], cwd=ROOT, text=True,
