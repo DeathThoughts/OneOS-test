@@ -1238,7 +1238,12 @@ if mtk:
     sys.exit(0)
 if b"IMtkSF_ext" in data:
     sys.exit("surfaceflinger: a MediaTek build with MtkSF_ext this was not written against, not patching")
-off = SITES.get(hashlib.sha1(data).hexdigest()[:12])
+# Twinity4c ColorOS 17: the PLT relocations identify AIBinder_getExtension
+# and IQtiComposer3Client::fromBinder on either side of the cbz at 0x470a58.
+if hashlib.sha256(data).hexdigest() == "4c51f07dd84fb8161f9791dd2a3403fce74e6a520784cfe426f60c6058f22445":
+    off = 0x470a58
+else:
+    off = SITES.get(hashlib.sha1(data).hexdigest()[:12])
 if off is None and b"IQtiComposer3Client" not in data:
     # Google's own build (Pixel image): no QTI composer client to skip.
     if os.path.exists(dst):
