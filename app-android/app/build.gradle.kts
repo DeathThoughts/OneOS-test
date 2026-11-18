@@ -88,6 +88,9 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     // payload (One UI's Google apps are laid over the guest at session time). Tethering never mounts; its source-built
     // cellbroadcast module is left out like Infinity-X's.
     "lineage" to (File(repoRoot, "out/overlays_lineage_r7") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
+    // ColorOS 17 China Twinity4c (0.5.19 trial), the base Galaxy S23: the set
+    // published with the twinity4c image release.
+    "twinity-s23" to (File(repoRoot, "out/overlays_twinity4c_r1") to listOf()),
 )
 // The series downloads (0.4.25): -Poneos.series=<id> packs only the sets that
 // app-android/packages/series.txt lists for it (ApkSeries keeps the same lists,
@@ -524,8 +527,9 @@ android {
         // the vendor's Bluetooth module with offload off, as One UI does; 0.4.99's bridge got the session but the
         // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
         // Refresh stages created before the storage, diagnostics and bring-apps changes.
-        versionCode = 169
-        versionName = "0.5.19-fork-popsicle.1"
+        // 0.5.19 fork 170: the ColorOS 17 China Twinity4c trial, the base Galaxy S23 only.
+        versionCode = 170
+        versionName = "0.5.19-fork-twinity.1"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
 

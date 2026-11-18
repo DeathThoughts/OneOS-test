@@ -29,6 +29,13 @@ class ApkSeriesTest {
         })
     }
 
+    @Test
+    fun twinityShipsInTheSeriesThatIncludesGalaxyS23() {
+        assertEquals(listOf(ApkSeries.S25), ApkSeries.entries.filter {
+            PackageSets.ID_TWINTY_S23 in it.setIds()
+        })
+    }
+
     /** app-android/packages/series.txt (what app/build.gradle.kts packs) lists exactly [ApkSeries.setIds]. */
     @Test
     fun theListBuildsUseIsTheModels() {

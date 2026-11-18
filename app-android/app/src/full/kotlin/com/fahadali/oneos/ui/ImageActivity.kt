@@ -238,7 +238,7 @@ class ImageFragment : CardsFragment() {
                 if (image.googleServices) add(getString(R.string.systems_chip_google))
             }
             Cards.row(systems, GLYPHS[i % GLYPHS.size], Images.systemName(image, p), notes.joinToString(" · "))
-            if (image.id == Images.ID_HYPEROS_POPSICLE) {
+            if (image.id == Images.ID_HYPEROS_POPSICLE || image.id == Images.ID_COLOROS17_TWINTY4C) {
                 CardRows.text(systems, getString(R.string.image_split_zip_instructions, image.gzName), R.style.OneOS_Text_Caption, inList = true)
             }
         }

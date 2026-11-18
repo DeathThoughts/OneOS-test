@@ -162,6 +162,7 @@ object PackageSets {
     const val ID_PIXEL_SULTRA = "pixel-sultra"
     const val ID_HYPER_F8U = "hyper-f8u"
     const val ID_HYPER_POPSICLE = "hyper-popsicle"
+    const val ID_TWINTY_S23 = "twinity-s23"
     const val ID_PIXEL9_SULTRA = "pixel9-sultra"
     const val ID_INFINITYX = "infinityx"
     const val ID_NOTHING_F8U = "nothing-f8u"
@@ -226,8 +227,8 @@ object PackageSets {
     /**
      * 0.5.05: oplus-framework.jar with outgoing calls over IMS where the carrier asks for VoLTE
      * provisioning (patches/oplus_ims_provision.py; Samsung's IMS answers 0 and ColorOS dialled GSM:
-     * Z Fold8 Spectrum 295249c3). The Find N6 sets and the November X9U set only (owner: not the
-     * older X9U build, not OxygenOS).
+     * Z Fold8 Spectrum 295249c3). The Find N6 sets, the November X9U set and the Twinity trial
+     * (owner: not the older X9U build, not OxygenOS).
      */
     private val OPLUS_FRAMEWORK_IMS = PackageFile("oplus-framework_patched.jar", FileRole.GUARD_JAR)
 
@@ -887,7 +888,29 @@ object PackageSets {
         hasReturnApp = true,
     )
 
-    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE)
+    /**
+     * ColorOS 17 China, the OnePlus 13T "TWNTY4.0c" build (0.5.19 trial), on the
+     * base Galaxy S23 only. The CI-published Twinity4c overlays: the common
+     * ColorOS guards and payloads, the OPPO IMS framework patch, the camera
+     * codes and the Samsung camera; no GMSSystem payload (the image has no
+     * Google apps) and no cell broadcast or tethering.
+     */
+    val TWINTY_S23 = PackageSet(
+        id = ID_TWINTY_S23,
+        imageId = Images.ID_COLOROS17_TWINTY4C,
+        sourceDir = "out/overlays_twinity4c_r1",
+        files = COMMON +
+            PackageFile("framework_patched.jar", FileRole.GUARD_JAR) +
+            PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR) +
+            PackageFile("libcamera_client_patched.so", FileRole.GUARD_LIBRARY) +
+            OPLUS_FRAMEWORK_IMS +
+            PackageFile("samcam_bar.tar", FileRole.GUEST_FIX),
+        omitted = emptyList(),
+        approxBytes = 424_083_730L,
+        hasReturnApp = true,
+    )
+
+    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE, TWINTY_S23)
 
     fun byId(id: String, sets: List<PackageSet> = ALL): PackageSet? = sets.firstOrNull { it.id == id }
 }

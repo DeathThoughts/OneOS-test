@@ -98,8 +98,8 @@ open class SystemsActivity : ToolbarActivity() {
 
     /** "I have the file" of [imageId] (null: whichever system it is). */
     fun choose(imageId: String?) {
-        if (imageId == Images.ID_HYPEROS_POPSICLE) {
-            val image = Images.HYPEROS_POPSICLE
+        if (imageId == Images.ID_HYPEROS_POPSICLE || imageId == Images.ID_COLOROS17_TWINTY4C) {
+            val image = requireNotNull(Images.byId(imageId))
             AlertDialog.Builder(this).setTitle(image.nameWithVariant)
                 .setMessage(getString(R.string.image_split_zip_instructions, image.gzName))
                 .setPositiveButton(R.string.image_pick_title) { _, _ -> pickArchive(imageId) }
@@ -456,11 +456,18 @@ class SystemsFragment : Fragment() {
                 ?: available.firstOrNull { it.family == family && it.id in st?.oldImages.orEmpty().values }
                 ?: rememberedImage?.takeIf { it.family == family && it.id == setUpId }
                 ?: available.firstOrNull { it.family == family } ?: fallback
+        // The ColorOS card keeps the non-Twinity image; the Twinity trial has its own card.
         val color = image(com.fahadali.oneos.core.model.SystemFamily.COLOROS, Images.FIND_N6)
+            .takeUnless { it.id == Images.ID_COLOROS17_TWINTY4C }
+            ?: available.firstOrNull {
+                it.family == com.fahadali.oneos.core.model.SystemFamily.COLOROS && it.id != Images.ID_COLOROS17_TWINTY4C
+            }
+            ?: Images.FIND_N6
         val pixel = image(com.fahadali.oneos.core.model.SystemFamily.PIXEL, Images.PIXEL_YOGI)
         val infinity = image(com.fahadali.oneos.core.model.SystemFamily.INFINITYX, Images.INFINITYX)
         val hyper = Images.HYPEROS_LHASA
         val popsicle = available.firstOrNull { it.id == Images.ID_HYPEROS_POPSICLE }
+        val twinity = available.firstOrNull { it.id == Images.ID_COLOROS17_TWINTY4C }
         val nothing = image(com.fahadali.oneos.core.model.SystemFamily.NOTHING, Images.NOTHING_METROID)
         val oxygen = image(com.fahadali.oneos.core.model.SystemFamily.OXYGENOS, Images.OXYGEN16)
         val origin = image(com.fahadali.oneos.core.model.SystemFamily.ORIGINOS, Images.ORIGINOS7)
@@ -475,6 +482,7 @@ class SystemsFragment : Fragment() {
             CatalogEntry(infinity.name, infinity, R.drawable.os_infinity, available.any { it.id == infinity.id }),
             CatalogEntry(hyper.name, hyper, R.drawable.os_hyperos, available.any { it.id == hyper.id }),
             popsicle?.let { CatalogEntry(it.name, it, R.drawable.os_hyperos, true) },
+            twinity?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
             CatalogEntry(color.name, color, R.drawable.os_coloros, available.any { it.id == color.id }),
             CatalogEntry(nothing.name, nothing, R.drawable.os_nothing, available.any { it.id == nothing.id }),
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
@@ -590,7 +598,7 @@ class SystemsFragment : Fragment() {
             p?.choice(image?.id.orEmpty())?.tested == true -> R.string.catalog_optimised
             else -> R.string.catalog_experimental
         })
-        badge.text = if (image?.id == Images.ID_HYPEROS_POPSICLE) "${entry.name} · $status" else status
+        badge.text = if (image?.id == Images.ID_HYPEROS_POPSICLE || image?.id == Images.ID_COLOROS17_TWINTY4C) "${entry.name} · $status" else status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send

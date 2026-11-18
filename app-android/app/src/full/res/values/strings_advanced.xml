@@ -195,7 +195,7 @@
     <string name="image_no_profile_summary">This version of OneOS has none for this phone. Phone details, in Settings › For the OneOS team, shows why.</string>
     <string name="image_cat_file">Your file</string>
     <string name="image_pick_summary">Opens your files. OneOS reads only the file you pick.</string>
-    <string name="image_split_zip_instructions">Join the .zip.001 and .zip.002 parts, then extract the joined archive once. In OneOS, pick the extracted %1$s and leave system.img inside it.</string>
+    <string name="image_split_zip_instructions">Join all the numbered .zip.001, .zip.002 (and later) parts in order, then extract the joined archive once. In OneOS, pick the extracted %1$s and leave system.img inside it.</string>
     <string name="image_not_used">%1$s · not used: setup reuses the system already on this phone</string>
     <string name="image_file_ok">It\'s %1$s for this phone</string>
     <string name="image_check_title">Check the file</string>

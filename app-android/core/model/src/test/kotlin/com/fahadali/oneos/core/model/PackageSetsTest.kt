@@ -11,6 +11,7 @@ class PackageSetsTest {
     private val n6 = PackageSets.N6_F8U
     private val pixel = PackageSets.PIXEL_F8U
     private val xin = PackageSets.X9U_IN_SULTRA
+    private val twinity = PackageSets.TWINTY_S23
 
     /** sha256sum of out/overlays_n6g_r3, out/overlays_x9u_r51, out/overlays_x9u_in_r53 (2026-11-03) and out/overlays_pixel_f8u_r2 without the omitted files. */
     private fun shas(set: PackageSet) = Bundles.text("packages/${set.id}.sha256")
@@ -31,6 +32,28 @@ class PackageSetsTest {
         assertEquals(FileRole.APEX_PAYLOAD, set.file(PackageSets.GMS_PAYLOAD)?.role)
         assertEquals(listOf(PackageSets.TETHERING), set.omitted)
         assertTrue(set.hasReturnApp)
+    }
+
+    @Test
+    fun twinityStagingSetMatchesItsPayloadAndGuardPins() {
+        assertEquals(Images.ID_COLOROS17_TWINTY4C, twinity.imageId)
+        assertEquals(29, twinity.files.size)
+        assertEquals("out/overlays_twinity4c_r1", twinity.sourceDir)
+        val manifest = shas(twinity)
+        val guardsText = guards(twinity)
+        assertEquals(emptyList<String>(), twinity.check(manifest))
+        assertEquals(emptyList<String>(), twinity.checkGuards(guardsText, manifest))
+        assertEquals(ShaList.parse(manifest).entries.getValue("guards.txt"), Hashes.sha256(guardsText.toByteArray()))
+        assertEquals(15, twinity.files.count { it.role == FileRole.APEX_PAYLOAD })
+        assertEquals(
+            listOf("services_patched.jar", "oplus-services_patched.jar", "vold_patched", "service.incremental_patched.so",
+                "framework_patched.jar", "telephony-common_patched.jar", "libcamera_client_patched.so", "oplus-framework_patched.jar"),
+            twinity.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
+        )
+        assertEquals(listOf("samcam_bar.tar"), twinity.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
+        assertEquals(emptyList<String>(), twinity.omitted)
+        assertEquals(424_083_730L, twinity.approxBytes)
+        assertTrue(twinity.hasReturnApp)
     }
 
     @Test fun fold8StableInheritsEverySharedPayloadAndGuard() {

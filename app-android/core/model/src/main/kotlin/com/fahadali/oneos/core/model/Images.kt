@@ -126,6 +126,7 @@ object Images {
     const val ID_FIND_N6 = "coloros17-findn6"
     const val ID_FIND_X9U_IN = "coloros17-findx9u-in"
     const val ID_FIND_X9U_IN_1105 = "coloros17-findx9u-in-1105"
+    const val ID_COLOROS17_TWINTY4C = "coloros17-twinity4c"
     const val ID_PIXEL_YOGI = "pixel11fold-yogi"
     const val ID_PIXEL_KODIAK = "pixel11pro-kodiak"
     const val ID_HYPEROS_LHASA = "hyperos-lhasa"
@@ -434,6 +435,37 @@ object Images {
     )
 
     /**
+     * ColorOS 17 China, the OnePlus 13T "TWNTY4.0c" build for the Poco F5
+     * (MARBLE) ported to the base Galaxy S23 (0.5.19 trial). Android 17
+     * (SDK 37), CP2A.260605.016, security patch 2026-09-01. The release is a
+     * split ZIP containing one stored `system.img`; the app streams that entry
+     * without unpacking the whole archive. No Google apps. Untested on a phone.
+     */
+    val COLOROS17_TWINTY4C = ImageRef(
+        id = ID_COLOROS17_TWINTY4C,
+        label = "ColorOS 17, OnePlus 13T China TWNTY4.0c build",
+        shortName = "OnePlus 13T",
+        name = "ColorOS 17",
+        variant = "China TWNTY4.0c",
+        blurb = "The OnePlus 13T's China ColorOS 17, ported to the Galaxy S23. Untested. No Google apps.",
+        downloadUrl = "https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity4c-81fff7581ff4",
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_ColorOS17_Twinity4c.zip",
+        gzBytes = 5186666434L,
+        gzSha256 = "71ad5919cbb6d813b8815e6dc4b27790c23724ca4f7441eb2a5c1ace08fbdc4e",
+        rawBytes = 10238496768L,
+        rawSha256 = "3d918b88d7ab4cf8f49854414d872f8c959d13d0a62e3f2691a5f5c9c0a57189",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = false,
+        family = SystemFamily.COLOROS,
+        zipEntryName = "system.img",
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity4c-81fff7581ff4",
+    )
+
+    /**
      * Nothing OS 5.0 (0.4.33), from the Nothing Archive dump of the A024
      * "Metroid" (nothing_archive, Metroid_C5.0-260924-2115). Android 17 on a
      * Qualcomm qssi_64 system image, like the ColorOS and Infinity-X builds.
@@ -601,7 +633,7 @@ object Images {
      */
     val DATA_UPGRADES: Map<String, String> = mapOf(ID_FIND_X9U_IN to ID_FIND_X9U_IN_1105)
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24)
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 

@@ -40,6 +40,29 @@ class ImagesTest {
     }
 
     @Test
+    fun twinityImportTakesTheInnerZipOnGalaxyS23() {
+        val twinity = Images.COLOROS17_TWINTY4C
+        val inner = ImageFileCheck(twinity.gzName, twinity.gzBytes, twinity.gzSha256, twinity.gzBytes)
+        val s23 = Profiles.S_8550
+        assertEquals("system.img", twinity.zipEntryName)
+        assertEquals(twinity.downloadUrl, twinity.mirrorUrl)
+        assertEquals(5_186_666_434L, twinity.gzBytes)
+        assertEquals("71ad5919cbb6d813b8815e6dc4b27790c23724ca4f7441eb2a5c1ace08fbdc4e", twinity.gzSha256)
+        assertEquals(10_238_496_768L, twinity.rawBytes)
+        assertEquals("3d918b88d7ab4cf8f49854414d872f8c959d13d0a62e3f2691a5f5c9c0a57189", twinity.rawSha256)
+        assertEquals(ImageState.VERIFIED, ImageIdentifier.identify(inner, s23).state)
+        assertEquals(ImageState.WRONG_FOR_PHONE, ImageIdentifier.identify(inner, Profiles.S_PLUS_8550).state)
+        assertEquals(ImageState.UNKNOWN, ImageIdentifier.identify(ImageFileCheck("OneOS_ColorOS17_Twinity4c.zip.001", 1_900_000_000L), s23).state)
+        val raw = ImageIdentifier.identify(ImageFileCheck("system.img", twinity.rawBytes), s23)
+        assertEquals(ImageState.UNCOMPRESSED, raw.state)
+        assertTrue(raw.finding.detail.contains(twinity.gzName))
+        assertFalse(twinity.googleServices)
+        assertFalse(twinity.presentsGms)
+        assertFalse(twinity.gmsHideable)
+        assertNull(twinity.testedOn)
+    }
+
+    @Test
     fun builtInTable() {
 
         assertEquals("coloros17-findn6", n6.id)
@@ -93,7 +116,7 @@ class ImagesTest {
         assertEquals(listOf(n6, xin, Images.NOTHING_METROID, Images.OXYGEN16, Images.LINEAGE24), Images.ALL.filter { it.gmsHideable })
         assertTrue(pixel.copy(presentsGms = false).gmsHideable)
         assertEquals(
-            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.HYPEROS_POPSICLE, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
+            listOf(n6, xin, Images.COLOROS17_TWINTY4C, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.HYPEROS_POPSICLE, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
                 Images.ORIGINOS7, Images.LINEAGE24),
             Images.ALL,
         )
@@ -158,7 +181,7 @@ class ImagesTest {
         // Guest data stays with its own system (0.3.7): the ColorOS builds and the Pixel images.
         assertEquals(
             listOf(
-                SystemFamily.COLOROS, SystemFamily.COLOROS,
+                SystemFamily.COLOROS, SystemFamily.COLOROS, SystemFamily.COLOROS,
                 SystemFamily.PIXEL, SystemFamily.PIXEL, SystemFamily.PIXEL,
                 SystemFamily.INFINITYX, SystemFamily.HYPEROS, SystemFamily.HYPEROS, SystemFamily.NOTHING, SystemFamily.NOTHING, SystemFamily.OXYGENOS, SystemFamily.ORIGINOS, SystemFamily.LINEAGE,
             ),
@@ -298,7 +321,7 @@ class ImagesTest {
             Profiles.FOLD8 to listOf(n6, pixel, ifx, lineage, hyper, nothing, origin),
             Profiles.S_8850 to listOf(xin, Images.PIXEL_KODIAK, ifx, lineage, hyper, nothing, origin),
             Profiles.S_ULTRA_8650 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.82
-            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin, Images.HYPEROS_POPSICLE),
+            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin, Images.HYPEROS_POPSICLE, Images.COLOROS17_TWINTY4C),
             Profiles.S_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.83
             Profiles.S_PLUS_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.83
             Profiles.S_FE_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper),
