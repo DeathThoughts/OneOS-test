@@ -3362,6 +3362,9 @@ fi
 #   (com.coloros.assistantscreen) crashes, Meta and Branch.io wakelocks, and unused
 #   OPPO/Microsoft apps (ebadge, microsoft.*, pictorial, member, heytap.browser) are
 #   disabled for user 0 and recorded in /data/oneos_oplus_bloat_off.
+#   com.oplus.ota (System updates) crashed at every start with "Failed to find
+#   update_engine" (session 161a843fbaddcd7a, 18:51:13 and 18:54:35): the guest has no
+#   update_engine and must never update itself, so it is disabled the same way.
 #   com.oplus.games (Game Assistant) ran at 82.1% CPU plus a 46.4% sandboxed WebView
 #   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34). It stays
 #   enabled for the in-game sidebar, and since 2026-11-18 it is no longer restricted
@@ -3386,7 +3389,7 @@ if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
 BLOAT_MODE=${BLOAT_MODE:-off}
 TELE_PKGS="com.oplus.onetrace com.oplus.olc"
 TELE_REC=/data/oneos_oplus_telemetry_off
-BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser"
+BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota"
 BLOAT_REC=/data/oneos_oplus_bloat_off
 RESTRICT_PKGS=""
 RESTRICT_REC=/data/oneos_oplus_restricted

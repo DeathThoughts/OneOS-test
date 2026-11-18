@@ -6,7 +6,7 @@
   for user 0 -> /data/oneos_oplus_telemetry_off; ONEOS_GUEST_OPLUS_TELEMETRY=1
   turns back on only those recorded packages.
 - Phase 1 debloat + restrict (2026-11-18): S25 Ultra, coloros17-findx9u-in-1105,
-  sessions db475ad5017133c4 and a12bf19e1931e81a: 15 bloat packages off for user 0
+  sessions db475ad5017133c4 and a12bf19e1931e81a: 15 bloat packages off for user 0 (16 with com.oplus.ota, session 161a843fbaddcd7a)
   -> /data/oneos_oplus_bloat_off; com.oplus.games stays enabled and gets
   RUN_ANY_IN_BACKGROUND ignore + standby bucket restricted ->
   /data/oneos_oplus_restricted; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
@@ -99,6 +99,7 @@ BLOAT_EXPECTED = [
     'com.coloros.assistantscreen',
     'com.oplus.member',
     'com.heytap.browser',
+    'com.oplus.ota',
 ]
 DEFERRED_OR_DROPPED = [
     'com.oplus.aiunit',
@@ -280,7 +281,7 @@ class ListsAndStatic(unittest.TestCase):
     def test_exact_package_lists(self):
         self.assertEqual(extract_pkg_list('TELE_PKGS'), [ONT, OLC])
         self.assertEqual(extract_pkg_list('BLOAT_PKGS'), BLOAT_EXPECTED)
-        self.assertEqual(len(BLOAT_EXPECTED), 15)
+        self.assertEqual(len(BLOAT_EXPECTED), 16)
         # Game Assistant is not restricted any more (S25 Ultra session 22343aacdd4e1d6c: the in-game
         # sidebar did not appear while it was); the list stays empty and only undoes old records.
         self.assertEqual(extract_pkg_list('RESTRICT_PKGS'), [])
@@ -387,7 +388,7 @@ class Telemetry(unittest.TestCase):
 
 
 class Bloat(unittest.TestCase):
-    def test_off_disables_all_15_and_is_idempotent(self):
+    def test_off_disables_all_16_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as d:
             g = Guest(d, bloat_mode='off')
             for p in BLOAT_EXPECTED:
@@ -397,7 +398,7 @@ class Bloat(unittest.TestCase):
             for p in BLOAT_EXPECTED:
                 self.assertTrue(g.disabled(p), p)
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED)
-            self.assertIn('OPPO bloat apps: 15 turned off, 0 failed', log)
+            self.assertIn('OPPO bloat apps: 16 turned off, 0 failed', log)
             log2 = g.run()
             self.assertEqual(g.assert_exit0, 0)
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED)
@@ -418,7 +419,7 @@ class Bloat(unittest.TestCase):
             self.assertNotIn(f'disable-user --user 0 {BLOAT_EXPECTED[0]}', g.calls('pm'))
             self.assertNotIn(f'disable-user --user 0 {BLOAT_EXPECTED[1]}', g.calls('pm'))
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED[2:])
-            self.assertIn('OPPO bloat apps: 13 turned off, 0 failed', log)
+            self.assertIn('OPPO bloat apps: 14 turned off, 0 failed', log)
 
     def test_off_failure_logged_not_recorded(self):
         with tempfile.TemporaryDirectory() as d:
