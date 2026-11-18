@@ -172,3 +172,115 @@ def update_make_overlays_text(
         loc = match.end()
         source = source[:loc] + site + ", " + source[loc:]
     return source
+
+def resolve_and_update_for_image(
+    *, system_img, make_overlays_path, build_label, dexdump_path,
+    debugfs_path, extract_erofs_path,
+):
+    """Inspect a merged ext4 guest and register native patch sites.
+
+    An unexpected binary aborts before modifying make-overlays.sh. The ELF
+    resolvers are intentionally conservative, and passing synthetic unit tests
+    does NOT certify a new ROM's native binaries or host isolation.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+    import subprocess
+    import tempfile
+
+    image = Path(system_img)
+    overlays = Path(make_overlays_path)
+    if not image.is_file() or not overlays.is_file():
+        raise FileNotFoundError("system.img or make-overlays.sh missing")
+    with image.open("rb") as src:
+        src.seek(1080)
+        if src.read(2) != b"\x53\xef":
+            raise ValueError("Guest must be a raw ext4 system.img (not EROFS/super/sparse)")
+    debugfs = str(debugfs_path)
+    # The final guest is ext4. The dexdump and EROFS tools are used elsewhere
+    # in the pipeline and are intentionally not needed to resolve ELF files.
+    with tempfile.TemporaryDirectory(prefix="oneos-native-sites-") as tmp:
+        root = Path(tmp)
+
+        def dump(image_path: str, filename: str):
+            target = root / filename
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", filename):
+                raise ValueError("Invalid extraction filename")
+            proc = subprocess.run(
+                [debugfs, "-R", f"dump {image_path} {target}", str(image)],
+                capture_output=True, text=True,
+            )
+            if not target.is_file() or target.stat().st_size == 0:
+                return None
+            if proc.returncode:
+                raise RuntimeError(f"debugfs failed extracting {image_path}: {proc.stderr.strip()}")
+            return target.read_bytes()
+
+        vold = dump("/system/bin/vold", "vold")
+        incremental = dump("/system/lib64/service.incremental.so", "service.incremental.so")
+        sf = dump("/system/bin/surfaceflinger", "surfaceflinger")
+        if vold is None or incremental is None or sf is None:
+            raise ValueError("Missing native vold, service.incremental.so or surfaceflinger")
+        apex_candidates = (
+            ("crashrecovery-google.apex", "/system/apex/com.google.android.crashrecovery.apex"),
+            ("crashrecovery-aosp.apex", "/system/apex/com.android.crashrecovery.apex"),
+            ("crashrecovery-google-compressed.apex", "/system/apex/com.google.android.crashrecovery_compressed.apex"),
+            ("crashrecovery-aosp.capex", "/system/apex/com.android.crashrecovery.capex"),
+        )
+        apexes = [(n, raw) for n, p in apex_candidates if (raw := dump(p, n)) is not None]
+        if len(apexes) != 1:
+            raise ValueError(f"Expected exactly one crashrecovery APEX, found {[x[0] for x in apexes]}")
+        apex_name, apex = apexes[0]
+
+        name_off, try_off = resolve_vold_sites(vold)
+        inc_segs = _segments(incremental)
+        inc_refs = _name_references(incremental, inc_segs, b"vold")
+        inc_names = sorted({name for _, name in inc_refs})
+        if len(inc_names) != 1:
+            raise ValueError(f"incremental: expected one referenced vold service name, found {len(inc_names)}")
+        inc_off = inc_names[0]
+        sf_off = resolve_surfaceflinger_cbz_site(sf)
+
+        if vold[name_off:name_off + 6] != b"\x00vold\x00":
+            raise ValueError("vold string bytes changed")
+        if incremental[inc_off:inc_off + 6] != b"\x00vold\x00":
+            raise ValueError("incremental service string bytes changed")
+        if vold[try_off:try_off + 4] != bytes.fromhex("b3060036"):
+            raise ValueError("vold try_start patch bytes changed")
+        if sf[sf_off:sf_off + 4] != bytes.fromhex("680200b4"):
+            raise ValueError("surfaceflinger patch bytes changed")
+
+        sha = lambda blob: hashlib.sha256(blob).hexdigest()
+        sf_sha12 = hashlib.sha1(sf).hexdigest()[:12]
+        original = overlays.read_text(encoding="utf-8")
+        updated = update_make_overlays_text(
+            original, build_label=build_label,
+            vold_sha=sha(vold), inc_sha=sha(incremental),
+            crash_apex_name=apex_name, crash_sha=sha(apex),
+            vold_name_off=name_off, vold_try_off=try_off,
+            inc_name_off=inc_off, sf_sha12=sf_sha12, sf_cbz_off=sf_off,
+        )
+        if updated != original:
+            # Only write after all sites and expected bytes validate.
+            fd, scratch = tempfile.mkstemp(prefix=".make-overlays-", dir=overlays.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as out:
+                    out.write(updated)
+                os.chmod(scratch, overlays.stat().st_mode & 0o777)
+                os.replace(scratch, overlays)
+            finally:
+                if os.path.exists(scratch):
+                    os.unlink(scratch)
+        return {
+            "vold_sha256": sha(vold),
+            "vold_name_offset": name_off,
+            "vold_try_start_offset": try_off,
+            "incremental_sha256": sha(incremental),
+            "incremental_name_offset": inc_off,
+            "surfaceflinger_sha1_prefix": sf_sha12,
+            "surfaceflinger_cbz_offset": sf_off,
+            "crashrecovery_apex": apex_name,
+            "crashrecovery_sha256": sha(apex),
+            "overlay_table_updated": updated != original,
+        }
