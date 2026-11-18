@@ -1553,7 +1553,8 @@ add)
                 echo "$key=$value" >> "$NEW"
             fi
         done
-        echo "guest_props: ColorOS fingerprint icon ${fp_loc}px from the bottom (${fp_mb}mm + ${fp_ah}mm/2 at ${fp_dpi} dpi), $fp_type sensor"
+        echo "guest_props: ColorOS fingerprint icon ${fp_loc}px from the bottom (${fp_mb}mm + ${fp_ah}mm/2 at ${fp_dpi} dpi)"
+        [ "$fp_type" = ultrasonic ] || echo "guest_props: ColorOS fingerprint sensor kind: $fp_type (One UI's floating features)"
         # The panel lights the spot itself (local HBM, as One UI's fingerprint service reads it): ColorOS's lock
         # screen then keeps its brightness instead of its dim layer (patch-coloros-keyguard-lhbm.py, 0.5.20
         # upstream; only an optical sensor with the panel's local HBM).

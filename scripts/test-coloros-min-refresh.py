@@ -44,7 +44,7 @@ def dq_end(text, i):
 def extract_activator_refresh_snippet():
     a = SWITCH.index(ACT_START) + len(ACT_START)
     act = SWITCH[a:dq_end(SWITCH, a)]
-    r_start = act.index('            $BB nsenter -t \\$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate 120.0\n')
+    r_start = act.index('            $BB nsenter -t \\$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate $GUEST_REFRESH\n')
     oti_marker = "            $BB nsenter -t \\$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys oplus_vrr_service oti false >/dev/null 2>&1 && echo '[UI Activator] refresh rate: ColorOS touch idle off'\n"
     r_end = act.index(oti_marker, r_start) + len(oti_marker)
     refresh_block = act[r_start:r_end]
@@ -104,7 +104,7 @@ esac
 
 
 class Harness:
-    def __init__(self, d, guest_oplus='1'):
+    def __init__(self, d, guest_oplus='1', guest_refresh='120.0'):
         self.root = Path(d)
         self.stage = self.root / 'stage'
         (self.stage / 'data').mkdir(parents=True)
@@ -115,6 +115,8 @@ class Harness:
         self.bb.write_text(FAKE_BB)
         self.bb.chmod(0o755)
         self.guest_oplus = str(guest_oplus)
+        # oneos_switch.sh sets it from One UI's physical modes (0.5.20 upstream); 120.0 unless the panel tops out lower.
+        self.guest_refresh = guest_refresh
 
     def expand(self):
         gen = self.root / 'expand.sh'
@@ -122,6 +124,7 @@ class Harness:
         env = {
             **os.environ,
             'GUEST_OPLUS': self.guest_oplus,
+            'GUEST_REFRESH': self.guest_refresh,
             'STAGE': str(self.stage),
             'BB': str(self.bb),
         }
@@ -173,6 +176,19 @@ class ColorOsMinRefreshTest(unittest.TestCase):
                 h = Harness(d, guest_oplus=oplus)
                 expanded = h.expand()
                 self.assertIn('peak_refresh_rate 120.0', expanded)
+
+    def test_a_90_hz_panel_gets_its_own_peak_and_min_not_120(self):
+        # 0.5.20 upstream: [120, 120] on a 90 Hz panel is an impossible vote and Android falls back to 60 Hz.
+        with tempfile.TemporaryDirectory() as d:
+            h = Harness(d, guest_oplus='0', guest_refresh='90.0')
+            h.boot()
+            self.assertEqual('90.0', h.get_setting('peak_refresh_rate'))
+            self.assertEqual('90.0', h.get_setting('min_refresh_rate'))
+        with tempfile.TemporaryDirectory() as d:
+            h = Harness(d, guest_oplus='1', guest_refresh='90.0')
+            h.boot()
+            self.assertEqual('90.0', h.get_setting('peak_refresh_rate'))
+            self.assertEqual('null', h.get_setting('min_refresh_rate'))
 
     def test_coloros_fresh_stage_keeps_null_and_sets_marker(self):
         with tempfile.TemporaryDirectory() as d:
