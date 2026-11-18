@@ -77,6 +77,26 @@ def _name_references(data: bytes, segments, name: bytes):
     return refs
 
 
+# Pre-existing, independently pinned OneOS ColorOS 17 build. Its try_start
+# TBZ is separated from MOV w19, w0 by other instructions. The resolver's
+# adjacency heuristic is therefore insufficient; use the exact reviewed
+# binary identity and byte-verified patch offsets, never a guessed location.
+KNOWN_VOLD_SHA256_SITES = {
+    "3df4d13bb9636cb9833a6ee2027d189c6acfd25b0404058ca130afb164a55896": (0x104e6, 0x78b64),
+}
+
+
+def _known_vold_sites(data: bytes, sha256_hex: str) -> tuple[int, int] | None:
+    sites = KNOWN_VOLD_SHA256_SITES.get(sha256_hex)
+    if sites is None:
+        return None
+    name_off, try_off = sites
+    if (data[name_off:name_off + 6] != b"\x00vold\x00" or
+            data[try_off:try_off + 4] != bytes.fromhex("b3060036")):
+        raise ValueError("Hash-pinned ColorOS vold changed expected patch bytes")
+    return sites
+
+
 def resolve_vold_sites(data: bytes) -> tuple[int, int]:
     """Find a unique service-name reference and validated try_start branch.
 
@@ -99,6 +119,12 @@ def resolve_vold_sites(data: bytes) -> tuple[int, int]:
                 data[off - 4:off] == bytes.fromhex("f303002a")):
                 candidates.append(off)
     if len(candidates) != 1:
+        import hashlib
+        known = _known_vold_sites(data, hashlib.sha256(data).hexdigest())
+        if known is not None:
+            if known[0] != names[0]:
+                raise ValueError("Known vold service reference does not match pinned location")
+            return known
         raise ValueError(f"vold: expected one validated try_start TBZ, found {len(candidates)}")
     return names[0], candidates[0]
 
