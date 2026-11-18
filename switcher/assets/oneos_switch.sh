@@ -4010,6 +4010,11 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # hot thresholds [38, 40, 42, 45, 47, 60, 90] (diag_90_thermal.txt), so 47 C is
 # its CRITICAL point, and peak skin in four sessions was 47.5 C: the old 47.5
 # and 50 C steps were at or past CRITICAL before they acted.
+# Missing skin reading (dumpsys timed out): while the skin level is above 0 it
+# is held and the skin history is left as it was for that tick, instead of
+# dropping to the CPU level alone (skin 46, none, none, 44 gave levels
+# 1,0,0,1: full clock for two ticks, then capped again; review of the Curve B
+# branch).
 # Curve B CPU-zone thresholds: CPU level can never exceed level 2 (level 3
 # 50% CPU, 525 MHz GPU, boost off are skin >= 48.0 C only); level 1 at >= 82 C
 # for 3 consecutive readings, level 2 at >= 90 C for 4 consecutive readings;
@@ -4189,9 +4194,9 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         fi
         ct=''; cz=''
         [ $HEAT_CAP = 1 ] && cpu_temp
-        if [ -z \"\$sk\" ] || [ $HEAT_CAP != 1 ]; then sk_prev2=''; sk_prev=''; fi
+        if { [ -z \"\$sk\" ] && [ \$slvl = 0 ]; } || [ $HEAT_CAP != 1 ]; then sk_prev2=''; sk_prev=''; fi
         if [ -z \"\$ct\" ] || [ $HEAT_CAP != 1 ]; then cpu_prev3=0; cpu_prev2=0; cpu_prev=0; fi
-        if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
+        if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ] || [ \$slvl != 0 ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
             if [ -n \"\$sk\" ]; then
                 sr=\$(awk -v s=\"\$sk\" -v p=\"\$sk_prev\" -v q=\"\$sk_prev2\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 46.5; t[3] = 48; pn = (p == \"\" ? 999 : p + 0); qn = (q == \"\" ? 999 : q + 0); while (l < 3 && s >= t[l + 1]) l++; hd = l; while (hd > 0 && s < t[hd] - 2) hd--; while (l > 0 && s < t[l] - 2 && pn < t[l] - 2 && qn < t[l] - 2) l--; if (hd < l) printf \"%d %g %s, %s\\n\", l, t[hd + 1] - 2, (p == \"\" ? \"-\" : p), (q == \"\" ? \"-\" : q); else print l }')
@@ -4201,6 +4206,9 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 esac
                 sk_prev2=\$sk_prev; sk_prev=\$sk
                 new=\$slvl; why=\"skin \$sk C\"
+            elif [ \$slvl != 0 ]; then
+                # No skin reading this tick: hold the skin level, history untouched.
+                new=\$slvl; why=\"skin none, held at level \$slvl\"
             fi
             [ -n \"\$ap\" ] && why=\"\${why:+\$why, }ap \$ap C\"
             if [ -n \"\$ct\" ]; then

@@ -244,6 +244,30 @@ sleep() {{
         self.assertIn('level 2 to 0: full clock', log[8])
         self.assertEqual(['0 ', '0 ', '1 ', '2 ', '2 ', '2 ', '0 '], [l[:2] for l in self.trace()])
 
+    def test_a_missed_skin_reading_holds_the_skin_level(self):
+        # dumpsys timed out twice: the level used to drop to the CPU level alone
+        # (1,0,0,1: full clock for two ticks, then capped again).
+        self.run_loop([(46.0, {}), (None, {}), (None, {}), (44.0, {})])
+        self.assertEqual(['1 ', '1 ', '1 ', '1 '], [l[:2] for l in self.trace()])
+
+        # The skin history is left alone on a missed tick: 46.5 (L2), 44.0 (held,
+        # first of three), a miss, then 44.0 and 44.0 are the second and third.
+        self.fresh()
+        log = self.run_loop([(46.5, {}), (44.0, {}), (None, {}), (44.0, {}), (44.0, {})], held=True)
+        self.assertEqual(['2 ', '2 ', '2 ', '2 ', '1 '], [l[:2] for l in self.trace()])
+        self.assertIn('level 2 to 1: 80%', log[-2])
+
+        # A miss at level 0 stays level 0, and a missed skin with a hot CPU still
+        # caps on the CPU alone.
+        self.fresh()
+        log = self.run_loop([(None, {})] * 2)
+        self.assertEqual(['cpu 40.0 C (cpu-0-0): no cap'], [l.split(' ', 1)[1] for l in log])
+        self.assertEqual(['0 ', '0 '], [l[:2] for l in self.trace()])
+        self.fresh()
+        self.run_loop([(46.0, {'cpu-1-3': 92000}), (None, {'cpu-1-3': 92000}), (None, {'cpu-1-3': 92000}),
+                       (None, {'cpu-1-3': 92000})])
+        self.assertEqual(['1 ', '1 ', '1 ', '2 '], [l[:2] for l in self.trace()])
+
     def test_skin_still_takes_one_reading(self):
         log = self.run_loop([(46.4, {})])
         self.assertIn('skin 46.4 C, cpu 40.0 C (cpu-0-0), level 0 to 1: 80%', log[0])
