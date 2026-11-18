@@ -2091,6 +2091,8 @@ if in_image /system/framework/oplus-framework.jar; then
         python3 -I "$ROOT/scripts/check-dex.py" "$WORK/oplus-framework_patched.jar"
         mv -f "$WORK/oplus-framework_patched.jar" "$OUT/oplus-framework_patched.jar"
         chmod 644 "$OUT/oplus-framework_patched.jar"
+        # PackageSets.OPLUS_FRAMEWORK_IMS requires this guard JAR's checksum.
+        (cd "$OUT" && sha256sum oplus-framework_patched.jar) >> "$OUT/guards.txt"
     fi
     rm -rf "$WORK/of" "$WORK/of-rebuilt.jar" "$WORK/ofdex" "$WORK/oplus-framework.jar"
 fi
