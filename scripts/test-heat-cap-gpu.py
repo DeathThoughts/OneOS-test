@@ -137,6 +137,70 @@ class HeatCapGpuTest(unittest.TestCase):
             env={**os.environ, 'STAGE': str(self.stage)}, capture_output=True, text=True)
         self.assertEqual('719', top.stdout.strip(), top.stderr)
 
+    def _run_s25_loop(self, rounds):
+        kgsl = self.r / 'sys/class/kgsl/kgsl-3d0/gpu_available_frequencies'
+        kgsl.write_text('1200000000 1050000000 900000000 734000000 525000000 350000000\n')
+        (self.r / 'sys/kernel/gpu/gpu_max_clock').write_text('1200\n')
+        for p in (self.r / 'sys/devices/system/cpu/cpufreq').iterdir():
+            (p / 'scaling_max_freq').write_text((p / 'cpuinfo_max_freq').read_text())
+        (self.stage / 'data').mkdir(exist_ok=True)
+        (self.stage / 'guest_mntns').write_text('1\n')
+        tz = self.r / 'sys/class/thermal/thermal_zone0'
+        tz.mkdir(parents=True)
+        (tz / 'type').write_text('cpu-1-1-1\n')
+        (tz / 'temp').write_text('40000\n')
+        for n, (skin, cpu_mc) in enumerate(rounds, 1):
+            (self.r / f'round{n}').write_text(
+                f"printf '%s' '{skin}' > {self.stage}/skin\n"
+                f"echo {cpu_mc} > {tz}/temp\n")
+        render = subprocess.run(
+            ['sh', '-c', 'printf "%s" "' + heat_cap_block() + '"'],
+            env={**os.environ, 'BB': 'busybox', 'STAGE': str(self.stage), 'HEAT_CAP': '1',
+                 'HEAT_CAP_CPU': '1', 'GUEST_THERMAL_MAP': '0', 'HOST_LOW_POWER': '0'},
+            capture_output=True, text=True)
+        self.assertEqual(0, render.returncode, render.stderr)
+        loop = render.stdout.replace('/sys/', str(self.r) + '/sys/')
+        stubs = f'''
+pidof() {{ echo 1234; }}
+timeout() {{
+    s=$(cat {self.stage}/skin 2>/dev/null)
+    echo 'Current temperatures from HAL:'
+    [ -n "$s" ] && echo "	Temperature{{mValue=$s, mType=3, mName=SKIN, mStatus=0}}"
+    echo 'Current cooling devices from HAL:'
+}}
+n=1
+sleep() {{
+    echo "$(cat {self.stage}/heat_cap.level) $(cat {self.r}/sys/kernel/gpu/gpu_max_clock)" >> {self.stage}/gpu_trace
+    n=$((n + 1))
+    if [ -f {self.r}/round$n ]; then . {self.r}/round$n; else : > {self.stage}/data/oneos_rec_stop; fi
+}}
+. {self.r}/round1
+'''
+        done = subprocess.run(['sh', '-c', stubs + loop], capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, done.returncode, done.stderr)
+        return ((self.stage / 'heat_cap.log').read_text(),
+                (self.stage / 'gpu_trace').read_text().splitlines())
+
+    def test_header_lists_curve_b_skin_thresholds(self):
+        log, _ = self._run_s25_loop([(40.0, 40000)])
+        self.assertIn('45, 47.5, 50 C skin', log)
+        self.assertIn('82, 90 C on the hottest CPU thermal zone', log)
+
+    def test_s25_core_105_spike_caps_gpu_at_734_never_525(self):
+        log, trace = self._run_s25_loop([(41.0, 105000)] * 5)
+        self.assertEqual(['0 1200', '0 1200', '1 900', '2 734', '2 734'], trace)
+        self.assertIn('gpu=734/1200', log)
+        self.assertNotIn('gpu=525/1200', log)
+        self.assertNotIn('50%:', log)
+
+    def test_s25_skin_50_drops_gpu_to_525_and_hysteresis_restores_1200(self):
+        log, trace = self._run_s25_loop([(50.0, 40000), (40.0, 40000), (40.0, 40000), (40.0, 40000)])
+        self.assertEqual(['3 525', '3 525', '3 525', '0 1200'], trace)
+        self.assertIn('level 0 to 3: 50%:', log)
+        self.assertIn('gpu=525/1200', log)
+        self.assertIn('level 3 to 0: full clock:', log)
+        self.assertIn('gpu=1200/1200', log)
+
 
 if __name__ == '__main__':
     unittest.main()

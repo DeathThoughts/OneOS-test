@@ -3974,10 +3974,12 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # skin. Every 10 s the guest's SKIN temperature (its thermal service on the
 # shared HAL, read as the sampler reads it) sets a level: from 45 C (Samsung's
 # SEVERE) every cpufreq policy's scaling_max_freq is 80% of its
-# cpuinfo_max_freq, from 47 C 65%, from 50 C 50%; a level ends 2 C under where
-# it began. The first reading under 45 C lifts a cap One UI left (run 45: half
-# clock for a whole session); after that the policies are written only when the
-# level changes, each change logged in $STAGE/heat_cap.log. Only scaling_max_freq
+# cpuinfo_max_freq, from 47.5 C 65%, from 50 C 50%; going up takes one reading,
+# and stepping down needs three consecutive readings (30 s) 2 C under the
+# level's threshold (< 43, < 45.5, < 48 C), logging down-holds as "held". The
+# first reading under 45 C lifts a cap One UI left (run 45: half clock for a
+# whole session); after that the policies are written only when the level
+# changes, each change logged in $STAGE/heat_cap.log. Only scaling_max_freq
 # (the sysfs request) is written: the kernel's own thermal limits stay. It stops
 # with the return (data/oneos_rec_stop) or when the guest's namespace record is
 # gone, giving the policies their full clock back if it had capped them;
@@ -3992,18 +3994,20 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # hottest CPU thermal zone (/sys/class/thermal, millidegrees; Qualcomm's cpu-*
 # and cpuss-*, Exynos and Tensor's BIG, MID and LITTLE, any other *cpu*; never
 # a gpu, ddr, modem, npu, battery or skin zone) and keeps a CPU level of its
-# own: 1 from 75 C, 2 from 80, 3 from 85, each ending 3 C under where it began.
-# A higher CPU level is entered only on three readings running (30 s) at or
-# above its threshold, so a single spike (a compile, an app start) does not cap
-# the clocks for the minutes the hysteresis then holds them (review by the
-# mlcraze5 fork, 2026-11-16); the skin levels still take one reading.
-# Two readings were not enough (S25 Ultra, Snapdragon 8 Elite, ColorOS 17,
-# session bceaef29fb128e94): single zones (cpu-1-1-1, cpu-1-0-1, cpu-0-2-1)
-# read 94-106 C for two readings and 64-79 C at the third, five times in
-# 3.5 min, while Samsung's AP sensor read 52-53 C and skin 44-46 C; each went
-# to level 3 (50%) and turned the guest boost off. The S23's 84-88 C above
-# held for minutes, so three readings still catch it. A reading that would
-# have gone up but was held back is logged once ("held"), with the two before.
+# own. Earlier (75/80/85 C, 3-reading entry, 1-reading exit; review by the
+# mlcraze5 fork, 2026-11-16; bceaef29fb128e94), S25 Ultra
+# coloros17-findx9u-in-1105 sessions db475ad5017133c4 (stage/heat_cap.log line
+# 8: 03:34:19 skin 41.8 C, ap 62.6 C, cpu 104.3 C (cpu-1-1-1), level 0 to 3:
+# 50%) and a12bf19e1931e81a still had peak skin 47.5 C across the four
+# sessions while every level-3 entry came from a CPU core zone, dropping GPU
+# to 525 MHz and turning oneos_guest_boost WALT input boost off, while core
+# temps cooled 15-35 C in one 10 s tick and the cap saw-toothed at 1.40-1.86
+# changes/min.
+# Curve B CPU-zone thresholds: CPU level can never exceed level 2 (level 3
+# 50% CPU, 525 MHz GPU, boost off are skin >= 50.0 C only); level 1 at >= 82 C
+# for 3 consecutive readings, level 2 at >= 90 C for 4 consecutive readings;
+# stepping down requires 3 consecutive readings 4 C under the threshold (< 78 C,
+# < 86 C). Both up-holds and down-holds log "held" with the readings before.
 # The higher of the two levels is applied, with the same table; with no skin
 # reading the CPU level alone. The guest thermal status below stays on skin.
 # Samsung's AP sensor (the whole application processor, mName=AP in the same
@@ -4050,9 +4054,9 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     F=$STAGE/heat_cap.log
     CFL=/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit
     if [ $HEAT_CAP = 1 ]; then
-        echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (2 C hysteresis)\" > \$F
+        echo \"# \$(date) OneOS heat cap: from 45, 47.5, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)\" > \$F
         if [ $HEAT_CAP_CPU = 1 ]; then
-            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (three readings running to go up, 3 C hysteresis); the higher level applies\" >> \$F
+            echo \"# and from 82, 90 C on the hottest CPU thermal zone for levels 1 and 2 only (three and four readings running to go up, three 4 C under to step down); the higher level applies\" >> \$F
         else
             echo \"# CPU thermal zones not read (ONEOS_HEAT_CAP_CPU=0): skin only\" >> \$F
         fi
@@ -4124,10 +4128,11 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     lvl=0; first=1; tl=-1; lp=''
     # The level for the guest boost below: no boost at level 3.
     [ $HEAT_CAP = 1 ] && echo 0 > $STAGE/heat_cap.level
-    # cpu_prev, cpu_prev2: the two CPU readings before this one (milli C), not
-    # the cap percent pct below, which the same loop sets (review of de66247 by
-    # the mlcraze5 fork, 2026-11-16; three readings: S25 Ultra, bceaef29fb128e94).
-    slvl=0; clvl=0; cpu_prev=0; cpu_prev2=0
+    # slvl/clvl history: sk_prev, sk_prev2 (skin C) and cpu_prev..cpu_prev3 (milli C).
+    # Curve B (S25 Ultra, coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
+    # a12bf19e1931e81a): skin enters immediately and waits 3 readings (-2 C) to leave;
+    # CPU needs 3 >= 82 C for L1, 4 >= 90 C for L2 (max), and 3 (-4 C) to leave.
+    slvl=0; clvl=0; sk_prev=''; sk_prev2=''; cpu_prev=0; cpu_prev2=0; cpu_prev3=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -4153,24 +4158,30 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 tl=\$nt
             fi
         fi
-        cpu_prev2=\$cpu_prev; cpu_prev=\${ct:-0}; ct=''; cz=''
+        ct=''; cz=''
         [ $HEAT_CAP = 1 ] && cpu_temp
+        if [ -z \"\$sk\" ] || [ $HEAT_CAP != 1 ]; then sk_prev2=''; sk_prev=''; fi
+        if [ -z \"\$ct\" ] || [ $HEAT_CAP != 1 ]; then cpu_prev3=0; cpu_prev2=0; cpu_prev=0; fi
         if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
             if [ -n \"\$sk\" ]; then
-                slvl=\$(awk -v s=\"\$sk\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47; t[3] = 50; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 2) l--; print l }')
+                sr=\$(awk -v s=\"\$sk\" -v p=\"\$sk_prev\" -v q=\"\$sk_prev2\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47.5; t[3] = 50; pn = (p == \"\" ? 999 : p + 0); qn = (q == \"\" ? 999 : q + 0); while (l < 3 && s >= t[l + 1]) l++; hd = l; while (hd > 0 && s < t[hd] - 2) hd--; while (l > 0 && s < t[l] - 2 && pn < t[l] - 2 && qn < t[l] - 2) l--; if (hd < l) printf \"%d %g %s, %s\\n\", l, t[hd + 1] - 2, (p == \"\" ? \"-\" : p), (q == \"\" ? \"-\" : q); else print l }')
+                slvl=\${sr%% *}
+                case \"\$sr\" in
+                    *' '*) sr=\${sr#* }; echo \"\$(date +%T) skin \$sk C\$ap_c held: needs three readings under \${sr%% *} C (before: \${sr#* })\" >> \$F ;;
+                esac
+                sk_prev2=\$sk_prev; sk_prev=\$sk
                 new=\$slvl; why=\"skin \$sk C\"
             fi
             [ -n \"\$ap\" ] && why=\"\${why:+\$why, }ap \$ap C\"
             if [ -n \"\$ct\" ]; then
-                # Up only as far as this reading and the two before all reach; down on this one.
-                # h: where this reading alone would go; above l, it was held back, and the
-                # awk adds that threshold (C) and the two readings before (C) for the log.
-                cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; h = l; while (h < 3 && s >= t[h + 1]) h++; while (l < 3 && s >= t[l + 1] && p >= t[l + 1] && q >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; if (h > l) printf \"%d %d %d.%d, %d.%d\\n\", l, t[h] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
+                # Curve B: up 3 readings >= 82 C (L1), 4 >= 90 C (L2 max, never L3); down 3 < -4 C.
+                cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v r=\$cpu_prev3 -v l=\$clvl 'BEGIN { t[1] = 82000; t[2] = 90000; hu = 0; while (hu < 2 && s >= t[hu + 1]) hu++; if (l < 1 && s >= t[1] && p >= t[1] && q >= t[1]) l = 1; if (l < 2 && s >= t[2] && p >= t[2] && q >= t[2] && r >= t[2]) l = 2; hd = l; while (hd > 0 && s < t[hd] - 4000) hd--; while (l > 0 && s < t[l] - 4000 && p < t[l] - 4000 && q < t[l] - 4000) l--; if (hu > l && hu == 1) printf \"%d three over %d %d.%d, %d.%d\\n\", l, t[1] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else if (hu > l && hu == 2) printf \"%d four over %d %d.%d, %d.%d, %d.%d\\n\", l, t[2] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100), int(r / 1000), int(r % 1000 / 100); else if (hd < l) printf \"%d three under %d %d.%d, %d.%d\\n\", l, (t[hd + 1] - 4000) / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
                 clvl=\${cr%% *}
                 case \"\$cr\" in
-                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\$ap_c held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
+                    *' '*) cr=\${cr#* }; hn=\${cr%% *}; cr=\${cr#* }; hd=\${cr%% *}; cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\$ap_c held: needs \$hn readings \$hd \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
                 esac
+                cpu_prev3=\$cpu_prev2; cpu_prev2=\$cpu_prev; cpu_prev=\$ct
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
@@ -4202,7 +4213,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         sleep 10
     done
 " </dev/null >/dev/null 2>&1 &
-    [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 1 ] && echo "Heat cap: on (from 45 C skin or 75 C on the CPU; every 10 s to $STAGE/heat_cap.log)"
+    [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 1 ] && echo "Heat cap: on (from 45 C skin or 82 C on the CPU; every 10 s to $STAGE/heat_cap.log)"
     [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 0 ] && echo "Heat cap: on (from 45 C skin, CPU zones off by ONEOS_HEAT_CAP_CPU=0; every 10 s to $STAGE/heat_cap.log)"
     [ $HEAT_CAP = 1 ] || echo "Heat cap: off (ONEOS_HEAT_CAP=0, Cool down when hot off in Advanced)"
     [ $GUEST_THERMAL_MAP = 1 ] && echo "Guest thermal status: from the skin temperature, the HAL status from 56 C ($STAGE/heat_cap.log)"
