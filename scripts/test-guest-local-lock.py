@@ -8,7 +8,7 @@ guest's own in front of that guard: a PIN, pattern or password whose record live
 the phone's gatekeeper, weaver or keystore.
 
 Here:
-- the patcher on a small smali tree with the shapes of the ColorOS 17 framework: the seven changes,
+- the patcher on a small smali tree with the shapes of the ColorOS 17 framework: the six changes,
   the guard in both of its forms (as guest_no_gatekeeper.py writes it and as a decoded built jar
   shows it), a framework of another shape left untouched, a second run, a half-patched tree, a tree with the earlier enrollment token;
 - the helper class on the JVM through a small driver: set, check, change, remove, the waits after
@@ -456,7 +456,7 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(text.count('\n.method '), text.count('\n.end method'))
         helper = SMALI.read_text()
         calls = set(re.findall(re.escape(HELPER) + r'->([A-Za-z]+\([^)]*\)\S+)', text))
-        self.assertEqual({c.split('(')[0] for c in calls}, {'change', 'verify', 'credentialType', 'hat'})
+        self.assertEqual({c.split('(')[0] for c in calls}, {'change', 'verify', 'credentialType'})
         for call in calls:
             self.assertRegex(helper, r'(?m)^\.method public static (declared-synchronized )?'
                              + re.escape(call) + '$')
@@ -530,8 +530,6 @@ class PatcherTest(unittest.TestCase):
             'no strong-auth field': dict(lss=lss_text().replace('.field private final mStrongAuth:',
                                                                 '.field private final mAuth:')),
             'no FRP check': dict(lss=lss_text().replace(' enforceFrpNotActive()V', ' frpCheck()V')),
-            'no handle method': dict(lss=lss_text().replace(' verifyGatekeeperPasswordHandle(',
-                                                           ' verifyHandle(')),
             'static verify': dict(lss=lss_text().replace('.method private doVerifyCredential(',
                                                          '.method private static doVerifyCredential(')),
             'no timeout response': dict(lss=lss_text().replace('->fromTimeout(', '->fromError(')),
@@ -637,7 +635,6 @@ public final class GuestLockDriver {
     static int type() { return OneOSGuestLock.credentialType(0, -1); }
     static long check(byte[] c) { return OneOSGuestLock.verify(c, E, W); }
     static int set(int type, byte[] c, byte[] saved) { return OneOSGuestLock.change(type, c, saved, E, W); }
-    static byte[] hat(long h, int u) { return OneOSGuestLock.hat(h, u); }
 
     public static void main(String[] a) throws Exception {
         dir = new File(a[1]);
@@ -660,7 +657,6 @@ public final class GuestLockDriver {
         eq(-1, check(PIN), "no lock: a check is not handled");
         eq(-1, set(-1, null, null), "no lock: a removal is not handled");
         yes(!has(RECORD) && !has(TRIES), "nothing written without a lock");
-        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "no lock: the guest handle gets no token");
         eq(0, set(3, b("123"), null), "three digits are refused");
         eq(0, set(2, PIN, null), "an unknown type is refused");
         eq(0, set(0, PIN, null), "type 0 is refused");
@@ -671,11 +667,6 @@ public final class GuestLockDriver {
         eq(3, type(), "the type is PIN");
         eq(-1, OneOSGuestLock.credentialType(10, -1), "other users keep the native type");
         eq(0, check(PIN), "the PIN matches");
-        byte[] token = hat(OneOSGuestLock.HANDLE, 0);
-        yes(token != null && token.length == OneOSGuestLock.HAT_LENGTH,
-                "a set lock answers its handle with a token");
-        yes(hat(OneOSGuestLock.HANDLE, 10) == null, "another user: no token");
-        yes(hat(OneOSGuestLock.HANDLE + 1, 0) == null, "another handle: no token");
         eq(1, check(OTHER), "a wrong PIN, no wait yet");
         eq(1, check(null), "null is wrong");
         eq(1, check(new byte[0]), "empty is wrong");
@@ -704,7 +695,6 @@ public final class GuestLockDriver {
 
         eq(1, set(-1, null, b("0124")), "removed with the pattern");
         eq(-1, type(), "no lock again");
-        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "removed: no token");
         eq(-1, check(PASS), "a check is not handled again");
         yes(!has(RECORD) && !has(TRIES) && !has(RECORD + ".tmp"), "no files left");
         restart();
@@ -903,10 +893,9 @@ class HelperTest(unittest.TestCase):
 
 class SourceTest(unittest.TestCase):
     def test_the_smali_belongs_to_the_java_source(self):
-        # Git stores this Java source as LF, but Windows checkouts may convert
-        # it to CRLF. The checked-in smali records the canonical LF source hash.
-        source = JAVA.read_bytes().replace(b'\r\n', b'\n')
-        want = hashlib.sha256(source).hexdigest()
+        # Git stores this Java source as LF, but Windows checkouts may convert it to CRLF (upstream 0.5.20).
+        # The checked-in smali records the canonical LF source hash.
+        want = hashlib.sha256(JAVA.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
         head = SMALI.read_text().split('\n# static fields', 1)[0]
         self.assertIn(f'# from OneOSGuestLock.java (sha256 {want});', head,
                       'run scripts/build-guest-lock-smali.sh after changing the Java source')
