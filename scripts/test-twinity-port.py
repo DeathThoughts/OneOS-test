@@ -198,6 +198,21 @@ class TwinityElfSitesTest(unittest.TestCase):
         self.assertEqual(0x1000 + 6, name_off)
         self.assertEqual(0x2000 + 20, try_off)
 
+    def test_hash_pinned_coloros_vold_sites_require_exact_bytes(self):
+        # The real binary SHA-256 and offsets are independently recorded in
+        # make-overlays.sh. This tests the guarded lookup, not synthetic hash
+        # equivalence to the complete ColorOS ELF.
+        digest = "3df4d13bb9636cb9833a6ee2027d189c6acfd25b0404058ca130afb164a55896"
+        elf = bytearray(0x78b68)
+        elf[0x104e6:0x104ec] = b"\x00vold\x00"
+        elf[0x78b64:0x78b68] = bytes.fromhex("b3060036")
+        self.assertEqual((0x104e6, 0x78b64),
+                         twinity_elf_sites._known_vold_sites(bytes(elf), digest))
+        self.assertIsNone(twinity_elf_sites._known_vold_sites(bytes(elf), "0" * 64))
+        elf[0x78b64] ^= 1
+        with self.assertRaisesRegex(ValueError, "changed expected patch bytes"):
+            twinity_elf_sites._known_vold_sites(bytes(elf), digest)
+
     def test_unknown_vold_produces_bounded_diagnostics_without_patch(self):
         rodata = b"prefix\x00vold\x00suffix"
         adrp = 0x90000081
