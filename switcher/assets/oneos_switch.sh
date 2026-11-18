@@ -4135,8 +4135,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     cam_limit() {
         if [ \"$HOST_LOW_POWER\" = 0 ] && [ -w \$CFL ] && [ \"\$(cat \$CFL 2>/dev/null)\" != -1 ] && ! pidof com.sec.android.app.camera >/dev/null 2>&1; then
             v=\$(cat \$CFL 2>/dev/null)
-            echo -1 > \$CFL 2>/dev/null && echo \"\$v\" > $STAGE/cpufreq_max_limit.released
-            echo \"\$(date +%T) camera gone: cpufreq_max_limit \$v -> \$(cat \$CFL 2>/dev/null)\" >> \$F
+            echo -1 > \$CFL 2>/dev/null && echo \"\$v\" > $STAGE/cpufreq_max_limit.released && echo \"\$(date +%T) camera gone: cpufreq_max_limit \$v -> \$(cat \$CFL 2>/dev/null)\" >> \$F
         fi
     }
     # The hottest CPU thermal zone: ct in millidegrees, cz its type; both
