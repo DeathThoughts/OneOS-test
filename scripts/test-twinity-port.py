@@ -64,6 +64,33 @@ class LpUnpackAndOdmAiTest(unittest.TestCase):
             self.assertIn("mi_ext", summary["excluded_hardware"])
             self.assertIn("vendor_dlkm", summary["excluded_hardware"])
 
+    def test_lpunpack_falls_back_to_pinned_mystic_adapter(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td)
+            super_img = work / "super.img"
+            super_img.write_bytes(b"test")
+            guest = work / "guest"
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                raw = Path(command[-1])
+                (raw / "system_a.img").write_bytes(b"system")
+                (raw / "vendor_a.img").write_bytes(b"vendor")
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch.object(build_mod.shutil, "which", return_value=None), \
+                 patch.object(build_mod.subprocess, "run", side_effect=fake_run):
+                result = build_mod.lpunpack_super(super_img, guest)
+            self.assertEqual(
+                str(SCRIPT_DIR / "unpack-twinity-super.py"),
+                calls[0][1],
+            )
+            self.assertEqual(b"system", (guest / "system.img").read_bytes())
+            self.assertFalse((guest / "vendor.img").exists())
+            self.assertIn("vendor", result["excluded_hardware"])
+
     def test_validate_odm_ai_tar_enforces_guest_prepare_rules(self):
         with tempfile.TemporaryDirectory() as td:
             good = Path(td) / "good.tar"
