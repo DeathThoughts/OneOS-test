@@ -575,6 +575,38 @@ class BiometricGate(unittest.TestCase):
                 names = sorted(p.name for p in (top / 'etc/permissions').glob('*.xml')) if (top / 'etc').exists() else []
                 self.assertEqual(names, ['android.hardware.biometrics.face.xml', 'android.hardware.fingerprint.xml'] if written else [])
 
+    def run_udfps_block(self, sensor):
+        # The in-display sensor's place block of guest_prepare.sh, on a fake sysfs and floating_feature.xml:
+        # an ultrasonic sensor (the S25 Ultra) gets no oneos_udfps, an optical one (the A36) does.
+        start = PREPARE.index('    UPOS=$(head')
+        end = PREPARE.index("    # An optical sensor with the panel's local HBM")
+        block = PREPARE[start:end]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            ff, pos = d / 'floating_feature.xml', d / 'position'
+            ff.write_text('<SecFloatingFeatureSet><SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>'
+                          f'{sensor},sensor_position=1</SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES></SecFloatingFeatureSet>')
+            pos.write_text('15.0,0.0,10.0,10.0,9.0,1.0\n')
+            stage = d / 'stage'
+            (stage / 'data/system/users').mkdir(parents=True)
+            (stage / 'display_host.txt').write_text(
+                'DisplayDeviceInfo{"Built-in Screen": type INTERNAL FLAG_ALLOWED_TO_BE_DEFAULT_DISPLAY '
+                'physicalDisplayWidth=1080 physicalDisplayHeight=2340 density 420, 400.0 x 400.0 dpi}\n')
+            block = block.replace('/system/etc/floating_feature.xml', str(ff)).replace('/sys/class/fingerprint/fingerprint/position', str(pos))
+            r = subprocess.run(['sh', '-c', f'STAGE="{stage}"; BB=true; chown() {{ :; }}\n' + block],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            f = stage / 'data/system/oneos_udfps'
+            return (f.read_text().strip() if f.exists() else None), r.stdout
+
+    def test_the_sensor_place_is_given_only_for_an_optical_sensor(self):
+        place, out = self.run_udfps_block('ultrasonic')
+        self.assertIsNone(place)
+        self.assertIn('in-display sensor place not given (not an optical sensor)', out)
+        place, out = self.run_udfps_block('optical')
+        self.assertEqual(place, '540 2025 71')
+        self.assertIn('in-display sensor at 540 2025 71', out)
+
 
 if __name__ == '__main__':
     unittest.main()
