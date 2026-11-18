@@ -926,7 +926,7 @@ def publish_release(
         f"- **Branch**: `experiment/gemini-twinity-4c`\n"
         f"- **Target Device**: Base Samsung Galaxy S23 (`SM-S911*`, `dm1q`, `SM8550`) — **Experimental / Untested on physical phone**\n"
         f"- **Guest Archive (`{image_info['gz_name']}`)**: `{image_info['gz_bytes']:,}` bytes · SHA-256 `{image_info['gz_sha256']}`\n"
-        f"- **Unpacked `system.raw`**: `{image_info['raw_bytes']:,}` bytes · SHA-256 `{image_info['raw_sha256']}`\n\n"
+        f"- **Unpacked ext4 `system.img`**: `{image_info['raw_bytes']:,}` bytes · SHA-256 `{image_info['raw_sha256']}`\n\n"
         f"### Phone-Only Join & Import Steps\n"
         f"1. Download all `{GUEST_ARCHIVE_NAME}.00*` parts below into `Download/` on your phone:\n"
         f"{part_lines}\n"
