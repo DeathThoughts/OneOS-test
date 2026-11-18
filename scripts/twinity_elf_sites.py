@@ -103,6 +103,61 @@ def resolve_vold_sites(data: bytes) -> tuple[int, int]:
     return names[0], candidates[0]
 
 
+
+def diagnose_vold_sites(data: bytes) -> dict[str, object]:
+    """Bounded, nonpatching diagnostics for an unfamiliar AArch64 vold ELF.
+
+    Return offsets and instruction words only; never publish copyrighted
+    executable images. Nothing in this report authorizes a binary patch.
+    """
+    import hashlib
+
+    segments = _segments(data)
+    refs = _name_references(data, segments, b"vold")
+    exact = []
+    tbz_w19 = []
+    mov_w19 = []
+    for a, b, _, flags in segments:
+        if not flags & 1:
+            continue
+        for off in range(a, b - 3, 4):
+            inst = struct.unpack_from("<I", data, off)[0]
+            if inst == 0x360006b3:
+                exact.append(off)
+            if (inst & 0x7f00001f) == 0x36000013:
+                tbz_w19.append(off)
+            if inst == 0x2a0003f3:
+                mov_w19.append(off)
+    mov_set = set(mov_w19)
+    candidates = []
+    for off in tbz_w19:
+        near_mov = [p for p in (off - 4, off - 8, off - 12, off - 16)
+                    if p in mov_set]
+        if near_mov:
+            candidates.append({
+                "offset": f"0x{off:x}",
+                "instruction": data[off:off + 4].hex(),
+                "preceding_mov_offsets": [f"0x{x:x}" for x in near_mov],
+                "window": data[max(0, off - 16):off + 8].hex(),
+            })
+    return {
+        "warning": "DIAGNOSTIC ONLY. DO NOT PATCH WITHOUT INSTRUCTION FLOW ANALYSIS.",
+        "vold_sha256": hashlib.sha256(data).hexdigest(),
+        "file_size": len(data),
+        "service_string_references": [{
+            "adrp_offset": f"0x{ref:x}", "string_offset": f"0x{name:x}",
+        } for ref, name in refs[:32]],
+        "service_reference_count": len(refs),
+        "expected_tbz_exact_count": len(exact),
+        "expected_tbz_offsets": [f"0x{x:x}" for x in exact[:32]],
+        "tbz_w19_count": len(tbz_w19),
+        "mov_w19_count": len(mov_w19),
+        "nearby_mov_tbz_candidate_count": len(candidates),
+        "nearby_mov_tbz_candidates": candidates[:64],
+        "truncated": len(candidates) > 64 or len(refs) > 32 or len(exact) > 32,
+    }
+
+
 def resolve_surfaceflinger_cbz_site(data: bytes) -> int:
     """Locate the guarded Qualcomm composer extension call shape."""
     _segments(data)
