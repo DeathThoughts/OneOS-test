@@ -45,28 +45,35 @@ class HeatCapGpuTest(unittest.TestCase):
         gpu = self.r / 'sys/kernel/gpu'
         gpu.mkdir(parents=True)
         (gpu / 'gpu_max_clock').write_text('220\n')
+        cfl = self.r / 'sys/devices/system/cpu/cpufreq_limit'
+        cfl.mkdir(parents=True)
+        (cfl / 'cpufreq_max_limit').write_text('1958400\n')
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def inner(self):
+    def inner(self, low_power='0'):
         """The loop's script as the switch's shell hands it to `sh -c`, up to the loop."""
         render = subprocess.run(
             ['sh', '-c', 'printf "%s" "' + heat_cap_block() + '"'],
             env={**os.environ, 'BB': 'busybox', 'STAGE': str(self.stage), 'HEAT_CAP': '1',
-                 'GUEST_THERMAL_MAP': '0', 'HOST_LOW_POWER': '0'},
+                 'GUEST_THERMAL_MAP': '0', 'HOST_LOW_POWER': low_power},
             capture_output=True, text=True)
         self.assertEqual(0, render.returncode, render.stderr)
         text = render.stdout.replace('/sys/', str(self.r) + '/sys/')
         return text[:text.index('    lvl=0; first=1;')]
 
-    def run_inner(self, commands):
-        done = subprocess.run(['sh', '-c', self.inner() + '\n' + commands], capture_output=True, text=True)
+    def run_inner(self, commands, low_power='0'):
+        done = subprocess.run(['sh', '-c', self.inner(low_power=low_power) + '\n' + commands],
+                              capture_output=True, text=True)
         self.assertEqual(0, done.returncode, done.stderr)
         return done.stdout
 
     def gpu(self):
         return (self.r / 'sys/kernel/gpu/gpu_max_clock').read_text().strip()
+
+    def cfl(self):
+        return (self.r / 'sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit').read_text().strip()
 
     def test_the_rendered_loop_is_valid_shell(self):
         render = subprocess.run(
@@ -200,6 +207,24 @@ sleep() {{
         self.assertIn('gpu=525/1200', log)
         self.assertIn('level 3 to 0: full clock:', log)
         self.assertIn('gpu=1200/1200', log)
+
+    def test_cam_limit_releases_only_after_camera_exits_and_respects_low_power(self):
+        self.run_inner('pidof() { echo 5678; }\ncam_limit')
+        self.assertEqual('1958400', self.cfl())
+        self.assertFalse((self.stage / 'cpufreq_max_limit.released').exists())
+        self.assertNotIn('camera gone', (self.stage / 'heat_cap.log').read_text())
+
+        self.run_inner('pidof() { return 1; }\ncam_limit', low_power='1')
+        self.assertEqual('1958400', self.cfl())
+        self.assertFalse((self.stage / 'cpufreq_max_limit.released').exists())
+        self.assertNotIn('camera gone', (self.stage / 'heat_cap.log').read_text())
+
+        self.run_inner('pidof() { return 1; }\ncam_limit\ncam_limit')
+        self.assertEqual('-1', self.cfl())
+        self.assertEqual('1958400', (self.stage / 'cpufreq_max_limit.released').read_text().strip())
+        log = (self.stage / 'heat_cap.log').read_text()
+        self.assertIn('camera gone: cpufreq_max_limit 1958400 -> -1', log)
+        self.assertEqual(1, log.count('camera gone:'))
 
 
 if __name__ == '__main__':

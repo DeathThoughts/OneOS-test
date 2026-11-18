@@ -4018,6 +4018,16 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # thresholds.
 # ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
 # key): skin only, as before.
+# Post-camera cpufreq_max_limit release (S25 Ultra, coloros17-findx9u-in-1105,
+# session a12bf19e1931e81a): at 04:03:33 Samsung Camera ran and set
+# cpufreq_max_limit=1958400; after it closed, policy0/policy6 stayed clamped at
+# 1996800/1958400 for 92 s (04:03:39-04:05:11) because oneos_heat_cap only
+# clears $CFL inside full() at level 0. On every tick at level 1 or 2, when
+# HOST_LOW_POWER=0, $CFL is writable and != -1, and com.sec.android.app.camera
+# is no longer running (pidof), cam_limit() writes -1 to $CFL, records the
+# released value in $STAGE/cpufreq_max_limit.released just like full(), and
+# logs "camera gone: cpufreq_max_limit <old> -> -1". While the camera runs or
+# when One UI's power saving (HOST_LOW_POWER=1) is on, $CFL is never touched.
 # Guest thermal status (Pixel; owner's go, 2026-11-06). Samsung's thermal HAL
 # told Pixel CRITICAL at 49.6 C skin, and Pixel's JobScheduler holds every
 # ordinary job from SEVERE on (ThermalStatusRestriction, fixed in its code):
@@ -4105,6 +4115,13 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         gpu_at 100
         echo \"\$(date +%T) \$1: full clock:\$c\" >> \$F
     }
+    cam_limit() {
+        if [ \"$HOST_LOW_POWER\" = 0 ] && [ -w \$CFL ] && [ \"\$(cat \$CFL 2>/dev/null)\" != -1 ] && ! pidof com.sec.android.app.camera >/dev/null 2>&1; then
+            v=\$(cat \$CFL 2>/dev/null)
+            echo -1 > \$CFL 2>/dev/null && echo \"\$v\" > $STAGE/cpufreq_max_limit.released
+            echo \"\$(date +%T) camera gone: cpufreq_max_limit \$v -> \$(cat \$CFL 2>/dev/null)\" >> \$F
+        fi
+    }
     # The hottest CPU thermal zone: ct in millidegrees, cz its type; both
     # empty when none reads. Builtins only (read, case): it runs every 10 s
     # over every zone (about a hundred on a Snapdragon 8 Gen 2).
@@ -4185,6 +4202,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
+            case \$new in 1|2) cam_limit ;; esac
             if [ \"\$new\" = 0 ] && [ \$first = 1 ]; then
                 capped=''
                 for p in /sys/devices/system/cpu/cpufreq/policy*; do

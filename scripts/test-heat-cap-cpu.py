@@ -53,31 +53,50 @@ class HeatCapCpuTest(unittest.TestCase):
             z.mkdir(parents=True)
             (z / 'type').write_text(ty + '\n')
             (z / 'temp').write_text('40000\n')
+        cfl_dir = self.r / 'sys/devices/system/cpu/cpufreq_limit'
+        cfl_dir.mkdir(parents=True)
+        (cfl_dir / 'cpufreq_max_limit').write_text('-1\n')
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def round_script(self, skin, zones, ap=None):
+    def round_script(self, skin, zones, ap=None, camera=None, cfl=None):
         lines = [f"printf '%s' '{'' if skin is None else skin}' > {self.stage}/skin",
                  f"printf '%s' '{'' if ap is None else ap}' > {self.stage}/ap"]
         for i, ty in enumerate(ZONES):
             lines.append(f"echo {zones.get(ty, 40000)} > {self.r}/sys/class/thermal/thermal_zone{i}/temp")
+        if camera is True:
+            lines.append(f": > {self.stage}/camera_on")
+        elif camera is False:
+            lines.append(f"rm -f {self.stage}/camera_on")
+        if cfl is not None:
+            lines.append(f"echo {cfl} > {self.r}/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit")
         return '\n'.join(lines) + '\n'
 
-    def run_loop(self, rounds, cpu='1', held=False, apu=None, thermal_map='0'):
-        """rounds: (skin C or None, {zone type: millidegrees}[, AP C]) per 10 s round.
+    def run_loop(self, rounds, cpu='1', held=False, apu=None, thermal_map='0', cfl='-1', low_power='0', camera=False):
+        """rounds: (skin C or None, {zone type: millidegrees}[, AP C, camera, cfl]) per 10 s round.
         apu: an APU temperature listed before AP every round, which must not be read as AP."""
+        (self.r / 'sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit').write_text(f'{cfl}\n')
+        if camera:
+            (self.stage / 'camera_on').write_text('')
+        else:
+            (self.stage / 'camera_on').unlink(missing_ok=True)
         for n, rnd in enumerate(rounds, 1):
             (self.r / f'round{n}').write_text(self.round_script(*rnd))
         render = subprocess.run(
             ['sh', '-c', 'printf "%s" "' + heat_cap_block() + '"'],
             env={**os.environ, 'BB': 'busybox', 'STAGE': str(self.stage), 'HEAT_CAP': '1',
-                 'HEAT_CAP_CPU': cpu, 'GUEST_THERMAL_MAP': thermal_map, 'HOST_LOW_POWER': '0'},
+                 'HEAT_CAP_CPU': cpu, 'GUEST_THERMAL_MAP': thermal_map, 'HOST_LOW_POWER': low_power},
             capture_output=True, text=True)
         self.assertEqual(0, render.returncode, render.stderr)
         loop = render.stdout.replace('/sys/', str(self.r) + '/sys/')
         stubs = f'''
-pidof() {{ echo 1234; }}
+pidof() {{
+    case "$1" in
+        com.sec.android.app.camera) [ -f {self.stage}/camera_on ] && echo 5678 ;;
+        *) echo 1234 ;;
+    esac
+}}
 timeout() {{
     s=$(cat {self.stage}/skin 2>/dev/null)
     echo 'Current temperatures from HAL:'
@@ -90,6 +109,7 @@ timeout() {{
 n=1
 sleep() {{
     echo "$(cat {self.stage}/heat_cap.level) $(cat {self.r}/sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq | tr '\\n' ' ')" >> {self.stage}/trace
+    echo "$(cat {self.r}/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit) $([ -f {self.stage}/cpufreq_max_limit.released ] && cat {self.stage}/cpufreq_max_limit.released || echo -)" >> {self.stage}/cfl_trace
     n=$((n + 1))
     if [ -f {self.r}/round$n ]; then . {self.r}/round$n; else : > {self.stage}/data/oneos_rec_stop; fi
 }}
@@ -110,6 +130,13 @@ sleep() {{
 
     def freq(self, name='policy0'):
         return (self.r / 'sys/devices/system/cpu/cpufreq' / name / 'scaling_max_freq').read_text().strip()
+
+    def cfl(self):
+        return (self.r / 'sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit').read_text().strip()
+
+    def cfl_trace(self):
+        """cpufreq_max_limit and cpufreq_max_limit.released (or '-') after each round."""
+        return (self.stage / 'cfl_trace').read_text().splitlines()
 
     def test_the_rendered_loop_is_valid_shell(self):
         for cpu in ('0', '1'):
@@ -356,6 +383,36 @@ sleep() {{
         header = (self.stage / 'heat_cap.log').read_text()
         self.assertIn('from 45, 47.5, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)', header)
         self.assertIn('82, 90 C on the hottest CPU thermal zone for levels 1 and 2 only (three and four readings running to go up, three 4 C under to step down)', header)
+
+    def test_cam_limit_releases_at_level_1_and_2_after_camera_exits(self):
+        # Level 1: held at 1958400 while camera runs, released once camera exits, no duplicate on tick 3.
+        log = self.run_loop([(45.5, {}, None, True), (45.5, {}, None, False), (45.5, {}, None, False)],
+                            cfl='1958400')
+        self.assertEqual(['1958400 -', '-1 1958400', '-1 1958400'], self.cfl_trace())
+        self.assertEqual('-1', self.cfl())
+        self.assertEqual('1958400', (self.stage / 'cpufreq_max_limit.released').read_text().strip())
+        gone = [l for l in log if 'camera gone' in l]
+        self.assertEqual(1, len(gone), log)
+        self.assertIn('camera gone: cpufreq_max_limit 1958400 -> -1', gone[0])
+        self.assertIn('level 0 to 1: 80%', log[0])
+        self.assertNotIn('cpufreq_max_limit=', log[-1])
+
+        # Level 2: leftover cpufreq_max_limit is also released when camera is gone.
+        self.fresh()
+        log = self.run_loop([(48.0, {})], cfl='1958400', camera=False)
+        self.assertEqual(['-1 1958400'], self.cfl_trace())
+        self.assertEqual('-1', self.cfl())
+        self.assertEqual('1958400', (self.stage / 'cpufreq_max_limit.released').read_text().strip())
+        self.assertIn('camera gone: cpufreq_max_limit 1958400 -> -1', log[0])
+        self.assertIn('level 0 to 2: 65%', log[1])
+        self.assertNotIn('cpufreq_max_limit=', log[-1])
+
+    def test_low_power_leaves_cam_limit_untouched(self):
+        log = self.run_loop([(45.5, {})], cfl='1958400', low_power='1', camera=False)
+        self.assertEqual(['1958400 -'], self.cfl_trace())
+        self.assertEqual('1958400', self.cfl())
+        self.assertFalse((self.stage / 'cpufreq_max_limit.released').exists())
+        self.assertFalse(any('camera gone' in l for l in log), log)
 
 
 if __name__ == '__main__':
