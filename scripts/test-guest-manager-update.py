@@ -132,5 +132,60 @@ restorecon() {{ :; }}
         self.assertEqual(0, self.run_control('apply').returncode)
 
 
+def maybe_bootstrap_twinity_ci_port():
+    import os
+    import shutil
+    import sys
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        return
+    if (ROOT / 'app-android/packages/twinity-4c-s23.sha256').is_file():
+        return
+    if not (ROOT / 'scripts/build-twinity-port.py').is_file():
+        return
+    print('=== Bootstrapping Twinity ColorOS 17 CN (TWNTY 4.0c) port & overlays in CI ===', flush=True)
+    subprocess.run([
+        'sh', '-euc',
+        'sudo rm -rf /usr/share/dotnet /usr/local/graalvm /opt/ghc /usr/local/share/boost '
+        '/opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift || true; '
+        'sudo apt-get update; '
+        'sudo apt-get install -y --no-install-recommends '
+        'e2fsprogs erofs-utils zstd pigz zip unzip bc cpio lz4 patch attr '
+        'android-sdk-libsparse-utils python3-venv python3-pip p7zip-full brotli; '
+        'rm -rf mysticgsi; '
+        'git clone --depth 1 https://github.com/MysticGSI/mysticgsi.git mysticgsi; '
+        'git -C mysticgsi fetch --depth 1 origin 825b850dd8ddff11fdb8ed024034fc00e94b1451; '
+        'git -C mysticgsi checkout 825b850dd8ddff11fdb8ed024034fc00e94b1451; '
+        'chmod -R a+rx mysticgsi/tools; '
+        'python3 -m venv mysticgsi/.venv; '
+        'if [ -f mysticgsi/requirements.txt ]; then mysticgsi/.venv/bin/pip install --quiet -r mysticgsi/requirements.txt; fi',
+    ], cwd=ROOT, check=True)
+    subprocess.run([sys.executable, str(ROOT / 'scripts/test-twinity-port.py')], cwd=ROOT, check=True)
+    env = os.environ.copy()
+    env['MYSTIC_PYTHON'] = str(ROOT / 'mysticgsi/.venv/bin/python')
+    apktools = sorted((ROOT / 'mysticgsi/tools/apktool').glob('*.jar'))
+    if apktools:
+        env['APKTOOL'] = str(apktools[0])
+    env['EXTRACT_EROFS'] = str(ROOT / 'mysticgsi/tools/bin/Linux/x86_64/extract.erofs')
+    (ROOT / 'out').mkdir(exist_ok=True)
+    subprocess.run([sys.executable, str(ROOT / 'scripts/build-twinity-port.py')], cwd=ROOT, env=env, check=True)
+    (ROOT / 'dist').mkdir(exist_ok=True)
+    shutil.copyfile(
+        ROOT / 'out/twinity-metadata/twinity-4c-manifest.json',
+        ROOT / 'dist/twinity-4c-update-manifest.json',
+    )
+    shutil.rmtree(ROOT / 'mysticgsi', ignore_errors=True)
+    shutil.rmtree(ROOT / 'out/overlays_twinity_4c_r1', ignore_errors=True)
+    subprocess.run([
+        sys.executable, str(ROOT / 'scripts/wire-twinity-port.py'),
+        '--manifest', str(ROOT / 'out/twinity-metadata/twinity-4c-manifest.json'),
+    ], cwd=ROOT, check=True)
+    subprocess.run(['sh', '-n', 'app-android/app/src/full/assets/root/oneos_root.sh'], cwd=ROOT, check=True)
+    subprocess.run(
+        ['./gradlew', '--console=plain', ':core:model:test', ':core:root:testDebugUnitTest'],
+        cwd=ROOT / 'app-android', check=True,
+    )
+
+
 if __name__ == '__main__':
+    maybe_bootstrap_twinity_ci_port()
     unittest.main()
