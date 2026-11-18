@@ -78,23 +78,29 @@ def _name_references(data: bytes, segments, name: bytes):
 
 
 def resolve_vold_sites(data: bytes) -> tuple[int, int]:
-    """Find the service name and guarded try_start branch in vold.
+    """Find a unique service-name reference and validated try_start branch.
 
-    The try_start instruction must match the previously studied TBZ->B
-    transformation, otherwise we refuse to patch.
+    The existing ColorOS builds keep the service registration string and
+    try_start branch in different functions, sometimes megabytes apart.
+    Never rely on their proximity or on fixed offsets.
     """
     segs = _segments(data)
+    references = _name_references(data, segs, b"vold")
+    names = sorted({name for _, name in references})
+    if len(names) != 1:
+        raise ValueError(f"vold: expected one referenced NUL-prefixed service name, found {len(names)}")
+
     candidates = []
-    for ref_off, name_off in _name_references(data, segs, b"vold"):
-        # In known vold builds the guarded call is nearby; do not patch an
-        # unrelated TBZ in the binary merely because its bytes match.
-        for off in range(ref_off + 8, min(ref_off + 100, len(data) - 3), 4):
-            if data[off:off + 4] == bytes.fromhex("b3060036"):
-                candidates.append((name_off, off))
-    candidates = list(dict.fromkeys(candidates))
+    for a, b, _, flags in segs:
+        if not flags & 1:
+            continue
+        for off in range(a + 4, b - 3, 4):
+            if (data[off:off + 4] == bytes.fromhex("b3060036") and
+                data[off - 4:off] == bytes.fromhex("f303002a")):
+                candidates.append(off)
     if len(candidates) != 1:
-        raise ValueError(f"vold: expected one referenced service/try_start pair, got {len(candidates)}")
-    return candidates[0]
+        raise ValueError(f"vold: expected one validated try_start TBZ, found {len(candidates)}")
+    return names[0], candidates[0]
 
 
 def resolve_surfaceflinger_cbz_site(data: bytes) -> int:
