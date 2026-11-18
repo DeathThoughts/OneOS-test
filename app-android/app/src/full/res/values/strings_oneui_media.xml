@@ -6,8 +6,17 @@
     would promise it in every system.
 -->
 <resources>
-    <string name="oneui_media_title">One UI photos in ColorOS</string>
-    <string name="oneui_media_summary">Shows One UI\'s albums in ColorOS, each as its own album, read-only: ColorOS cannot edit or delete them. Nothing in One UI\'s Android folder is shared. Applies at the next switch or guest restart.</string>
+    <!-- One UI files in the other system: one setting with three modes (owner's decision of 2026-11-18, after the S25 Ultra; it replaces the two switches). -->
+    <string name="oneui_files_title">One UI files in the other system</string>
+    <string name="oneui_files_off">Off</string>
+    <string name="oneui_files_view">View One UI photos (read-only)</string>
+    <string name="oneui_files_full">Full access (read and write)</string>
+    <string name="oneui_files_off_summary">The other system keeps its own storage and sees none of One UI\'s files.</string>
+    <string name="oneui_files_view_summary">Recommended. Shows One UI\'s albums in the other system, each as its own album, read-only: it cannot edit or delete them. Nothing in One UI\'s Android folder is shared. Applies at the next switch or guest restart.</string>
+    <string name="oneui_files_full_summary">One UI\'s DCIM, Pictures, Download, Documents, Movies and Music appear in the other system, and apps there can change and delete them. Applies at the next switch or guest restart.</string>
+    <string name="oneui_files_full_confirm_title">Full access?</string>
+    <string name="oneui_files_full_confirm_message">Apps in the other system can change and delete your real photos, downloads, documents, videos and music. Use only if you need it.</string>
+    <string name="oneui_files_full_confirm_run">Turn on</string>
     <string name="oneui_media_asking">Asking root…</string>
     <string name="oneui_media_problem">Nothing was changed: %1$s</string>
     <string name="oneui_media_unread">Not read: %1$s</string>
