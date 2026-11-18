@@ -17,6 +17,7 @@ Here, on small smali trees with the shapes of the ColorOS 17 framework (image 11
 - R8's field owner and a framework without BaseClientMonitor's getters;
 - make-overlays.sh runs the patcher next to guest_no_biometric_cleanup.py.
 """
+import os
 import re
 import subprocess
 import sys
@@ -486,8 +487,93 @@ class Wiring(unittest.TestCase):
         # word, so the sets built before it keep starting.
         header = next(l for l in text.split('\n') if 'echo "# framework overlays built by' in l)
         self.assertRegex(header, r'\bbiometric, biowrites,')
-        for script in ('guest_prepare.sh', 'oneos_switch.sh', 'guest_google.sh'):
+        for script in ('oneos_switch.sh', 'guest_google.sh'):
             self.assertNotIn('biowrites', (ROOT / 'switcher/assets' / script).read_text(), script)
+
+
+PREPARE = (ROOT / 'switcher/assets/guest_prepare.sh').read_text()
+R6_GUARDS = ROOT / 'app-android/packages/x9u-in-1105-sultra.guards.txt'
+# What the upstream 0.5.20 sets (nothing-a, nothing-f8u) write: a body line, and a first line without our word.
+UPSTREAM_STYLE = '''# framework overlays built by scripts/make-overlays.sh with the storage, installd, biometric and pdb guards
+# guest vold name: gvld (vold_patched and services_patched.jar)
+# biometric-remove guard: services_patched.jar never removes a fingerprint or face template
+00000000  services_patched.jar
+'''
+NEITHER = '''# framework overlays built by scripts/make-overlays.sh with the storage, installd, power and biometric guards
+# a later line that only mentions biowrites in passing does not count: the header names the guard
+00000000  services_patched.jar
+'''
+
+
+def bio_guard(guards, biometrics=None):
+    # guest_prepare.sh computes BIO_GUARD once; the feature files and the carry of One UI's enrollment
+    # lists both read it, so they cannot disagree. Runs that computation as the phone does.
+    start = PREPARE.index('BIO_GUARD=0\n')
+    end = PREPARE.index('\nfi\n', start) + 4
+    with tempfile.TemporaryDirectory() as d:
+        if guards is not None:
+            (Path(d) / 'guards.txt').write_text(guards)
+        env = {k: v for k, v in os.environ.items() if k != 'ONEOS_GUEST_BIOMETRICS'}
+        env['STAGE'] = d
+        if biometrics is not None:
+            env['ONEOS_GUEST_BIOMETRICS'] = biometrics
+        r = subprocess.run(['sh', '-ec', PREPARE[start:end] + '\necho "$BIO_GUARD"'], env=env,
+                           capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+class BiometricGate(unittest.TestCase):
+    def test_our_r6_guards_pass_the_gate(self):
+        # x9u-in-1105-sultra names the biowrites guard in its first line and has no "# biometric-remove guard" line
+        self.assertNotIn('# biometric-remove guard', R6_GUARDS.read_text())
+        self.assertEqual(bio_guard(R6_GUARDS.read_text()), '1')
+
+    def test_an_upstream_style_removal_guard_passes_too(self):
+        self.assertEqual(bio_guard(UPSTREAM_STYLE), '1')
+
+    def test_neither_guard_does_not_carry(self):
+        self.assertEqual(bio_guard(NEITHER), '0')
+        self.assertEqual(bio_guard(None), '0')
+        for name in ('hyper-f8u', 'lineage', 'pixel-f8u'):
+            guards = (ROOT / f'app-android/packages/{name}.guards.txt').read_text()
+            self.assertEqual(bio_guard(guards), '0', name)
+
+    def test_the_switch_off_wins(self):
+        self.assertEqual(bio_guard(R6_GUARDS.read_text(), biometrics='0'), '0')
+        self.assertEqual(bio_guard(UPSTREAM_STYLE, biometrics='0'), '0')
+        self.assertEqual(bio_guard(R6_GUARDS.read_text(), biometrics='1'), '1')
+
+    def test_one_gate_for_the_feature_files_and_the_carry(self):
+        # The same variable in both places, and no second copy of the check that could drift.
+        self.assertEqual(PREPARE.count("'^# biometric-remove guard'"), 1)
+        self.assertEqual(PREPARE.count('BIO_GUARD=0\n'), 1)
+        self.assertNotIn('BIO_FEATURES', PREPARE)
+        feat = PREPARE.index('bio_features_into() {')
+        self.assertIn('[ "$BIO_GUARD" = 1 ] || return 0', PREPARE[feat:feat + 120])
+        # Exactly one carry block, gated by it, with the else branch that removes copied lists.
+        self.assertEqual(PREPARE.count('BIO_DST=$STAGE/data/system/users/0'), 1)
+        carry = PREPARE.index('BIO_DST=$STAGE/data/system/users/0')
+        gate = PREPARE.rindex('\nif [ "$BIO_GUARD" = 1 ]; then\n', 0, carry)
+        self.assertLess(carry - gate, 2500)
+        block = PREPARE[gate:PREPARE.index('\nfi\n', PREPARE.index('rm -f "$STAGE/data/system/users/0"/settings_fingerprint*.xml', carry))]
+        self.assertIn('\nelse\n', block)
+        for udfps in ('oneos_udfps', 'oneos_fp_lhbm', 'oneos_fp_touch'):
+            self.assertIn(udfps, block)
+        self.assertNotIn('ONEOS_GUEST_BIOMETRICS', block)
+
+    def test_the_feature_files_are_written_only_with_the_guard(self):
+        start = PREPARE.index('bio_features_into() {')
+        end = PREPARE.index('\n}\n', start) + 3
+        for guard, written in (('0', False), ('1', True)):
+            with tempfile.TemporaryDirectory() as d:
+                top = Path(d) / 'up'
+                top.mkdir()
+                r = subprocess.run(['sh', '-ec', f'BIO_GUARD={guard}; BB=true\n' + PREPARE[start:end] + f'\nbio_features_into "{top}"'],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                names = sorted(p.name for p in (top / 'etc/permissions').glob('*.xml')) if (top / 'etc').exists() else []
+                self.assertEqual(names, ['android.hardware.biometrics.face.xml', 'android.hardware.fingerprint.xml'] if written else [])
 
 
 if __name__ == '__main__':
