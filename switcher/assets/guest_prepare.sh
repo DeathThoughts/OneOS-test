@@ -100,14 +100,14 @@ fi
 # vold_patched and service.incremental_patched.so (the guest vold as "gvld"),
 # HyperOS's miui-services_patched.jar and apprecovery.proinstaller_patched.jar,
 # and the Pixel camera client libraries.
-for need in services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
+for need in services_patched.jar $(awk '/^#/ { next } $2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
                                         $2 == "miui-services_patched.jar" || $2 == "apprecovery.proinstaller_patched.jar" ||
                                         $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
                                         $2 == "libcamera_client_patched.so" || $2 == "libcameracompatbilityinfo_patched.so" ||
                                         $2 == "libsurfaceflinger_patched.so" || $2 == "telephony-common_patched.jar" ||
                                         $2 == "vivo-services_patched.jar" || $2 == "vivo-telephony-common-platform-ex_patched.jar" ||
                                         $2 == "oplus-framework_patched.jar" { print $2 }' "$STAGE/guards.txt"); do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$STAGE/guards.txt")
+    sum=$(awk -v n="$need" '$1 !~ /^#/ && $2 == n {print $1}' "$STAGE/guards.txt")
     if [ -z "$sum" ] || [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" != "$sum" ]; then
         echo "ERROR: $STAGE/$need missing or not the guarded build in guards.txt; not starting the guest"
         exit 3
@@ -2059,7 +2059,7 @@ fi
 # services.jar that looks up "vold" next to this vold would get One UI's.
 # guest_start.sh reads oneos_vold_name and checks both names before going on.
 rm -f "$STAGE/data/oneos_vold_name"
-VG=$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")
+VG=$(awk '/^#/ { next } $2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")
 if [ "$VG" = 2 ]; then
     chmod 755 "$STAGE/vold_patched"
     chmod 644 "$STAGE/service.incremental_patched.so"
@@ -2095,7 +2095,7 @@ if [ -e "$VSJ" ] || [ -L "$VSJ" ]; then
     fi
     VJ=$(stat -c %d:%i "$VSJ" 2>/dev/null)
     if [ -z "$VJ" ] || [ "$VJ" != "$(stat -c %d:%i "$STAGE/vivo-services_patched.jar" 2>/dev/null)" ] ||
-        ! awk '$2 == "vivo-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+        ! awk '$1 !~ /^#/ && $2 == "vivo-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
         echo "ERROR: the guarded vivo-services.jar is not in place; not starting the guest"
         exit 3
     fi
@@ -2199,7 +2199,7 @@ fi
 if [ -e "$ROOTFS/system/framework/oplus-services.jar" ] || [ -L "$ROOTFS/system/framework/oplus-services.jar" ]; then
     OSJ=$(stat -c %d:%i "$ROOTFS/system/framework/oplus-services.jar" 2>/dev/null)
     if [ -z "$OSJ" ] || [ "$OSJ" != "$(stat -c %d:%i "$STAGE/oplus-services_patched.jar" 2>/dev/null)" ] ||
-        ! awk '$2 == "oplus-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+        ! awk '$1 !~ /^#/ && $2 == "oplus-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
         echo "ERROR: the guarded oplus-services.jar is not in place; not starting the guest"
         exit 3
     fi
@@ -2487,7 +2487,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
         fi
         MJ=$(stat -c %d:%i "$MIUI_FW/$j.jar" 2>/dev/null)
         if [ -z "$MJ" ] || [ "$MJ" != "$(stat -c %d:%i "$STAGE/${j}_patched.jar" 2>/dev/null)" ] ||
-            ! awk -v n="${j}_patched.jar" '$2 == n { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+            ! awk -v n="${j}_patched.jar" '$1 !~ /^#/ && $2 == n { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
             echo "ERROR: the guarded $j.jar is not in place; not starting the guest"
             exit 3
         fi
@@ -2503,7 +2503,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
     fi
     MJ=$(stat -c %d:%i "$HFW" 2>/dev/null)
     if [ -z "$MJ" ] || [ "$MJ" != "$(stat -c %d:%i "$STAGE/framework_patched.jar" 2>/dev/null)" ] ||
-        ! awk '$2 == "framework_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+        ! awk '$1 !~ /^#/ && $2 == "framework_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
         echo "ERROR: HyperOS's framework.jar with One UI's camera status format is not in place; not starting the guest"
         exit 3
     fi
