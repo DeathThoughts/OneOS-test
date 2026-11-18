@@ -1889,7 +1889,9 @@ else
     if [ "$PF_N" = 0 ]; then
         echo "Boot profiles: no patched jar with a stock jar to read; nothing to do"
     else
-        PF_KEY="$PF_KEY $(stat -c '%s %Y' "$ROOTFS/system/etc/boot-image.prof" 2>/dev/null || echo none) v1"
+        # v2: guest_start.sh keeps the profiles that were made and logs why one failed; the
+        # phone holds "<key> failed" from v1 (session db475ad5017133c4), so this builds once more.
+        PF_KEY="$PF_KEY $(stat -c '%s %Y' "$ROOTFS/system/etc/boot-image.prof" 2>/dev/null || echo none) v2"
         PF_K=$(printf '%s' "$PF_KEY" | cksum 2>/dev/null | awk '{ print $1 "-" $2 }')
         no_symlink oneos_prof
         no_symlink oneos_prof/key

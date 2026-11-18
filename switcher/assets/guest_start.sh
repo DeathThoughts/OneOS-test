@@ -3531,13 +3531,25 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
         [ -f "$P/stock/${1##*/}" ] && awk -v b="${1##*/}" '$1 == b { f = 1 } END { exit !f }' "$P/stock.list" 2>/dev/null
     }
     prof_count() { awk 'END { print NR }'; }
+    prof_fail() { # <name> <what failed>: logged with profman's own lines; that profile's files go
+        plog "$1.prof: $2"
+        # ART's tools log to logd, not stderr: session db475ad5017133c4 had only "create with
+        # the patched jars failed (exit 255)", and Full logs off keeps no logcat.
+        if command -v logcat >/dev/null 2>&1; then
+            pf_l=$(timeout 10 logcat -d -b main,system -v time -s profman 2>/dev/null | tail -n 20)
+            if [ -n "$pf_l" ]; then plog "$1.prof: profman's log:"; printf '%s\n' "$pf_l" >> "$PLOG"
+            else plog "$1.prof: no profman lines in logcat"; fi
+        fi
+        rm -f "$P/out/$1.prof" "$P/out/$1.txt"
+        return 1
+    }
     prof_make() { # <name> <boot|app> <the image's profile> <stock jar args> <patched jar args>
         pm_n=$1; pm_o=$3; pm_s=$4; pm_p=$5; pm_ty=""
         [ "$2" = boot ] && pm_ty="--output-profile-type=boot"
         timeout 120 "$PROFMAN" --dump-classes-and-methods --profile-file="$pm_o" $pm_s > "$P/out/$pm_n.txt" 2>> "$PLOG"; pm_rc=$?
-        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.txt" ]; then plog "$pm_n.prof: dump with the stock jars failed (exit $pm_rc)"; return 1; fi
+        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.txt" ]; then prof_fail "$pm_n" "dump with the stock jars failed (exit $pm_rc)"; return 1; fi
         timeout 120 "$PROFMAN" $pm_ty --create-profile-from="$P/out/$pm_n.txt" $pm_p --reference-profile-file="$P/out/$pm_n.prof" >> "$PLOG" 2>&1; pm_rc=$?
-        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.prof" ]; then plog "$pm_n.prof: create with the patched jars failed (exit $pm_rc)"; return 1; fi
+        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.prof" ]; then prof_fail "$pm_n" "create with the patched jars failed (exit $pm_rc)"; return 1; fi
         pm_c1=$(prof_count < "$P/out/$pm_n.txt")
         pm_c2=$(timeout 60 "$PROFMAN" --dump-classes-and-methods --profile-file="$pm_o" $pm_p 2>/dev/null | prof_count)
         pm_c3=$(timeout 60 "$PROFMAN" --dump-classes-and-methods --profile-file="$P/out/$pm_n.prof" $pm_p 2>/dev/null | prof_count)
@@ -3561,7 +3573,10 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
         # B1: build the profiles, once per key from guest_prepare.sh. Without a profman the
         # key is closed as failed too: guest_prepare.sh would copy the stock jars again on every
         # switch while pending stays. After a success only the .prof files are kept (the text
-        # dumps are just the way from the stock jars to the patched ones).
+        # dumps are just the way from the stock jars to the patched ones). The key is ok when
+        # at least one profile was made: in session db475ad5017133c4 boot-image.prof failed
+        # and the two good system server profiles (5.4x the entries, and 39452 from 0) were
+        # thrown away with it. B2 binds only the ones there; a failed one stays the image's.
         if [ -f "$P/pending" ] && [ ! -L "$P/pending" ] && [ ! -x "$PROFMAN" ]; then
             echo "$(cat "$P/pending" 2>/dev/null) failed" > "$P/key"
             rm -rf "$P/stock" "$P/stock.list" "$P/pending" "$P/out"
@@ -3572,31 +3587,44 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
             PK=$(cat "$P/pending" 2>/dev/null)
             plog "building profiles for $PK"
             rm -rf "$P/out"; mkdir -p "$P/out"
-            PFAIL=0; PMADE=0
+            PFAIL=0; PMADE=0; PFN=""
             if [ -f /system/etc/boot-image.prof ]; then
-                PA_S=""; PA_P=""; PN=0
+                PA_S=""; PA_P=""; PN=0; PBN=0; PNN=""
                 for e in $BCP; do
-                    if prof_patched "$e"; then PA_S="$PA_S --apk=$P/stock/${e##*/} --dex-location=$e"; PN=$((PN + 1))
+                    PBN=$((PBN + 1))
+                    if prof_patched "$e"; then PA_S="$PA_S --apk=$P/stock/${e##*/} --dex-location=$e"; PN=$((PN + 1)); PNN="$PNN ${e##*/}"
                     else PA_S="$PA_S --apk=$e --dex-location=$e"; fi
                     PA_P="$PA_P --apk=$e --dex-location=$e"
                 done
                 if [ "$PN" -gt 0 ]; then
-                    if prof_make boot-image boot /system/etc/boot-image.prof "$PA_S" "$PA_P"; then PMADE=$((PMADE + 1)); else PFAIL=1; fi
+                    # profman's boot profile fails ("Failed to add dex file to boot image profile",
+                    # exit 255) when two dex files share a profile key, the jar's name; inferred for
+                    # session db475ad5017133c4, so the log says whether that is so.
+                    plog "boot class path: $PBN entries, $PN patched:$PNN"
+                    PDUP=$(printf '%s\n' $BCP | awk -F/ 'NF { p[NR] = $0; b[NR] = $NF; n[$NF]++ } END { for (i = 1; i <= NR; i++) if (n[b[i]] > 1) printf " %s", p[i] }')
+                    if [ -n "$PDUP" ]; then plog "boot class path jars sharing a name:$PDUP"
+                    else plog "boot class path jar names: all distinct ($PBN)"; fi
+                    if prof_make boot-image boot /system/etc/boot-image.prof "$PA_S" "$PA_P"; then PMADE=$((PMADE + 1))
+                    else PFAIL=$((PFAIL + 1)); PFN="$PFN${PFN:+, }boot-image"; fi
                 fi
             fi
             for e in $SSCP; do
                 prof_patched "$e" && [ -f "$e.prof" ] || continue
                 [ -s "$P/out/${e##*/}.prof" ] && continue
-                if prof_make "${e##*/}" app "$e.prof" "--apk=$P/stock/${e##*/} --dex-location=$e" "--apk=$e --dex-location=$e"; then PMADE=$((PMADE + 1)); else PFAIL=1; fi
+                if prof_make "${e##*/}" app "$e.prof" "--apk=$P/stock/${e##*/} --dex-location=$e" "--apk=$e --dex-location=$e"; then PMADE=$((PMADE + 1))
+                else PFAIL=$((PFAIL + 1)); PFN="$PFN${PFN:+, }${e##*/}"; fi
             done
-            if [ "$PFAIL" = 0 ] && [ "$PMADE" -gt 0 ]; then
-                echo "$PK ok" > "$P/key"; PRES=ok; rm -f "$P/out"/*.txt
+            if [ "$PMADE" -gt 0 ]; then
+                echo "$PK ok" > "$P/key"; rm -f "$P/out"/*.txt
+                if [ "$PFAIL" = 0 ]; then PRES="ok ($PMADE made)"; PSUM="$PMADE profiles ok"
+                else PRES="ok ($PMADE made, $PFAIL failed: $PFN)"; PSUM="$PMADE profiles made, $PFAIL failed ($PFN)"; fi
             else
-                echo "$PK failed" > "$P/key"; rm -rf "$P/out"; PRES=failed
+                echo "$PK failed" > "$P/key"; rm -rf "$P/out"; PRES="failed ($PMADE made)"; PSUM="$PMADE profiles failed"
             fi
             rm -rf "$P/stock" "$P/stock.list" "$P/pending"
-            plog "profiles $PRES ($PMADE made) in $(( $(date +%s) - PT0 )) s"
-            PSUM="$PMADE profiles $PRES in $(( $(date +%s) - PT0 )) s"
+            PT=$(( $(date +%s) - PT0 ))
+            plog "profiles $PRES in $PT s"
+            PSUM="$PSUM in $PT s"
         fi
         # B2: bind them, every boot
         PKL=$(cat "$P/key" 2>/dev/null)
