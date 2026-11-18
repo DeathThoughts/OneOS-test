@@ -959,6 +959,8 @@ if [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
         *) tr '\0' ' ' < "/proc/$swp/cmdline" 2>/dev/null | grep -q "sound_watch.log" && kill "$swp" 2>/dev/null ;;
     esac
     [ -f "$STAGE/sound_watch.log" ] && mv -f "$STAGE/sound_watch.log" "$STAGE/sound_watch.prev"
+    # incidentd: ColorOS sessions db19aee410bd79ff and 75e538ac0ed725df show incident_helper
+    # and a second top at 40-100% CPU for 30-60 s several times a session; say what requests them.
     $BB setsid $BB timeout 7200 logcat -b main,system,crash -v threadtime -f "$STAGE/sound_watch.log" -r 2048 -n 1 -s \
         AndroidRuntime:E DEBUG:F Telecom:I Telecom_INCOMING_RINGING:V Ringtone:V RingtoneManager:V \
         VibratorManagerService:V VibratorManagerServiceExtImpl:V VibrationThread:V VibrationScaler:V \
@@ -966,7 +968,7 @@ if [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
         AHAL_DlbSpatializerEffectImpl:V DlbDap2Process:V \
         AudioFlinger:W APM_AudioPolicyManager:W AHAL:W AHAL_ModulePrimary:W AHAL_StreamPrimary_exynos:W \
         audio_hw_primary:W audio_hw_proxy2:E bluetooth-a2dp:W A2dpStateMachine:I A2dpService:I \
-        BTAudioProviderStub_2_1:I BTAudioProviderA2dpSoftware:W </dev/null >/dev/null 2>&1 &
+        BTAudioProviderStub_2_1:I BTAudioProviderA2dpSoftware:W incidentd:I </dev/null >/dev/null 2>&1 &
     echo $! > "$STAGE/sound_watch.pid"
     echo "Sound watch: $STAGE/sound_watch.log"
 fi
@@ -1851,14 +1853,36 @@ if [ "${ONEOS_GUEST_AUDIO:-1}" = "1" ]; then
     # gives an image's own value; when the key is still true and the
     # extension is not there a few seconds after the HAL restart, false for
     # the session (put back on the return with the other overrides).
+    # The extension never appears on a firmware that has none: in S25 Ultra
+    # sessions db19aee410bd79ff and 75e538ac0ed725df it was not there in any
+    # of the 10 checks, and every switch paid about 5.5 s of them in step
+    # [6/6]. So the absence is remembered per One UI build (its fingerprint
+    # from the preflight baseline, taken before any property is changed): the
+    # next switch on the same build does one check and no waiting, and a
+    # One UI update (another fingerprint) polls again.
     AVX=ro.audio.ihaladaptervendorextension_enabled
     if [ "$(getprop $AVX)" = true ] && [ -n "$RP" ]; then
-        n=0
-        while [ $n -lt 10 ] && ! timeout 5 service check android.media.audio.IHalAdapterVendorExtension/default 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.5; done
-        if ! timeout 5 service check android.media.audio.IHalAdapterVendorExtension/default 2>/dev/null | grep -q ": found"; then
+        AVXSVC=android.media.audio.IHalAdapterVendorExtension/default
+        AVXMEM="$STAGE/oneos_avx_absent"
+        AVXFP=$(sed -n 's/^\[ro\.build\.fingerprint\]: \[\(.*\)\]$/\1/p' "$STAGE/inplace_base/props" 2>/dev/null | head -n 1)
+        AVXREM=0
+        [ -n "$AVXFP" ] && [ -f "$AVXMEM" ] && [ ! -L "$AVXMEM" ] && [ "$(head -n 1 "$AVXMEM" 2>/dev/null)" = "$AVXFP" ] && AVXREM=1
+        if [ $AVXREM = 0 ]; then
+            n=0
+            while [ $n -lt 10 ] && ! timeout 5 service check $AVXSVC 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.5; done
+        fi
+        if ! timeout 5 service check $AVXSVC 2>/dev/null | grep -q ": found"; then
             grep -q "^$AVX=" "$STAGE/guest_props.overridden" 2>/dev/null || echo "$AVX=true" >> "$STAGE/guest_props.overridden"
             "$RP" -n "$AVX" false 2>/dev/null &&
-                echo "Audio: $AVX=false for the session (no IHalAdapterVendorExtension with One UI's audioserver stopped)"
+                echo "Audio: $AVX=false for the session (no IHalAdapterVendorExtension with One UI's audioserver stopped)$([ $AVXREM = 1 ] && echo ' (remembered for this firmware)')"
+            if [ $AVXREM = 0 ] && [ -n "$AVXFP" ] && [ ! -L "$AVXMEM" ] && [ ! -L "$AVXMEM.tmp" ]; then
+                # Root's own file, written whole or not at all.
+                rm -f "$AVXMEM.tmp"
+                ( umask 077; echo "$AVXFP" > "$AVXMEM.tmp" ) && mv -f "$AVXMEM.tmp" "$AVXMEM" &&
+                    echo "Audio: no IHalAdapterVendorExtension after the wait; remembered for this firmware"
+            fi
+        else
+            rm -f "$AVXMEM"
         fi
     fi
 else
@@ -2403,7 +2427,32 @@ while true; do
             fi
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system haptic_feedback_enabled 1
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate 120.0
-            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 120.0
+            # On ColorOS, panel_keeper and /data/oneos_sf_kick.sh already cure the
+            # 24 Hz start without pinning; forcing min_refresh_rate 120.0 held
+            # PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE at 120 Hz all session over
+            # OplusRefreshRateService (S25 Ultra, coloros17-findx9u-in-1105,
+            # sessions db19aee410bd79ff and 75e538ac0ed725df: diag_90_display.txt).
+            # Once per stage, delete a forced 120/120.0 floor; any other value stays.
+            if [ $GUEST_OPLUS = 1 ]; then
+                if [ -L $STAGE/data/oneos_min_refresh_reset ]; then
+                    echo '[UI Activator] min refresh rate: data/oneos_min_refresh_reset is a link, not made by OneOS; left alone'
+                elif [ ! -e $STAGE/data/oneos_min_refresh_reset ]; then
+                    MRR=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system min_refresh_rate 2>/dev/null)
+                    case \"\$MRR\" in
+                        120|120.0)
+                            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings delete system min_refresh_rate >/dev/null 2>&1 &&
+                                mkdir $STAGE/data/oneos_min_refresh_reset 2>/dev/null &&
+                                echo \"[UI Activator] min refresh rate: was min_refresh_rate=\$MRR; the forced floor reset once\" ;;
+                        '')
+                            echo '[UI Activator] min refresh rate: not read; will check next boot' ;;
+                        *)
+                            mkdir $STAGE/data/oneos_min_refresh_reset 2>/dev/null
+                            echo \"[UI Activator] min refresh rate: was min_refresh_rate=\$MRR; left alone (once per stage)\" ;;
+                    esac
+                fi
+            else
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 120.0
+            fi
             # ColorOS's touch idle (OTI) pushes SurfaceFlinger to 240/60 Hz over the
             # 120 Hz policy on this panel (run 29); also staged off by guest_prepare.sh.
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys oplus_vrr_service oti false >/dev/null 2>&1 && echo '[UI Activator] refresh rate: ColorOS touch idle off'
@@ -3769,6 +3818,12 @@ while true; do
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_panoramic_aod.sh >\"$STAGE/panoramic_aod.log\" 2>&1 || echo '[UI Activator] Wallpaper AOD setup failed; see panoramic_aod.log'
             fi
 
+            # ColorOS: OPPO's trace/log uploaders off (or back on), 2026-11-17; guest_prepare.sh wrote the script.
+            if [ -f \"$STAGE/data/oneos_oplus_telemetry.sh\" ]; then
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_oplus_telemetry.sh >\"$STAGE/oplus_telemetry.log\" 2>&1 </dev/null &
+                echo '[UI Activator] OPPO telemetry apps: started (oplus_telemetry.log)'
+            fi
+
             # ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN, session 146de99d: it ran
             # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it runs
             # in the background, so Home is never held up, and saves its marker and log in the guest data
@@ -4028,11 +4083,22 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # override-status / reset; again after a guest system_server restart). The
 # kernel's thermal limits and the cap above stay. It runs without the cap too
 # (only the status then); ONEOS_GUEST_THERMAL_MAP=0 leaves the HAL's.
+# ColorOS too (owner's go, 2026-11-17). S25 Ultra, ColorOS 17
+# coloros17-findx9u-in-1105, session db19aee410bd79ff: Samsung's thermal HAL
+# (SKIN thresholds 38, 40, 42, 45...) gave the guest status 3 (SEVERE) from
+# 43.2 C skin (diag_series.txt 02:37:49 on). ColorOS then turned window blur
+# off (blur=false at 42.8 C, 02:41:49) and oneos_sysui_compile.sh postponed
+# every app compile ("thermal status 3 (severe or worse): app compile
+# postponed"; 75e538ac0ed725df too, at 44.2 C), so the one-time compiles never
+# finished.
 rm -f "$STAGE/heat_cap.active" "$STAGE/heat_cap.level"
 HEAT_CAP=0; [ "${ONEOS_HEAT_CAP:-1}" = 1 ] && HEAT_CAP=1
 HEAT_CAP_CPU=0; [ "${ONEOS_HEAT_CAP_CPU:-1}" = 1 ] && HEAT_CAP_CPU=1
 GUEST_THERMAL_MAP=0
-[ "${ONEOS_GUEST_THERMAL_MAP:-1}" = 1 ] && grep -q '^  "image": "pixel' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_THERMAL_MAP=1
+if [ "${ONEOS_GUEST_THERMAL_MAP:-1}" = 1 ]; then
+    [ $GUEST_OPLUS = 1 ] && GUEST_THERMAL_MAP=1
+    grep -q '^  "image": "pixel' "$STAGE/.oneos_stage" 2>/dev/null && GUEST_THERMAL_MAP=1
+fi
 if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     [ $HEAT_CAP = 1 ] && : > "$STAGE/heat_cap.active"
     rm -f "$STAGE/cpufreq_max_limit.released"
@@ -4879,14 +4945,23 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # in S25 Ultra sessions bceaef29fb128e94 and 4d2e95c67f065941
                         # (ColorOS native audit 2026-11-16) the rounds froze the UI while it
                         # booted, with Full session logs off, and touch_events.txt was empty.
-                        # They run when Full session logs are on, or when the home screen
-                        # has not come yet: then something is stuck and the stacks are the
-                        # point. SurfaceFlinger's own dump below keeps its condition (it
+                        # They run when Full session logs are on. With them off, only the
+                        # 90 s round takes them, and only if the home screen still has not
+                        # come: then something is stuck and the stacks are the point. At 40 s
+                        # a normal boot has no home screen yet (S25 Ultra sessions
+                        # db19aee410bd79ff and 75e538ac0ed725df, Full logs off: it came about
+                        # 86 s after the zygote launch), so that round dumped SystemUI (1.74 MB)
+                        # and the launcher (1.37 MB) and held the touchscreen 15 s, 03:15:53 to
+                        # 03:16:36, while ColorOS brought up its home screen and the owner
+                        # unlocked. SurfaceFlinger's own dump below keeps its condition (it
                         # never registered, a stuck case already).
                         heavy=1
                         if [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$home = 1 ]; then
                             heavy=0
                             echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off and the home screen was up' > \$D/heavy_skipped.txt
+                        elif [ ${ONEOS_FULL_LOGS:-1} != 1 ] && [ \$dname = 40 ]; then
+                            heavy=0
+                            echo 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off; a normal boot has no home screen yet at 40 s, the 90 s round takes them if it still has none' > \$D/heavy_skipped.txt
                         fi
                         # Every thread's name, state and wait channel, from the kernel, read
                         # by the shell itself (a cat, sed, cut and cat per thread before,

@@ -436,6 +436,12 @@ fi
 # Z Fold's cover becomes display 0 when it folds: no app could use it
 # (patches/qti_builtin_display_public.py; nothing in images without them).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/qti_builtin_display_public.py" "$WORK/services")"
+# Twinity ColorOS 17 starts with 65535 method references in classes.dex.
+# Move the generated INetd classes together so the guest guards fit.
+SERVICES_SHA=$(sha256sum < "$WORK/services.jar")
+if [ "${SERVICES_SHA%% *}" = f669c8373f10043d674cc3cd7391627de4d6d958fe5ebb8b5dd303ab46e64270 ]; then
+    KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/twinity_services_dex.py" "$WORK/services")"
+fi
 # A dex the added OneOS classes push past 65536 method references (the Pixel 9
 # Pro XL's classes2: 65568) gets them moved to a dex of their own after the
 # last one: one jar, one class loader, so they keep their package access.

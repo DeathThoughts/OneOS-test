@@ -83,7 +83,7 @@ for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetoot
          vendor_de/0/fpdata \
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
-         oneos_sysui_compile.sh; do
+         oneos_sysui_compile.sh oneos_oplus_telemetry.sh; do
     no_symlink "$s"
 done
 # The framework jars must be the ones built with the storage, installd and
@@ -1851,6 +1851,81 @@ elif $BB mount --rbind /mnt "$ROOTFS/mnt"; then
     $BB mount --make-rslave "$ROOTFS/mnt" 2>/dev/null || true
     echo "Guest /mnt: One UI's, a recursive bind (ONEOS_GUEST_OWN_MNT=${ONEOS_GUEST_OWN_MNT:-1})"
 fi
+# Stock copies of the jars OneOS covers, for guest_start.sh's profile rebuild.
+# ART keys a binary profile by dex checksum, and the patched jars have other
+# checksums than the image's: odrefresh's speed-profile compile of the boot
+# image and system server found no profile data for them and left the framework
+# interpreted (S25 Ultra, ColorOS 17 coloros17-findx9u-in-1105, sessions
+# db19aee410bd79ff and 75e538ac0ed725df: SystemUI's Looper/MessageQueue frames in
+# boot.vdex under nterp_helper, one android.* method in boot.oat). profman needs
+# the stock jars to read the image's profiles, and the binds below hide them, so
+# they are copied out first, only when the jars, the profiles or the scheme
+# changed. Nothing of the image is changed. ONEOS_GUEST_BOOT_PROFILE=0 skips it.
+PF_DIR="$STAGE/data/oneos_prof"
+if [ "${ONEOS_GUEST_BOOT_PROFILE:-1}" = 0 ]; then
+    echo "Boot profiles: off (ONEOS_GUEST_BOOT_PROFILE=0)"
+else
+    PF_KEY=""; PF_ITEMS=""; PF_LIST=""; PF_N=0
+    for pj in "$STAGE"/*_patched.jar; do
+        [ -f "$pj" ] && [ ! -L "$pj" ] || continue
+        pn=${pj##*/}; pn=${pn%_patched.jar}
+        pc=0; ps=""
+        for pd in "$ROOTFS/system/framework" "$GUEST_SYSTEM_EXT/framework" "$GUEST_PRODUCT/framework"; do
+            if [ -f "$pd/$pn.jar" ] && [ ! -L "$pd/$pn.jar" ]; then pc=$((pc + 1)); ps="$pd/$pn.jar"; fi
+        done
+        if [ "$pc" != 1 ]; then echo "Boot profiles: $pn.jar has no single stock jar ($pc found); skipped"; continue; fi
+        if [ "$(stat -c %d:%i "$ps" 2>/dev/null)" = "$(stat -c %d:%i "$pj" 2>/dev/null)" ]; then
+            echo "Boot profiles: $pn.jar is still covered; skipped"; continue
+        fi
+        PF_KEY="$PF_KEY $pn $(stat -c '%s %Y' "$pj" 2>/dev/null) $(stat -c '%s %Y' "$ps" 2>/dev/null) $(stat -c '%s %Y' "$ps.prof" 2>/dev/null || echo none)"
+        PF_ITEMS="$PF_ITEMS $pn:$ps"
+        PF_LIST="$PF_LIST$pn.jar ${ps#$ROOTFS}
+"
+        PF_N=$((PF_N + 1))
+    done
+    if [ "$PF_N" = 0 ]; then
+        echo "Boot profiles: no patched jar with a stock jar to read; nothing to do"
+    else
+        PF_KEY="$PF_KEY $(stat -c '%s %Y' "$ROOTFS/system/etc/boot-image.prof" 2>/dev/null || echo none) v1"
+        PF_K=$(printf '%s' "$PF_KEY" | cksum 2>/dev/null | awk '{ print $1 "-" $2 }')
+        no_symlink oneos_prof
+        no_symlink oneos_prof/key
+        PF_CUR=$(cat "$PF_DIR/key" 2>/dev/null)
+        if [ "$PF_CUR" = "$PF_K ok" ] || [ "$PF_CUR" = "$PF_K failed" ]; then
+            no_symlink oneos_prof/stock
+            rm -rf "$PF_DIR/stock" "$PF_DIR/stock.list" "$PF_DIR/pending"
+            case "$PF_CUR" in
+                *" ok") echo "Boot profiles: current for $PF_N jars ($PF_K)" ;;
+                *) echo "Boot profiles: failed before for these $PF_N jars ($PF_K); not retried" ;;
+            esac
+        else
+            mkdir -p "$PF_DIR" && chmod 700 "$PF_DIR" && chown 0:0 "$PF_DIR" 2>/dev/null
+            no_symlink oneos_prof/stock
+            no_symlink oneos_prof/out
+            rm -rf "$PF_DIR/stock" "$PF_DIR/out" "$PF_DIR/stock.list" "$PF_DIR/pending"
+            PF_OK=1
+            mkdir -p "$PF_DIR/stock" && chmod 700 "$PF_DIR/stock" || PF_OK=0
+            for it in $PF_ITEMS; do
+                [ "$PF_OK" = 1 ] || break
+                pn=${it%%:*}; ps=${it#*:}
+                cp "$ps" "$PF_DIR/stock/$pn.jar" 2>/dev/null &&
+                    [ "$(stat -c %s "$PF_DIR/stock/$pn.jar")" = "$(stat -c %s "$ps")" ] || PF_OK=0
+            done
+            if [ "$PF_OK" = 1 ]; then
+                printf '%s' "$PF_LIST" > "$PF_DIR/stock.list" &&
+                    printf '%s\n' "$PF_K" > "$PF_DIR/pending" || PF_OK=0
+            fi
+            if [ "$PF_OK" = 1 ]; then
+                chmod 644 "$PF_DIR/stock.list" "$PF_DIR/pending" "$PF_DIR/stock"/*.jar 2>/dev/null
+                chown 0:0 "$PF_DIR/stock.list" "$PF_DIR/pending" "$PF_DIR/stock" "$PF_DIR/stock"/*.jar 2>/dev/null
+                echo "Boot profiles: $PF_N stock jars copied for the profile rebuild ($PF_K)"
+            else
+                rm -rf "$PF_DIR/stock" "$PF_DIR/stock.list" "$PF_DIR/pending"
+                echo "Boot profiles: copying the stock jars failed; the image's profiles stay"
+            fi
+        fi
+    fi
+fi
 if [ -f "$STAGE/services_patched.jar" ]; then
     $BB umount -l "$ROOTFS/system/framework/services.jar" 2>/dev/null || true
     $BB mount --bind "$STAGE/services_patched.jar" "$ROOTFS/system/framework/services.jar"
@@ -3166,6 +3241,66 @@ PANO
         echo "ColorOS UniRender: off on this $(getprop ro.soc.manufacturer) phone (${UR:+bound over$UR}${UR:-no switch list in the image})"
     fi
 fi
+# OPPO's trace and log uploaders turned off in ColorOS guests (owner, 2026-11-17).
+# S25 Ultra, coloros17-findx9u-in-1105, sessions db19aee410bd79ff and
+# 75e538ac0ed725df: incident_helper plus a second top ran at 40-100% CPU for
+# 30-60 s several times a session around com.oplus.onetrace activity. On a port
+# com.oplus.onetrace and com.oplus.olc (LogCoreService) have nothing to report
+# to OPPO, so oneos_oplus_telemetry.sh disables them for user 0 once the guest's
+# package manager answers (the UI activator starts it) and lists what it
+# disabled in /data/oneos_oplus_telemetry_off; a package the owner had disabled
+# is never listed or touched. com.oplus.midas is left alone.
+# ONEOS_GUEST_OPLUS_TELEMETRY=1 turns back on only what OneOS turned off.
+rm -f "$STAGE/data/oneos_oplus_telemetry.sh"
+if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
+    if [ "${ONEOS_GUEST_OPLUS_TELEMETRY:-0}" = 1 ]; then TELE_MODE=keep; else TELE_MODE=off; fi
+    { echo "MODE=$TELE_MODE"; cat <<'TELE'
+PKGS="com.oplus.onetrace com.oplus.olc"
+REC=/data/oneos_oplus_telemetry_off
+log() { echo "$(date +%T) $*"; }
+if [ -L "$REC" ]; then
+    rm -f "$REC"
+    log "$REC was a symlink; removed, not used"
+fi
+ok=0; bad=0
+if [ "$MODE" = off ]; then
+    dis=$(timeout 30 pm list packages -d 2>/dev/null </dev/null)
+    for p in $PKGS; do
+        if [ -z "$(timeout 30 pm path "$p" 2>/dev/null </dev/null)" ]; then
+            log "$p: not installed"
+        elif echo "$dis" | grep -qx "package:$p"; then
+            # off already: listed only if OneOS put it there before
+            log "$p: already off"
+        elif out=$(timeout 30 pm disable-user --user 0 "$p" 2>&1 </dev/null); then
+            if ! { [ -f "$REC" ] && grep -qx "$p" "$REC"; }; then echo "$p" >> "$REC"; fi
+            ok=$((ok + 1)); log "$p: turned off"
+        else
+            bad=$((bad + 1)); log "$p: pm disable-user failed: $out"
+        fi
+    done
+    log "OPPO telemetry apps: $ok turned off, $bad failed"
+else
+    if [ -f "$REC" ]; then
+        while read -r p; do
+            # pm is cmd, which forwards stdin: </dev/null keeps it from eating the rest of the record
+            case " $PKGS " in *" $p "*) ;; *) continue ;; esac
+            if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
+                ok=$((ok + 1)); log "$p: turned back on"
+            else
+                bad=$((bad + 1)); log "$p: pm enable failed: $out"
+            fi
+        done < "$REC"
+        [ "$bad" = 0 ] && rm -f "$REC"
+    fi
+    log "OPPO telemetry apps: kept, $ok turned back on, $bad failed"
+fi
+exit 0
+TELE
+    } > "$STAGE/data/oneos_oplus_telemetry.sh"
+    chmod 644 "$STAGE/data/oneos_oplus_telemetry.sh"
+    $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_oplus_telemetry.sh" 2>/dev/null || true
+    echo "ColorOS OPPO telemetry apps (onetrace, olc): $TELE_MODE (ONEOS_GUEST_OPLUS_TELEMETRY=${ONEOS_GUEST_OPLUS_TELEMETRY:-0}; oplus_telemetry.log)"
+fi
 # The guest's /oem, built in $STAGE/oem and bound over the image's. /oem is
 # empty in the images (ColorOS and Pixel) and scanned by the guest's
 # PackageManagerService as a system partition (PackagePartitions: oem has an
@@ -4353,12 +4488,17 @@ PC=com.google.android.permissioncontroller
 [ -L "$AMARK" ] && rm -f "$AMARK"
 # Home, Settings and the permission dialogs first, then the ColorOS apps opened
 # most (S25 Ultra, Find X9 Ultra IN image, session bffd23abac05cd7c: seen in
-# its logs, except alarmclock and weather2, which are assumed; a missing one
-# is skipped and the next is tried).
+# its logs, except alarmclock and weather2, which are assumed) plus the daily
+# and resident packages still running at verify/JIT on S25 Ultra,
+# coloros17-findx9u-in-1105, sessions db19aee410bd79ff and 75e538ac0ed725df
+# (Gboard, Samsung Camera, Google Phone, Google Messages, Wallpapers,
+# Notification Manager, Smart Sidebar and Blur; a missing one is skipped and
+# the next is tried).
 APPS="com.android.launcher com.android.settings $PC
 com.android.incallui com.android.contacts com.android.mms
 com.coloros.gallery3d com.coloros.filemanager
-com.coloros.alarmclock com.coloros.weather2"
+com.coloros.alarmclock com.coloros.weather2
+com.google.android.inputmethod.latin com.sec.android.app.camera com.google.android.dialer com.google.android.apps.messaging com.oplus.wallpapers com.oplus.notificationmanager com.coloros.smartsidebar com.oplus.blur"
 for p in $APPS; do
     h=$(thermal)
     if [ -n "$h" ] && [ "$h" -ge 3 ]; then
@@ -4370,7 +4510,7 @@ done
 SYSUI
     chmod 644 "$STAGE/data/oneos_sysui_compile.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_sysui_compile.sh" 2>/dev/null || true
-    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings, PermissionController, InCallUI, Contacts, Messages, Gallery, File Manager, Clock and Weather (speed, once per APK; oneos_sysui_compile.log in the guest data)"
+    echo "ColorOS SystemUI compile: checked 60 s after the UI activator starts it (with the guest's own artd only), once per SystemUI.apk, then launcher, Settings, PermissionController, InCallUI, Contacts, Messages, Gallery, File Manager, Clock, Weather, Gboard, Samsung Camera, Google Phone, Google Messages, Wallpapers, Notification Manager, Smart Sidebar and Blur (speed, once per APK; oneos_sysui_compile.log in the guest data)"
 else
     echo "ColorOS SystemUI compile: not a ColorOS guest"
 fi
