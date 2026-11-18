@@ -4821,6 +4821,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     { for p in /sys/devices/system/cpu/cpufreq/policy*; do echo \"\$p cur/max/hw \$(cat \$p/scaling_cur_freq \$p/scaling_max_freq \$p/cpuinfo_max_freq 2>/dev/null | tr '\n' ' ')\"; done
                       echo \"gpu cur \$(cat /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq 2>&1) max \$(cat /sys/class/kgsl/kgsl-3d0/max_gpuclk 2>&1)\"
                       timeout 10 logcat -d -s thermal_core 2>/dev/null | tail -n 3; } > \$D/throttle.txt 2>&1
+                    # Incident reports (S25 Ultra, coloros17-findx9u-in-1105, session db475ad5017133c4: One UI's
+                    # incidentd made 95 in 16 min for com.oplus.obrain): who asks, IncidentManager or statsd.
+                    { timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys incidentcompanion
+                      echo ---
+                      timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd stats print-stats 2>&1 | head -n 120; } > \$D/incident.txt 2>&1
                     # Galaxy S24 family kernel panics in free_pipe_info (10 reports, 0.4.84-0.5.01, ColorOS IN,
                     # OriginOS and Pixel 9 Pro XL): the exiting thread is almost always named libtimer.so (else
                     # \"POSIX timer N\"), and no log tells whose it is. Record each such thread's process.

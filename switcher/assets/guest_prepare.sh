@@ -74,7 +74,9 @@ for pair in $BRIDGES; do no_symlink "${pair#*:}"; done
 # seeded there. As a link to the host's /data/system/users, the rm -f of
 # settings_fingerprint*.xml would have deleted One UI's own list of its
 # fingerprints. The two face files are copied over what is there, and cp
-# writes through a link.
+# writes through a link. media/0/Android and its data, media and obb are
+# chowned one by one in section 5b (sessions db475ad5017133c4 and
+# a12bf19e1931e81a); -h covers the last component only.
 for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetooth \
          misc_ce/0 misc_de/0 system system/devicestate system/package_cache \
          system/users system/users/0 system/users/0/settings_face.xml \
@@ -83,6 +85,7 @@ for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetoot
          vendor_de/0/fpdata \
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
+         media/0/Android media/0/Android/data media/0/Android/media media/0/Android/obb \
          oneos_sysui_compile.sh oneos_oplus_telemetry.sh; do
     no_symlink "$s"
 done
@@ -1886,7 +1889,9 @@ else
     if [ "$PF_N" = 0 ]; then
         echo "Boot profiles: no patched jar with a stock jar to read; nothing to do"
     else
-        PF_KEY="$PF_KEY $(stat -c '%s %Y' "$ROOTFS/system/etc/boot-image.prof" 2>/dev/null || echo none) v1"
+        # v2: guest_start.sh keeps the profiles that were made and logs why one failed; the
+        # phone holds "<key> failed" from v1 (session db475ad5017133c4), so this builds once more.
+        PF_KEY="$PF_KEY $(stat -c '%s %Y' "$ROOTFS/system/etc/boot-image.prof" 2>/dev/null || echo none) v2"
         PF_K=$(printf '%s' "$PF_KEY" | cksum 2>/dev/null | awk '{ print $1 "-" $2 }')
         no_symlink oneos_prof
         no_symlink oneos_prof/key
@@ -5277,7 +5282,37 @@ for d in "$STAGE/data/user/0" "$STAGE/data/user_de/0"; do
         fi
     fi
 done
-$BB chown -h -R 1023:1023 "$STAGE/data/media" 2>/dev/null || true
+# The host's half of PR #36: a recursive chown of all of $STAGE/data/media, on
+# every switch before the guest boots, reset each
+# /data/media/0/Android/{data,media,obb}/<pkg> from ensure_app_storage.sh's
+# <uid>:1078 to 1023:1023, so it repaired them on every boot (S25 Ultra,
+# coloros17-findx9u-in-1105, sessions db475ad5017133c4 and a12bf19e1931e81a:
+# guest/app_storage.log "realigned 1485" and "realigned 1486 to new uids"
+# after guest_start.sh's own recursive chown was gone). Same shape as
+# guest_start.sh's block: the Android dirs themselves only, never a <pkg>
+# below them or One UI's albums in OneUI.
+if [ -d "$STAGE/data/media" ] && [ ! -L "$STAGE/data/media" ]; then
+    $BB chown -h 1023:1023 "$STAGE/data/media" 2>/dev/null || true
+    if [ -d "$STAGE/data/media/0" ] && [ ! -L "$STAGE/data/media/0" ]; then
+        $BB chown -h 1023:1023 "$STAGE/data/media/0" 2>/dev/null || true
+        if [ -d "$STAGE/data/media/0/Android" ] && [ ! -L "$STAGE/data/media/0/Android" ]; then
+            for d in "$STAGE/data/media/0/Android" "$STAGE/data/media/0/Android/data" "$STAGE/data/media/0/Android/media" "$STAGE/data/media/0/Android/obb"; do
+                [ -d "$d" ] && [ ! -L "$d" ] || continue
+                $BB chown -h 1023:1023 "$d" 2>/dev/null || true
+            done
+        fi
+    fi
+    for m in "$STAGE/data/media" "$STAGE/data/media/0"; do
+        [ -d "$m" ] && [ ! -L "$m" ] || continue
+        for d in "$m"/* "$m"/.*; do
+            case "$d" in
+                */.|*/..|"$STAGE/data/media/0"|"$STAGE/data/media/0/Android"|"$STAGE/data/media/0/OneUI") continue ;;
+            esac
+            [ ! -L "$d" ] && [ -e "$d" ] || continue
+            $BB chown -h -R 1023:1023 "$d" 2>/dev/null || true
+        done
+    done
+fi
 $BB chmod 0770 "$STAGE/data/media" "$STAGE/data/media/0" 2>/dev/null || true
 $BB chcon -h -R u:object_r:media_rw_data_file:s0 "$STAGE/data/media" 2>/dev/null || true
 # data/apex (host /data/apex) and data/adb (host /data/adb) are left alone: they

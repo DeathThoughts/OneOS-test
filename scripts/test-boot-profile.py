@@ -15,6 +15,14 @@ are rewritten to the temporary root. Checked:
 - guest_start.sh: success writes `K ok`, makes the profiles, binds them and removes stock and
   pending; a failing profman writes `K failed` and binds nothing; --force-compile runs only when
   $ADC/oneos_prof differs; its failure undoes the binds and writes `K failed`.
+
+Session db475ad5017133c4 (the same phone and image): boot-image.prof failed (exit 255) and the two
+good system server profiles were thrown away with it. Now one made profile is enough for `K ok`:
+the made ones are kept and bound, the failed one's files are removed and its target stays the
+image's; only when none was made is the key `K failed`. A failure appends profman's own logcat
+lines (only when there is a logcat), and the boot class path's entry count, patched jars and any
+jar names shared by two entries are logged before the boot profile is made. The key's scheme is
+v2, so the phone's "K failed" from v1 is built once more.
 """
 from pathlib import Path
 import glob
@@ -70,10 +78,15 @@ esac
 FAKE_PROFMAN = r'''#!/bin/sh
 echo "profman $*" >> "$CALLS"
 [ -f "$FAILP" ] && exit 1
+[ -f "$FAILBOOT" ] && case "$*" in *--output-profile-type=boot*) exit 255 ;; esac
 dump=0; for a in "$@"; do
   case "$a" in --dump-classes-and-methods) dump=1 ;; --reference-profile-file=*) ref=${a#*=} ;; esac
 done
 if [ $dump = 1 ]; then echo "HSP Lfoo;"; echo "HSP Lbar;"; else echo prof > "$ref"; fi
+'''
+FAKE_LOGCAT = r'''#!/bin/sh
+echo "logcat $*" >> "$CALLS"
+echo "11-18 03:33:38.123 E/profman ( 4321): Failed to add dex file to boot image profile"
 '''
 FAKE_ODR = r'''#!/bin/sh
 echo "odrefresh $*" >> "$CALLS"
@@ -219,6 +232,11 @@ class PrepareBlock(unittest.TestCase):
         self.assertEqual(3, r.returncode, r.stdout + r.stderr)
         self.assertEqual([], list(victim.iterdir()))
 
+    def test_key_scheme_is_v2(self):
+        # The phone holds "<key> failed" from v1 (session db475ad5017133c4); v2 builds once more.
+        self.assertIn("""|| echo none) v2"\n""", PREP_BLOCK)
+        self.assertNotIn(' v1"', PREP_BLOCK)
+
     def test_kill_switch(self):
         for name, sh in SHELLS:
             with self.subTest(name):
@@ -256,7 +274,7 @@ class StartBlock(unittest.TestCase):
         self.p = p
         self.adc = d / 'adc'
 
-    def run_block(self, shell, fail_profman=False, fail_odr=False, kill=None):
+    def run_block(self, shell, fail_profman=False, fail_odr=False, kill=None, fail_boot=False, logcat=False, bcp=None):
         d = self.d
         block = (START_BLOCK.replace('/data/oneos_prof', str(d / 'data/oneos_prof'))
                  .replace('/data/odrefresh.log', str(d / 'odrefresh.log'))
@@ -265,8 +283,17 @@ class StartBlock(unittest.TestCase):
         script = ('BB=%s/bin/bb; ADC=%s; ODR=%s/bin/odrefresh\n'
                   'BOOTCLASSPATH=%s:%s; SYSTEMSERVERCLASSPATH=%s; STANDALONE_SYSTEMSERVER_JARS=\n'
                   'timeout() { shift; "$@"; }\n%s\n') % (d, self.adc, d, self.fw, self.other, self.svc, block)
+        if bcp is not None:
+            script = script.replace('BOOTCLASSPATH=%s:%s;' % (self.fw, self.other), 'BOOTCLASSPATH=%s;' % ':'.join(map(str, bcp)))
         env = dict(os.environ, CALLS=str(self.calls), ADC=str(self.adc), FAILP=str(d / 'failp') if fail_profman else str(d / 'nofail'),
-                   FAILODR=str(d / 'failodr') if fail_odr else str(d / 'nofail'))
+                   FAILODR=str(d / 'failodr') if fail_odr else str(d / 'nofail'),
+                   FAILBOOT=str(d / 'failboot') if fail_boot else str(d / 'nofail'))
+        if fail_boot:
+            (d / 'failboot').touch()
+        if logcat:
+            (d / 'lcbin').mkdir(exist_ok=True)
+            sh_script(d / 'lcbin/logcat', FAKE_LOGCAT)
+            env['PATH'] = '%s:%s' % (d / 'lcbin', env['PATH'])
         if fail_profman:
             (d / 'failp').touch()
         if fail_odr:
@@ -321,6 +348,97 @@ class StartBlock(unittest.TestCase):
                 self.assertNotIn('mount', self.calls_text())
                 self.assertNotIn('odrefresh', self.calls_text())
                 self.assertFalse((self.adc / 'oneos_prof').exists())
+
+    def test_all_failed_says_failed(self):
+        sh = SHELLS[0][1]
+        r = self.run_block(sh, fail_profman=True)
+        self.assertEqual('K1 failed\n', (self.p / 'key').read_text())
+        self.assertFalse((self.p / 'out').exists())
+        self.assertIn('profiles failed (0 made) in ', (self.d / 'data/oneos_prof.log').read_text())
+        self.assertIn('boot profiles: 0 profiles failed in ', r.stdout)
+
+    def test_one_failed_keeps_the_ones_made(self):
+        # Session db475ad5017133c4: boot-image.prof exit 255, services.jar.prof made.
+        for name, sh in SHELLS:
+            with self.subTest(name):
+                self.setUp()
+                r = self.run_block(sh, fail_boot=True)
+                self.assertEqual('K1 ok\n', (self.p / 'key').read_text())
+                self.assertTrue((self.p / 'out/services.jar.prof').is_file())
+                self.assertFalse((self.p / 'out/boot-image.prof').exists())
+                self.assertEqual([], sorted(glob.glob(str(self.p / 'out/*.txt'))))
+                for f in ('stock', 'stock.list', 'pending'):
+                    self.assertFalse((self.p / f).exists(), f)
+                # B2: only the made one is bound; boot-image.prof stays the image's
+                self.assertEqual('image boot profile', self.boot.read_text())
+                self.assertNotEqual(os.stat(self.boot).st_ino, os.stat(self.p / 'out/services.jar.prof').st_ino)
+                self.assertEqual(os.stat(self.svc_prof).st_ino, os.stat(self.p / 'out/services.jar.prof').st_ino)
+                c = self.calls_text()
+                self.assertNotIn('bb mount --bind %s/out/boot-image.prof' % self.p, c)
+                self.assertIn('bb mount --bind %s/out/services.jar.prof %s' % (self.p, self.svc_prof), c)
+                self.assertIn('odrefresh --force-compile', c)
+                self.assertEqual('K1\n', (self.adc / 'oneos_prof').read_text())
+                log = (self.d / 'data/oneos_prof.log').read_text()
+                self.assertIn('boot-image.prof: create with the patched jars failed (exit 255)', log)
+                self.assertIn('profiles ok (1 made, 1 failed: boot-image) in ', log)
+                self.assertIn('boot profiles: 1 profiles made, 1 failed (boot-image) in ', r.stdout)
+                # the next boot binds the same one again and builds nothing
+                self.calls.write_text('')
+                self.run_block(sh)
+                c = self.calls_text()
+                self.assertNotIn('profman', c)
+                self.assertNotIn('out/boot-image.prof', c)
+                self.assertIn('bb mount --bind %s/out/services.jar.prof' % self.p, c)
+
+    def test_failure_appends_profmans_logcat_lines(self):
+        for name, sh in SHELLS:
+            with self.subTest(name):
+                self.setUp()
+                self.run_block(sh, fail_boot=True, logcat=True)
+                log = (self.d / 'data/oneos_prof.log').read_text()
+                self.assertIn("boot-image.prof: profman's log:\n", log)
+                self.assertIn('E/profman ( 4321): Failed to add dex file to boot image profile\n', log)
+                self.assertEqual(1, self.calls_text().count('logcat -d -b main,system -v time -s profman'))
+
+    def test_logcat_only_on_failure(self):
+        sh = SHELLS[0][1]
+        self.run_block(sh, logcat=True)
+        self.assertEqual('K1 ok\n', (self.p / 'key').read_text())
+        self.assertNotIn('logcat', self.calls_text())
+        self.assertNotIn("profman's log", (self.d / 'data/oneos_prof.log').read_text())
+
+    def test_logcat_capture_is_guarded(self):
+        self.assertIn('if command -v logcat >/dev/null 2>&1; then', START_BLOCK)
+        if shutil.which('logcat'):
+            self.skipTest('this host has a logcat')
+        for name, sh in SHELLS:
+            with self.subTest(name):
+                self.setUp()
+                self.run_block(sh, fail_boot=True)
+                self.assertEqual('K1 ok\n', (self.p / 'key').read_text())
+                log = (self.d / 'data/oneos_prof.log').read_text()
+                self.assertNotIn('logcat', log)
+                self.assertNotIn("profman's log", log)
+
+    def test_boot_class_path_names_logged(self):
+        sh = SHELLS[0][1]
+        self.run_block(sh)
+        log = (self.d / 'data/oneos_prof.log').read_text()
+        self.assertIn('boot class path: 2 entries, 1 patched: framework.jar\n', log)
+        self.assertIn('boot class path jar names: all distinct (2)\n', log)
+        self.assertNotIn('sharing a name', log)
+
+    def test_boot_class_path_shared_names_logged(self):
+        for name, sh in SHELLS:
+            with self.subTest(name):
+                self.setUp()
+                twin = self.d / 'sys/ext/framework/framework.jar'
+                twin.write_text('another framework')
+                self.run_block(sh, bcp=[self.fw, self.other, twin])
+                log = (self.d / 'data/oneos_prof.log').read_text()
+                self.assertIn('boot class path: 3 entries, 2 patched: framework.jar framework.jar\n', log)
+                self.assertIn('boot class path jars sharing a name: %s %s\n' % (self.fw, twin), log)
+                self.assertNotIn('all distinct', log)
 
     def test_success_leaves_no_text_dumps(self):
         for name, sh in SHELLS:
