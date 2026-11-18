@@ -4027,7 +4027,13 @@ if [ "$BIO_GUARD" = 1 ]; then
     # The guest's /data/system (BIO_DST is its users/0: one level up was users/, where OneOSUdfps never looked).
     UFILE=$STAGE/data/system/oneos_udfps
     rm -f "$UFILE" "$STAGE/data/system/users/oneos_udfps"
-    if [ -n "$UPOS" ] && [ -n "$UGEO" ]; then
+    # Only for an optical sensor (One UI's floating features, the check the local-HBM block below uses too): the
+    # location was only tried on the A36's optical sensor, and the S25 Ultra's ultrasonic sensor unlocks ColorOS
+    # fine without it (sessions db475ad5017133c4, a12bf19e1931e81a), so its working fingerprint is left as it is.
+    FF=/system/etc/floating_feature.xml
+    if ! grep -q '<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>[^<]*optical' "$FF" 2>/dev/null; then
+        echo "Guest biometrics: in-display sensor place not given (not an optical sensor)"
+    elif [ -n "$UPOS" ] && [ -n "$UGEO" ]; then
         UXYR=$(echo "$UPOS $UGEO" | awk '{ n = split($1, p, ","); w = $2; h = $3; dpi = $4;
             if (n < 6 || w < 100 || h < 100 || dpi < 100) exit; ppm = dpi / 25.4;
             x = int(w / 2 + p[2] * ppm + 0.5); y = int(h - (p[1] + p[4] / 2) * ppm + 0.5); r = int(p[5] / 2 * ppm + 0.5);
@@ -4043,7 +4049,6 @@ if [ "$BIO_GUARD" = 1 ]; then
     # UI does; without both every capture failed (A36). The marker is what it looks for.
     LFILE=$STAGE/data/system/oneos_fp_lhbm
     rm -f "$LFILE"
-    FF=/system/etc/floating_feature.xml
     if grep -q '<SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>1</SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>' "$FF" 2>/dev/null &&
        grep -q '<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>[^<]*optical' "$FF" 2>/dev/null &&
        [ -e /sys/class/lcd/panel/local_hbm ]; then
