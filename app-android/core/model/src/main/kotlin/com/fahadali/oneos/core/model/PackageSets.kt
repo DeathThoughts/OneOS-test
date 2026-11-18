@@ -686,7 +686,7 @@ object PackageSets {
     val NOTHING_A = PackageSet(
         id = ID_NOTHING_A,
         imageId = Images.ID_NOTHING_ASTEROIDS,
-        sourceDir = "out/overlays_nothing_a_r5", // 0.5.18 r5: OneOSSehTouch (TEST, not uploaded yet); 0.5.17 r2: fingerprint from One UI, removal guard
+        sourceDir = "out/overlays_nothing_a_r6", // 0.5.21 r6: video rotation in samcam_a; 0.5.18 r5: OneOSSehTouch (TEST, not uploaded yet); 0.5.17 r2: fingerprint from One UI, removal guard
         files = listOf(
             PackageFile("services_patched.jar", FileRole.GUARD_JAR),
             PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
@@ -820,7 +820,7 @@ object PackageSets {
     val LINEAGE = PackageSet(
         id = ID_LINEAGE,
         imageId = Images.ID_LINEAGE,
-        sourceDir = "out/overlays_lineage_r7",
+        sourceDir = "out/overlays_lineage_r8", // 0.5.21 r8: video rotation in samcam_a and samcam_bar
         files = listOf(
             PackageFile("services_patched.jar", FileRole.GUARD_JAR),
             PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
