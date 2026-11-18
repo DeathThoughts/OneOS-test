@@ -9,6 +9,14 @@
 # two smali edits on top, so one APK carries both: its wave+AOD dex and the dex with DozeService go
 # into the stock APK with apk-replace-dex.py, which keeps the signing block where PackageManager
 # looks for it.
+#
+# Set r7 adds upstream 0.5.20's four lock screen / AOD patches to that APK (not to SystemUI_wave.dex,
+# which the guest uses only with wallpaper AOD off): patch-coloros-keyguard-lhbm.py,
+# patch-coloros-fp-icon-nodoze.py, patch-coloros-aod-tilt-wake.py and
+# patch-coloros-aod-mask-instant.py. Their patch() functions run on the same decoded tree, each on the one
+# smali file that defines its class and exactly once (a repeat or a missing method aborts the build), so
+# the APK is built once and keeps the stock signing block, instead of four dex round trips of a finished
+# APK (their own main() path, for an APK that is already built).
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -50,8 +58,20 @@ spec = importlib.util.spec_from_file_location('panoramic_aod', sys.argv[1])
 aod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(aod)
 dec = sys.argv[2]
-for rel, fn in (('com/oplus/systemui/aod/display/SmoothTransitionController.smali', aod.patch_smali),
-                ('com/android/systemui/doze/DozeService.smali', aod.patch_doze)):
+
+
+def upstream(name):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(sys.argv[1]), name + '.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.REL, mod.patch
+
+
+edits = [('com/oplus/systemui/aod/display/SmoothTransitionController.smali', aod.patch_smali),
+         ('com/android/systemui/doze/DozeService.smali', aod.patch_doze)]
+edits += [upstream(n) for n in ('patch-coloros-keyguard-lhbm', 'patch-coloros-fp-icon-nodoze',
+                                'patch-coloros-aod-tilt-wake', 'patch-coloros-aod-mask-instant')]
+for rel, fn in edits:
     hits = glob.glob(os.path.join(dec, 'smali*', rel))
     if len(hits) != 1:
         sys.exit(f'{rel}: {len(hits)} matches in {dec}')
