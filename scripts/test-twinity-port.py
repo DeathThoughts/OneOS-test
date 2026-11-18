@@ -81,8 +81,10 @@ class LpUnpackAndOdmAiTest(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0)
 
             with patch.object(build_mod.shutil, "which", return_value=None), \
+                 patch.dict(build_mod.os.environ, {"MYSTIC_PYTHON": "/tmp/mystic-venv/bin/python"}), \
                  patch.object(build_mod.subprocess, "run", side_effect=fake_run):
                 result = build_mod.lpunpack_super(super_img, guest)
+            self.assertEqual("/tmp/mystic-venv/bin/python", calls[0][0])
             self.assertEqual(
                 str(SCRIPT_DIR / "unpack-twinity-super.py"),
                 calls[0][1],
