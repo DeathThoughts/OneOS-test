@@ -11,7 +11,7 @@ object GuestRestart {
         AlertDialog.Builder(activity).setTitle(R.string.restart_confirm_title)
             .setMessage(R.string.restart_confirm_message)
             .setNegativeButton(android.R.string.cancel,null).setPositiveButton(R.string.restart_action) { _,_ ->
-                activity.startActivity(android.content.Intent(activity,ReturnSplashActivity::class.java).putExtra(EXTRA_RESTART,true))
+                activity.startActivity(android.content.Intent(activity,ReturnSplashActivity::class.java).putExtra(EXTRA_RESTART,true).putExtra(ReturnSplashActivity.EXTRA_ASKED_AT,System.currentTimeMillis()))
             }.show()
     }
     const val EXTRA_RESTART="restart_guest"

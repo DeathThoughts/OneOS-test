@@ -26,6 +26,8 @@
     <string name="advanced_heat_cap_summary">Контроль нагрева One UI не работает в другой системе. Начиная с 45 °C OneOS замедляет там процессор, пока телефон не остынет.</string>
     <string name="advanced_full_logs_title">Полные журналы сеансов</string>
     <string name="advanced_full_logs_summary">Записывает всё, что делают системы, для отчётов об ошибках. По умолчанию выключено: из-за этого телефон греется и расходуется память. Включите, когда что-то идёт не так, и отправьте отчёт.</string>
+    <string name="advanced_share_files_title">Общие файлы с другими системами</string>
+    <string name="advanced_share_files_summary">Показывает папки One UI DCIM, Pictures, Download, Documents, Movies и Music внутри другой системы. Приложения там могут изменять и удалять эти файлы, как в One UI. Выключено: у каждой системы своё пустое хранилище.</string>
     <string name="advanced_card_help">Справка</string>
     <string name="advanced_before_summary">Что может сломаться, резервные копии и блокировка экрана</string>
     <string name="advanced_about_summary">Версия, безопасность и авторы</string>
@@ -253,6 +255,8 @@
     <string name="prepare_running_title">Настройка · %1$d%%</string>
     <string name="prepare_stop_summary">Останавливается после текущего файла. Тогда система не настроена, и переключение остаётся недоступным, пока вы не настроите её снова.</string>
     <string name="prepare_done">Завершено</string>
+    <string name="prepare_first_session_title">Первый сеанс: оптимизация приложений</string>
+    <string name="prepare_first_session_summary">Первый сеанс после этого обновления компилирует все приложения для новой системы, примерно 10–20 минут. Телефон может нагреваться и работать медленнее, пока не появится уведомление «Apps optimized».</string>
     <string name="prepare_not_done">Не завершено</string>
     <string name="prepare_moved_title">Сохранено как старые копии</string>
     <string name="prepare_delete_gz_summary">Теперь %1$s не нужен. Если позже вы будете настраивать снова, его придётся скачать ещё раз.</string>
