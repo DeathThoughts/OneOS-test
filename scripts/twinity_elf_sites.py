@@ -91,7 +91,7 @@ def _known_vold_sites(data: bytes, sha256_hex: str) -> tuple[int, int] | None:
     if sites is None:
         return None
     name_off, try_off = sites
-    if (data[name_off:name_off + 6] != b"\\x00vold\\x00" or
+    if (data[name_off:name_off + 6] != b"\x00vold\x00" or
             data[try_off:try_off + 4] != bytes.fromhex("b3060036")):
         raise ValueError("Hash-pinned ColorOS vold changed expected patch bytes")
     return sites
