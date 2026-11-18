@@ -525,8 +525,11 @@ def bio_guard(guards, biometrics=None):
 
 class BiometricGate(unittest.TestCase):
     def test_our_r6_guards_pass_the_gate(self):
-        # x9u-in-1105-sultra names the biowrites guard in its first line and has no "# biometric-remove guard" line
-        self.assertNotIn('# biometric-remove guard', R6_GUARDS.read_text())
+        # x9u-in-1105-sultra r6 named only the biowrites guard in its first line, with no
+        # "# biometric-remove guard" line (r7 has both): that shape must still pass.
+        r6 = '\n'.join(l for l in R6_GUARDS.read_text().split('\n') if not l.startswith('# biometric-remove guard'))
+        self.assertNotIn('# biometric-remove guard', r6)
+        self.assertEqual(bio_guard(r6), '1')
         self.assertEqual(bio_guard(R6_GUARDS.read_text()), '1')
 
     def test_an_upstream_style_removal_guard_passes_too(self):
