@@ -3976,9 +3976,9 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # skin. Every 10 s the guest's SKIN temperature (its thermal service on the
 # shared HAL, read as the sampler reads it) sets a level: from 45 C (Samsung's
 # SEVERE) every cpufreq policy's scaling_max_freq is 80% of its
-# cpuinfo_max_freq, from 47.5 C 65%, from 50 C 50%; going up takes one reading,
+# cpuinfo_max_freq, from 46.5 C 65%, from 48 C 50%; going up takes one reading,
 # and stepping down needs three consecutive readings (30 s) 2 C under the
-# level's threshold (< 43, < 45.5, < 48 C), logging down-holds as "held". The
+# level's threshold (< 43, < 44.5, < 46 C), logging down-holds as "held". The
 # first reading under 45 C lifts a cap One UI left (run 45: half clock for a
 # whole session); after that the policies are written only when the level
 # changes, each change logged in $STAGE/heat_cap.log. Only scaling_max_freq
@@ -4005,8 +4005,13 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # to 525 MHz and turning oneos_guest_boost WALT input boost off, while core
 # temps cooled 15-35 C in one 10 s tick and the cap saw-toothed at 1.40-1.86
 # changes/min.
+# Skin thresholds 45.0 / 46.5 / 48.0 C (was 45 / 47.5 / 50; owner's decision,
+# review of the Curve B branch): Samsung's thermal HAL in the guest lists SKIN
+# hot thresholds [38, 40, 42, 45, 47, 60, 90] (diag_90_thermal.txt), so 47 C is
+# its CRITICAL point, and peak skin in four sessions was 47.5 C: the old 47.5
+# and 50 C steps were at or past CRITICAL before they acted.
 # Curve B CPU-zone thresholds: CPU level can never exceed level 2 (level 3
-# 50% CPU, 525 MHz GPU, boost off are skin >= 50.0 C only); level 1 at >= 82 C
+# 50% CPU, 525 MHz GPU, boost off are skin >= 48.0 C only); level 1 at >= 82 C
 # for 3 consecutive readings, level 2 at >= 90 C for 4 consecutive readings;
 # stepping down requires 3 consecutive readings 4 C under the threshold (< 78 C,
 # < 86 C). Both up-holds and down-holds log "held" with the readings before.
@@ -4066,7 +4071,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     F=$STAGE/heat_cap.log
     CFL=/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit
     if [ $HEAT_CAP = 1 ]; then
-        echo \"# \$(date) OneOS heat cap: from 45, 47.5, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)\" > \$F
+        echo \"# \$(date) OneOS heat cap: from 45.0, 46.5, 48.0 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)\" > \$F
         if [ $HEAT_CAP_CPU = 1 ]; then
             echo \"# and from 82, 90 C on the hottest CPU thermal zone for levels 1 and 2 only (three and four readings running to go up, three 4 C under to step down); the higher level applies\" >> \$F
         else
@@ -4189,7 +4194,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
             if [ -n \"\$sk\" ]; then
-                sr=\$(awk -v s=\"\$sk\" -v p=\"\$sk_prev\" -v q=\"\$sk_prev2\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47.5; t[3] = 50; pn = (p == \"\" ? 999 : p + 0); qn = (q == \"\" ? 999 : q + 0); while (l < 3 && s >= t[l + 1]) l++; hd = l; while (hd > 0 && s < t[hd] - 2) hd--; while (l > 0 && s < t[l] - 2 && pn < t[l] - 2 && qn < t[l] - 2) l--; if (hd < l) printf \"%d %g %s, %s\\n\", l, t[hd + 1] - 2, (p == \"\" ? \"-\" : p), (q == \"\" ? \"-\" : q); else print l }')
+                sr=\$(awk -v s=\"\$sk\" -v p=\"\$sk_prev\" -v q=\"\$sk_prev2\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 46.5; t[3] = 48; pn = (p == \"\" ? 999 : p + 0); qn = (q == \"\" ? 999 : q + 0); while (l < 3 && s >= t[l + 1]) l++; hd = l; while (hd > 0 && s < t[hd] - 2) hd--; while (l > 0 && s < t[l] - 2 && pn < t[l] - 2 && qn < t[l] - 2) l--; if (hd < l) printf \"%d %g %s, %s\\n\", l, t[hd + 1] - 2, (p == \"\" ? \"-\" : p), (q == \"\" ? \"-\" : q); else print l }')
                 slvl=\${sr%% *}
                 case \"\$sr\" in
                     *' '*) sr=\${sr#* }; echo \"\$(date +%T) skin \$sk C\$ap_c held: needs three readings under \${sr%% *} C (before: \${sr#* })\" >> \$F ;;

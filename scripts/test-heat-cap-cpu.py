@@ -4,9 +4,9 @@
 S23 SM-S911B, ColorOS 17 (2026-11-15): skin sat at 44.6 C, just under 45,
 while cpu-1-3 read 88 C and policy0/policy3 stayed at their top clock. Under
 Curve B (S25 Ultra coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
-a12bf19e1931e81a), skin enters immediately at 45 (80%), 47.5 (65%), and
-50 C (50%) and waits three readings 2 C under to step down; CPU thermal zones
-never exceed level 2 (level 3 is skin >= 50.0 C only), entering level 1 at
+a12bf19e1931e81a), skin enters immediately at 45.0 (80%), 46.5 (65%), and
+48.0 C (50%) and waits three readings 2 C under to step down; CPU thermal zones
+never exceed level 2 (level 3 is skin >= 48.0 C only), entering level 1 at
 >= 82 C for three readings and level 2 at >= 90 C for four readings, and
 stepping down on three readings 4 C under (< 78, < 86 C). Up-holds and
 down-holds log a "held" line; run_loop leaves those out unless asked for them.
@@ -214,24 +214,24 @@ sleep() {{
         self.assertEqual(['0 ', '0 ', '1 ', '1 ', '1 ', '2 '], [l[:2] for l in self.trace()])
 
     def test_skin_and_cpu_step_down_hysteresis_requires_three_readings(self):
-        # Skin: L3 at 50.0, two 40.0 readings hold at L3, third 40.0 restores full clock.
-        log = self.run_loop([(50.0, {}), (40.0, {}), (40.0, {}), (40.0, {})], held=True)
+        # Skin: L3 at 48.0, two 40.0 readings hold at L3, third 40.0 restores full clock.
+        log = self.run_loop([(48.0, {}), (40.0, {}), (40.0, {}), (40.0, {})], held=True)
         self.assertIn('level 0 to 3: 50%', log[0])
         self.assertIn('skin 40.0 C held: needs three readings under 43 C', log[1])
         self.assertIn('skin 40.0 C held: needs three readings under 43 C', log[2])
         self.assertIn('level 3 to 0: full clock', log[3])
         self.assertEqual(['3 ', '3 ', '3 ', '0 '], [l[:2] for l in self.trace()])
 
-        # Skin L2 boundary: 47.5 -> 45.5 stays L2; 45.4 x3 steps down to L1.
+        # Skin L2 boundary: 46.5 -> 44.5 stays L2; 44.4 x3 steps down to L1.
         self.fresh()
-        log = self.run_loop([(47.5, {})] + [(45.5, {})] * 3 + [(45.4, {})] * 3, held=True)
+        log = self.run_loop([(46.5, {})] + [(44.5, {})] * 3 + [(44.4, {})] * 3, held=True)
         self.assertEqual(['2 ', '2 ', '2 ', '2 ', '2 ', '2 ', '1 '], [l[:2] for l in self.trace()])
-        self.assertIn('skin 45.4 C held: needs three readings under 45.5 C', log[1])
-        self.assertIn('skin 45.4 C, cpu 40.0 C (cpu-0-0), level 2 to 1: 80%', log[3])
+        self.assertIn('skin 44.4 C held: needs three readings under 44.5 C', log[1])
+        self.assertIn('skin 44.4 C, cpu 40.0 C (cpu-0-0), level 2 to 1: 80%', log[3])
 
         # Skin warm bounce resets consecutive cool count.
         self.fresh()
-        self.run_loop([(50.0, {}), (40.0, {}), (40.0, {}), (48.0, {}), (40.0, {}), (40.0, {}), (40.0, {})])
+        self.run_loop([(48.0, {}), (40.0, {}), (40.0, {}), (46.0, {}), (40.0, {}), (40.0, {}), (40.0, {})])
         self.assertEqual(['3 ', '3 ', '3 ', '3 ', '3 ', '3 ', '0 '], [l[:2] for l in self.trace()])
 
         # CPU: L2 at 92.0 x4, two 70.0 readings hold at L2, third 70.0 restores full clock.
@@ -245,11 +245,14 @@ sleep() {{
         self.assertEqual(['0 ', '0 ', '1 ', '2 ', '2 ', '2 ', '0 '], [l[:2] for l in self.trace()])
 
     def test_skin_still_takes_one_reading(self):
-        log = self.run_loop([(47.4, {})])
-        self.assertIn('skin 47.4 C, cpu 40.0 C (cpu-0-0), level 0 to 1: 80%', log[0])
+        log = self.run_loop([(46.4, {})])
+        self.assertIn('skin 46.4 C, cpu 40.0 C (cpu-0-0), level 0 to 1: 80%', log[0])
         self.fresh()
-        log = self.run_loop([(47.5, {})])
-        self.assertIn('skin 47.5 C, cpu 40.0 C (cpu-0-0), level 0 to 2: 65%', log[0])
+        log = self.run_loop([(46.5, {})])
+        self.assertIn('skin 46.5 C, cpu 40.0 C (cpu-0-0), level 0 to 2: 65%', log[0])
+        self.fresh()
+        log = self.run_loop([(44.9, {})])
+        self.assertIn('skin 44.9 C, cpu 40.0 C (cpu-0-0): no cap', log[0])
 
     def test_the_s23_report_caps_at_80(self):
         log = self.run_loop([(44.6, {'cpu-1-3': 88000, 'cpuss-2': 79200, 'cpu-0-0': 84000})] * 3)
@@ -278,14 +281,14 @@ sleep() {{
         self.assertFalse(any('50%' in l or 'to 3:' in l or 'level 3' in l for l in log), log)
         self.assertEqual(['0 ', '0 ', '1 ', '2 ', '2 ', '2 '], [l[:2] for l in self.trace()])
 
-    def test_skin_50_reaches_level_3(self):
-        log = self.run_loop([(50.0, {'cpu-1-3': 60000})])
-        self.assertIn('skin 50.0 C, cpu 60.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
+    def test_skin_48_reaches_level_3(self):
+        log = self.run_loop([(48.0, {'cpu-1-3': 60000})])
+        self.assertIn('skin 48.0 C, cpu 60.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
         self.assertTrue(self.trace()[0].startswith('3 '), self.trace())
 
     def test_skin_higher_than_cpu_wins(self):
-        log = self.run_loop([(50.5, {'cpu-1-3': 76000})])
-        self.assertIn('skin 50.5 C, cpu 76.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
+        log = self.run_loop([(48.5, {'cpu-1-3': 76000})])
+        self.assertIn('skin 48.5 C, cpu 76.0 C (cpu-1-3), level 0 to 3: 50%', log[0])
 
     def test_no_skin_but_cpu_still_caps(self):
         log = self.run_loop([(None, {'cpuss-2': 83000})] * 3)
@@ -381,7 +384,7 @@ sleep() {{
     def test_the_header_names_the_cpu_thresholds(self):
         self.run_loop([(40.0, {})])
         header = (self.stage / 'heat_cap.log').read_text()
-        self.assertIn('from 45, 47.5, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)', header)
+        self.assertIn('from 45.0, 46.5, 48.0 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)', header)
         self.assertIn('82, 90 C on the hottest CPU thermal zone for levels 1 and 2 only (three and four readings running to go up, three 4 C under to step down)', header)
 
     def test_cam_limit_releases_at_level_1_and_2_after_camera_exits(self):
@@ -399,7 +402,7 @@ sleep() {{
 
         # Level 2: leftover cpufreq_max_limit is also released when camera is gone.
         self.fresh()
-        log = self.run_loop([(48.0, {})], cfl='1958400', camera=False)
+        log = self.run_loop([(46.5, {})], cfl='1958400', camera=False)
         self.assertEqual(['-1 1958400'], self.cfl_trace())
         self.assertEqual('-1', self.cfl())
         self.assertEqual('1958400', (self.stage / 'cpufreq_max_limit.released').read_text().strip())

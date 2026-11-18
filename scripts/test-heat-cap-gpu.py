@@ -190,7 +190,7 @@ sleep() {{
 
     def test_header_lists_curve_b_skin_thresholds(self):
         log, _ = self._run_s25_loop([(40.0, 40000)])
-        self.assertIn('45, 47.5, 50 C skin', log)
+        self.assertIn('45.0, 46.5, 48.0 C skin', log)
         self.assertIn('82, 90 C on the hottest CPU thermal zone', log)
 
     def test_s25_core_105_spike_caps_gpu_at_734_never_525(self):
