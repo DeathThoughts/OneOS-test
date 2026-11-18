@@ -54,7 +54,7 @@ def _name_references(data: bytes, segments, name: bytes):
         pos = data.find(b"\x00" + name + b"\x00", start)
         if pos < 0:
             break
-        names.append(pos + 1)
+        names.append(pos)
         start = pos + 1
     refs = []
     for a, b, va, flags in segments:
@@ -72,8 +72,8 @@ def _name_references(data: bytes, segments, name: bytes):
             pc = va + off - a
             target = _adrp_target(adrp, pc) + ((add >> 10) & 0xfff)
             target_off = _file_for_va(segments, target)
-            if target_off in names:
-                refs.append((off, target_off))
+            if target_off is not None and target_off - 1 in names:
+                refs.append((off, target_off - 1))
     return refs
 
 
@@ -144,7 +144,7 @@ def update_make_overlays_text(
         f'        "vold": "{vold_sha.lower()}",\n'
         f'        "service.incremental.so": "{inc_sha.lower()}",\n'
         f'        "{crash_apex_name}": "{crash_sha.lower()}",\n'
-        f'    }}, [("vold", {vold_name_off - 1:#x}, {name_patch}), '
+        f'    }}, [("vold", {vold_name_off:#x}, {name_patch}), '
         f'("vold", {vold_try_off:#x}, TRY_START), '
         f'("service.incremental.so", {inc_name_off - 1:#x}, {name_patch})]),\n'
     )
