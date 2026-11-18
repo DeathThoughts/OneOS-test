@@ -5208,7 +5208,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     rm -f $STAGE/diag.pid
                     ) </dev/null >/dev/null 2>&1 &
                 fi
-            ) </dev/null & fi
+            fi
             # A running surfaceflinger can still show nothing: when the composer
             # rejects its frames the panel keeps the last host frame.
             # The guest framework is gone for good once its zygote died: the
