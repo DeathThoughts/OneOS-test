@@ -74,7 +74,8 @@ def download(url, output, size):
 
 BRANCH = "test/coloros-twinity-4c"
 SET_NAME = "twinity-s23"
-IMAGE_SIZE = 10_238_480_384
+MAX_IMAGE_SIZE = 16 * 1024**3
+IMAGE_BLOCK_SIZE = 4096
 SHA256 = re.compile(r"[0-9a-f]{64}")
 GIT_SHA = re.compile(r"[0-9a-f]{40}")
 GUARDED = frozenset({
@@ -140,13 +141,14 @@ def validate_guards(path, pins):
         raise ValueError(f"Missing guards.txt pins: {sorted(GUARDED - covered)}")
 
 
-def validate_image_metadata(provenance):
+def validate_image_metadata(provenance, *, verify_file=False):
     image = provenance.get("image") if isinstance(provenance, dict) else None
     if not isinstance(image, dict):
         raise ValueError("Missing image pin in builder metadata")
     path, size, digest = image.get("path"), image.get("size"), image.get("sha256")
     if (not isinstance(path, str) or not Path(path).is_absolute() or type(size) is not int
-            or size != IMAGE_SIZE or not isinstance(digest, str) or not SHA256.fullmatch(digest)):
+            or not 1082 <= size <= MAX_IMAGE_SIZE or size % IMAGE_BLOCK_SIZE
+            or not isinstance(digest, str) or not SHA256.fullmatch(digest)):
         raise ValueError("Invalid image path, size, or SHA-256 in builder metadata")
 
     builder = runpy.run_path(str(ROOT / "scripts/build-twinity-image.py"))
@@ -156,6 +158,11 @@ def validate_image_metadata(provenance):
             raise ValueError(f"Image provenance differs from pinned builder metadata: {key}")
     if provenance.keys() != expected.keys():
         raise ValueError("Unexpected keys in builder metadata")
+    if verify_file:
+        try:
+            builder["image_details"](Path(path), digest, size)
+        except builder["BuildError"] as error:
+            raise ValueError(str(error)) from error
 
 
 def index_rows(path):
@@ -332,7 +339,7 @@ def main():
             require_publish_context(os.environ, args.target)
 
         provenance = json.loads(args.image_metadata.read_text(encoding="utf-8"))
-        validate_image_metadata(provenance)
+        validate_image_metadata(provenance, verify_file=args.publish)
         files = validate_files(args.existing_overlays, GENERATED | BUILD_ONLY)
         build_info = files["build-info.txt"].read_text(encoding="utf-8")
         if args.publish:

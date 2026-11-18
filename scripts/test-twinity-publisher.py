@@ -22,9 +22,9 @@ TARGET = "a" * 40
 BUILDER = runpy.run_path(str(Path(__file__).with_name("build-twinity-image.py")))
 
 
-def provenance():
-    return BUILDER["metadata"](Path("/build/system.img"), {
-        "size": publisher.IMAGE_SIZE, "sha256": "b" * 64,
+def provenance(path=Path("/build/system.img"), size=10_238_480_384, digest="b" * 64):
+    return BUILDER["metadata"](path, {
+        "size": size, "sha256": digest,
     })
 
 
@@ -111,6 +111,12 @@ class ProvenanceTests(unittest.TestCase):
     def test_valid_metadata(self):
         publisher.validate_image_metadata(provenance())
 
+    def test_accepts_runner_image_size(self):
+        publisher.validate_image_metadata(provenance(
+            size=10_238_484_480,
+            digest="118f244edeca9a5a29fdac3ba31ee18287e0114c34b67058195697baefc32638",
+        ))
+
     def test_rejects_source_pin_mismatch(self):
         data = copy.deepcopy(provenance())
         data["source_parts"][0]["sha256"] = "0" * 64
@@ -118,11 +124,47 @@ class ProvenanceTests(unittest.TestCase):
             publisher.validate_image_metadata(data)
 
     def test_rejects_invalid_image_digest_or_size(self):
-        for name, value in (("sha256", "broken"), ("size", "10238480384"), ("size", 1)):
+        for name, value in (
+            ("sha256", "broken"), ("sha256", "B" * 64), ("size", "10238480384"),
+            ("size", 0), ("size", 1), ("size", 4097),
+            ("size", publisher.MAX_IMAGE_SIZE + publisher.IMAGE_BLOCK_SIZE),
+        ):
             data = provenance()
             data["image"][name] = value
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Invalid image"):
                 publisher.validate_image_metadata(data)
+
+    def test_verify_image_file(self):
+        with tempfile.TemporaryDirectory() as work:
+            path = Path(work) / "system.img"
+            image = bytes(1080) + b"\x53\xef" + bytes(4096 - 1082)
+            path.write_bytes(image)
+            pin = publisher.file_pin(path)
+            publisher.validate_image_metadata(provenance(path, pin.size, pin.sha), verify_file=True)
+
+    def test_rejects_missing_image_file(self):
+        with tempfile.TemporaryDirectory() as work:
+            with self.assertRaises(FileNotFoundError):
+                publisher.validate_image_metadata(
+                    provenance(Path(work) / "system.img"), verify_file=True,
+                )
+
+    def test_rejects_image_file_mismatch(self):
+        with tempfile.TemporaryDirectory() as work:
+            path = Path(work) / "system.img"
+            image = bytes(1080) + b"\x53\xef" + bytes(4096 - 1082)
+            path.write_bytes(image)
+            pin = publisher.file_pin(path)
+            for content, digest, message in (
+                (bytes(4096), pin.sha, "ext4 superblock magic"),
+                (image + bytes(4096), pin.sha, "expected 4096 bytes"),
+                (image, "b" * 64, "SHA-256"),
+            ):
+                with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                    path.write_bytes(content)
+                    publisher.validate_image_metadata(
+                        provenance(path, pin.size, digest), verify_file=True,
+                    )
 
 
 class PublishTests(unittest.TestCase):

@@ -103,15 +103,29 @@ jobs:
               print(name, size, f"{release}/{name}", sep="\t")
           PY
           {
+            pids=()
             while IFS=$'\t' read -r name size url; do
-              part="out/twinity-source/$name"
-              curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-                --connect-timeout 30 --max-time 900 --retry 3 --retry-max-time 1200 \
-                --max-filesize "$size" --output "$part.tmp" "$url"
-              [ "$(stat -c %s "$part.tmp")" = "$size" ] || { echo "unexpected size for $name" >&2; exit 1; }
-              mv "$part.tmp" "$part"
-              echo "Downloaded $name ($size bytes)"
+              (
+                part="out/twinity-source/$name"
+                curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+                  --connect-timeout 30 --max-time 900 --retry 3 --retry-all-errors --retry-max-time 1200 \
+                  --max-filesize "$size" --output "$part.tmp" "$url"
+                [ "$(stat -c %s "$part.tmp")" = "$size" ] || { echo "unexpected size for $name" >&2; exit 1; }
+                mv "$part.tmp" "$part"
+                echo "Downloaded $name ($size bytes)"
+              ) &
+              pids+=("$!")
             done < out/twinity-source/parts.tsv
+            any_failed=0
+            for pid in "${pids[@]}"; do
+              if ! wait "$pid"; then
+                any_failed=1
+              fi
+            done
+            if ((any_failed)); then
+              echo "Failed to download all pinned Twinity source parts" >&2
+              exit 1
+            fi
           } 2>&1 | tee out/twinity-logs/download.log
 
       - name: Build Twinity ext4 image
