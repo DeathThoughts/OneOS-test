@@ -3347,65 +3347,272 @@ PANO
         echo "ColorOS UniRender: off on this $(getprop ro.soc.manufacturer) phone (${UR:+bound over$UR}${UR:-no switch list in the image})"
     fi
 fi
-# OPPO's trace and log uploaders turned off in ColorOS guests (owner, 2026-11-17).
-# S25 Ultra, coloros17-findx9u-in-1105, sessions db19aee410bd79ff and
-# 75e538ac0ed725df: incident_helper plus a second top ran at 40-100% CPU for
-# 30-60 s several times a session around com.oplus.onetrace activity. On a port
-# com.oplus.onetrace and com.oplus.olc (LogCoreService) have nothing to report
-# to OPPO, so oneos_oplus_telemetry.sh disables them for user 0 once the guest's
-# package manager answers (the UI activator starts it) and lists what it
-# disabled in /data/oneos_oplus_telemetry_off; a package the owner had disabled
-# is never listed or touched. com.oplus.midas is left alone.
-# ONEOS_GUEST_OPLUS_TELEMETRY=1 turns back on only what OneOS turned off.
+# OPPO's trace/log uploaders and Phase 1 bloat/background-CPU apps in ColorOS guests.
+# - Telemetry (owner, 2026-11-17): S25 Ultra, coloros17-findx9u-in-1105, sessions
+#   db19aee410bd79ff and 75e538ac0ed725df: incident_helper plus a second top ran at
+#   40-100% CPU for 30-60 s several times a session around com.oplus.onetrace activity.
+#   com.oplus.onetrace and com.oplus.olc (LogCoreService) have nothing to report to
+#   OPPO on a port, so oneos_oplus_telemetry.sh disables them for user 0 once the
+#   guest's package manager answers (the UI activator starts it) and records them in
+#   /data/oneos_oplus_telemetry_off; com.oplus.midas is left alone.
+#   ONEOS_GUEST_OPLUS_TELEMETRY=1 turns back on only those recorded packages.
+# - Phase 1 debloat + restrict (2026-11-18): S25 Ultra, coloros17-findx9u-in-1105,
+#   sessions db475ad5017133c4 and a12bf19e1931e81a: hotword (okgoogle, xgoogle)
+#   FATAL EXCEPTION on every boot, Global Search (com.oppo.quicksearchbox) and Shelf
+#   (com.coloros.assistantscreen) crashes, Meta and Branch.io wakelocks, and unused
+#   OPPO/Microsoft apps (ebadge, microsoft.*, pictorial, member, heytap.browser) are
+#   disabled for user 0 and recorded in /data/oneos_oplus_bloat_off.
+#   com.oplus.games (Game Assistant) ran at 82.1% CPU plus a 46.4% sandboxed WebView
+#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34), so it stays
+#   enabled for the in-game sidebar and has its background execution restricted
+#   (RUN_ANY_IN_BACKGROUND ignore, standby bucket restricted, recorded in
+#   /data/oneos_oplus_restricted), while com.oplus.cosa and com.oplus.statistics.rom
+#   (135 callers) stay enabled and unrestricted. An owner's own disabled/restricted
+#   state is never recorded or undone; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
+#   unrestricts only what OneOS recorded.
+#   A package the owner had disabled (or already restricted) is never listed or touched,
+#   in any of the three lists.
 rm -f "$STAGE/data/oneos_oplus_telemetry.sh"
 if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
     if [ "${ONEOS_GUEST_OPLUS_TELEMETRY:-0}" = 1 ]; then TELE_MODE=keep; else TELE_MODE=off; fi
-    { echo "MODE=$TELE_MODE"; cat <<'TELE'
-PKGS="com.oplus.onetrace com.oplus.olc"
-REC=/data/oneos_oplus_telemetry_off
+    if [ "${ONEOS_GUEST_OPLUS_BLOAT:-0}" = 1 ]; then BLOAT_MODE=keep; else BLOAT_MODE=off; fi
+    { echo "TELE_MODE=$TELE_MODE"; echo "BLOAT_MODE=$BLOAT_MODE"; cat <<'TELE'
+BLOAT_MODE=${BLOAT_MODE:-off}
+TELE_PKGS="com.oplus.onetrace com.oplus.olc"
+TELE_REC=/data/oneos_oplus_telemetry_off
+BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser"
+BLOAT_REC=/data/oneos_oplus_bloat_off
+RESTRICT_PKGS="com.oplus.games"
+RESTRICT_REC=/data/oneos_oplus_restricted
 log() { echo "$(date +%T) $*"; }
-if [ -L "$REC" ]; then
-    rm -f "$REC"
-    log "$REC was a symlink; removed, not used"
-fi
-ok=0; bad=0
-if [ "$MODE" = off ]; then
-    dis=$(timeout 30 pm list packages -d 2>/dev/null </dev/null)
-    for p in $PKGS; do
-        if [ -z "$(timeout 30 pm path "$p" 2>/dev/null </dev/null)" ]; then
-            log "$p: not installed"
-        elif echo "$dis" | grep -qx "package:$p"; then
-            # off already: listed only if OneOS put it there before
-            log "$p: already off"
-        elif out=$(timeout 30 pm disable-user --user 0 "$p" 2>&1 </dev/null); then
-            if ! { [ -f "$REC" ] && grep -qx "$p" "$REC"; }; then echo "$p" >> "$REC"; fi
-            ok=$((ok + 1)); log "$p: turned off"
+is_pkg() { case "$1" in ''|*[!A-Za-z0-9._]*) return 1 ;; esac; }
+drop_link() { if [ -L "$1" ]; then rm -f "$1"; log "$1 was a symlink; removed, not used"; fi; }
+prep_tmp() { drop_link "$1.tmp"; [ -L "$1.tmp" ] && return 1; rm -f "$1.tmp"; : > "$1.tmp"; }
+commit_tmp() {
+    drop_link "$1"
+    if [ -L "$1.tmp" ]; then rm -f "$1.tmp"; log "$1.tmp was a symlink; removed, not used"; return 1; fi
+    if [ -s "$1.tmp" ]; then mv -f "$1.tmp" "$1"; else rm -f "$1.tmp" "$1"; fi
+}
+disable_pkg_list() {
+    _pkgs=$1; _rec=$2; _label=$3
+    _ok=0; _bad=0
+    _dis=$(timeout 30 pm list packages -d 2>/dev/null </dev/null)
+    for _p in $_pkgs; do
+        if [ -z "$(timeout 30 pm path "$_p" 2>/dev/null </dev/null)" ]; then
+            log "$_p: not installed"
+        elif echo "$_dis" | grep -qxF "package:$_p"; then
+            log "$_p: already off"
+        elif _out=$(timeout 30 pm disable-user --user 0 "$_p" 2>&1 </dev/null); then
+            drop_link "$_rec"
+            if ! [ -L "$_rec" ] && ! { [ -f "$_rec" ] && grep -qxF "$_p" "$_rec"; }; then echo "$_p" >> "$_rec"; fi
+            _ok=$((_ok + 1)); log "$_p: turned off"
         else
-            bad=$((bad + 1)); log "$p: pm disable-user failed: $out"
+            _bad=$((_bad + 1)); log "$_p: pm disable-user failed: $_out"
         fi
     done
-    log "OPPO telemetry apps: $ok turned off, $bad failed"
-else
-    if [ -f "$REC" ]; then
-        while read -r p; do
-            # pm is cmd, which forwards stdin: </dev/null keeps it from eating the rest of the record
-            case " $PKGS " in *" $p "*) ;; *) continue ;; esac
-            if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
-                ok=$((ok + 1)); log "$p: turned back on"
-            else
-                bad=$((bad + 1)); log "$p: pm enable failed: $out"
-            fi
-        done < "$REC"
-        [ "$bad" = 0 ] && rm -f "$REC"
+    log "$_label: $_ok turned off, $_bad failed"
+}
+appop_get() {
+    _ao=$(timeout 30 cmd appops get --user 0 "$1" RUN_ANY_IN_BACKGROUND 2>/dev/null </dev/null) || return 1
+    _ao=$(printf '%s\n' "$_ao" | tr -d '\r')
+    _modes=$(printf '%s\n' "$_ao" | sed -n 's/.*RUN_ANY_IN_BACKGROUND:[[:space:]]*\([A-Za-z_][A-Za-z_]*\).*/\1/p')
+    if [ -n "$_modes" ]; then
+        if printf '%s\n' "$_modes" | grep -qxF ignore; then
+            echo ignore
+        else
+            printf '%s\n' "$_modes" | tail -n 1
+        fi
+    elif printf '%s\n' "$_ao" | grep -q 'No operations'; then
+        echo default
+    else
+        return 1
     fi
-    log "OPPO telemetry apps: kept, $ok turned back on, $bad failed"
-fi
+}
+bucket_get() {
+    if _b=$(timeout 30 am get-standby-bucket --user 0 "$1" 2>/dev/null </dev/null); then
+        _b=$(printf '%s' "$_b" | tr -d '[:space:]')
+        echo "${_b:-unknown}"
+    else
+        echo unknown
+    fi
+}
+unrestrict_one() {
+    _uf=0
+    if ! _u1=$(timeout 30 cmd appops set --user 0 "$1" RUN_ANY_IN_BACKGROUND default 2>&1 </dev/null); then
+        log "$1: cmd appops set default failed: $_u1"
+        _uf=1
+    fi
+    if ! _u2=$(timeout 30 am set-standby-bucket --user 0 "$1" active 2>&1 </dev/null); then
+        log "$1: am set-standby-bucket active failed: $_u2"
+        _uf=1
+    fi
+    return "$_uf"
+}
+run_telemetry() {
+    drop_link "$TELE_REC"
+    drop_link "$TELE_REC.tmp"
+    ok=0; bad=0
+    if [ "$TELE_MODE" = off ]; then
+        disable_pkg_list "$TELE_PKGS" "$TELE_REC" "OPPO telemetry apps"
+    else
+        if [ -f "$TELE_REC" ]; then
+            while IFS= read -r p || [ -n "$p" ]; do
+                # Keep stdin on /dev/null so the record loop is never drained
+                case " $TELE_PKGS " in *" $p "*) ;; *) continue ;; esac
+                if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
+                    ok=$((ok + 1)); log "$p: turned back on"
+                else
+                    bad=$((bad + 1)); log "$p: pm enable failed: $out"
+                fi
+            done < "$TELE_REC"
+            [ "$bad" = 0 ] && rm -f "$TELE_REC"
+        fi
+        log "OPPO telemetry apps: kept, $ok turned back on, $bad failed"
+    fi
+}
+run_bloat() {
+    drop_link "$BLOAT_REC"
+    drop_link "$BLOAT_REC.tmp"
+    ok=0; bad=0
+    if [ "$BLOAT_MODE" = off ]; then
+        if [ -f "$BLOAT_REC" ] && prep_tmp "$BLOAT_REC"; then
+            while IFS= read -r p || [ -n "$p" ]; do
+                is_pkg "$p" || continue
+                case " $BLOAT_PKGS " in
+                    *" $p "*)
+                        if ! grep -qxF "$p" "$BLOAT_REC.tmp"; then echo "$p" >> "$BLOAT_REC.tmp"; fi
+                        ;;
+                    *)
+                        if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
+                            log "$p: turned back on"
+                        else
+                            log "$p: pm enable failed: $out"
+                            if ! grep -qxF "$p" "$BLOAT_REC.tmp"; then echo "$p" >> "$BLOAT_REC.tmp"; fi
+                        fi
+                        ;;
+                esac
+            done < "$BLOAT_REC"
+            commit_tmp "$BLOAT_REC"
+        fi
+        disable_pkg_list "$BLOAT_PKGS" "$BLOAT_REC" "OPPO bloat apps"
+    else
+        if [ -f "$BLOAT_REC" ] && prep_tmp "$BLOAT_REC"; then
+            while IFS= read -r p || [ -n "$p" ]; do
+                is_pkg "$p" || continue
+                if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
+                    ok=$((ok + 1)); log "$p: turned back on"
+                else
+                    bad=$((bad + 1)); log "$p: pm enable failed: $out"
+                    if ! grep -qxF "$p" "$BLOAT_REC.tmp"; then echo "$p" >> "$BLOAT_REC.tmp"; fi
+                fi
+            done < "$BLOAT_REC"
+            commit_tmp "$BLOAT_REC"
+        fi
+        log "OPPO bloat apps: kept, $ok turned back on, $bad failed"
+    fi
+}
+run_restrict() {
+    drop_link "$RESTRICT_REC"
+    drop_link "$RESTRICT_REC.tmp"
+    ok=0; bad=0
+    if [ "$BLOAT_MODE" = off ]; then
+        if [ -f "$RESTRICT_REC" ] && prep_tmp "$RESTRICT_REC"; then
+            while IFS= read -r p || [ -n "$p" ]; do
+                is_pkg "$p" || continue
+                case " $RESTRICT_PKGS " in
+                    *" $p "*)
+                        if ! grep -qxF "$p" "$RESTRICT_REC.tmp"; then echo "$p" >> "$RESTRICT_REC.tmp"; fi
+                        ;;
+                    *)
+                        if unrestrict_one "$p"; then
+                            m=$(appop_get "$p" || echo unknown)
+                            b=$(bucket_get "$p")
+                            log "$p: unrestricted (appop=$m bucket=$b)"
+                        else
+                            if ! grep -qxF "$p" "$RESTRICT_REC.tmp"; then echo "$p" >> "$RESTRICT_REC.tmp"; fi
+                        fi
+                        ;;
+                esac
+            done < "$RESTRICT_REC"
+            commit_tmp "$RESTRICT_REC"
+        fi
+        for p in $RESTRICT_PKGS; do
+            if [ -z "$(timeout 30 pm path "$p" 2>/dev/null </dev/null)" ]; then
+                log "$p: not installed"
+                continue
+            fi
+            rec=0; [ -f "$RESTRICT_REC" ] && grep -qxF "$p" "$RESTRICT_REC" && rec=1
+            pre=$(appop_get "$p") || pre=unknown
+            if [ "$rec" = 0 ] && [ "$pre" = ignore ]; then
+                b=$(bucket_get "$p")
+                log "$p: already restricted"
+                log "OPPO restricted apps: $p appop=$pre bucket=$b"
+                continue
+            fi
+            if [ "$rec" = 0 ] && [ "$pre" = unknown ]; then
+                b=$(bucket_get "$p")
+                log "$p: cmd appops get failed; not restricting"
+                log "OPPO restricted apps: $p appop=unknown bucket=$b"
+                continue
+            fi
+            # Record before changing anything (S25 Ultra, coloros17-findx9u-in-1105, review of the
+            # debloat branch): a recorded-but-not-yet-set entry is harmless (keep mode restores
+            # default/active), while a set with no record could never be undone.
+            added=0
+            if [ "$rec" = 0 ]; then
+                drop_link "$RESTRICT_REC"
+                if ! [ -L "$RESTRICT_REC" ] && ! { [ -f "$RESTRICT_REC" ] && grep -qxF "$p" "$RESTRICT_REC"; }; then
+                    echo "$p" >> "$RESTRICT_REC" && added=1
+                fi
+            fi
+            if out=$(timeout 30 cmd appops set --user 0 "$p" RUN_ANY_IN_BACKGROUND ignore 2>&1 </dev/null); then
+                if ! out=$(timeout 30 am set-standby-bucket --user 0 "$p" restricted 2>&1 </dev/null); then
+                    log "$p: am set-standby-bucket restricted failed: $out"
+                fi
+            else
+                log "$p: cmd appops set ignore failed: $out"
+                # The appop did not change, so drop the entry this run added and leave the bucket alone.
+                if [ "$added" = 1 ] && [ -f "$RESTRICT_REC" ] && prep_tmp "$RESTRICT_REC"; then
+                    grep -vxF "$p" "$RESTRICT_REC" >> "$RESTRICT_REC.tmp"
+                    commit_tmp "$RESTRICT_REC"
+                fi
+            fi
+            m=$(appop_get "$p" || echo unknown)
+            b=$(bucket_get "$p")
+            log "OPPO restricted apps: $p appop=$m bucket=$b"
+        done
+    else
+        if [ -f "$RESTRICT_REC" ] && prep_tmp "$RESTRICT_REC"; then
+            while IFS= read -r p || [ -n "$p" ]; do
+                is_pkg "$p" || continue
+                if unrestrict_one "$p"; then
+                    ok=$((ok + 1))
+                    m=$(appop_get "$p" || echo unknown)
+                    b=$(bucket_get "$p")
+                    log "$p: unrestricted (appop=$m bucket=$b)"
+                    log "OPPO restricted apps: $p appop=$m bucket=$b"
+                else
+                    bad=$((bad + 1))
+                    m=$(appop_get "$p" || echo unknown)
+                    b=$(bucket_get "$p")
+                    log "OPPO restricted apps: $p appop=$m bucket=$b"
+                    if ! grep -qxF "$p" "$RESTRICT_REC.tmp"; then echo "$p" >> "$RESTRICT_REC.tmp"; fi
+                fi
+            done < "$RESTRICT_REC"
+            commit_tmp "$RESTRICT_REC"
+        fi
+        log "OPPO restricted apps: kept, $ok restored, $bad failed"
+    fi
+}
+run_telemetry
+run_bloat
+run_restrict
 exit 0
 TELE
     } > "$STAGE/data/oneos_oplus_telemetry.sh"
     chmod 644 "$STAGE/data/oneos_oplus_telemetry.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_oplus_telemetry.sh" 2>/dev/null || true
-    echo "ColorOS OPPO telemetry apps (onetrace, olc): $TELE_MODE (ONEOS_GUEST_OPLUS_TELEMETRY=${ONEOS_GUEST_OPLUS_TELEMETRY:-0}; oplus_telemetry.log)"
+    echo "ColorOS OPPO apps: telemetry=$TELE_MODE (ONEOS_GUEST_OPLUS_TELEMETRY=${ONEOS_GUEST_OPLUS_TELEMETRY:-0}), bloat/restrict=$BLOAT_MODE (ONEOS_GUEST_OPLUS_BLOAT=${ONEOS_GUEST_OPLUS_BLOAT:-0}; oplus_telemetry.log)"
 fi
 # The guest's /oem, built in $STAGE/oem and bound over the image's. /oem is
 # empty in the images (ColorOS and Pixel) and scanned by the guest's

@@ -177,18 +177,19 @@ class EndCapture(unittest.TestCase):
 class HeatSeries(heat.HeatCapCpuTest):
     def series(self, rounds, cfl='2246400'):
         d = self.r / 'sys/devices/system/cpu/cpufreq_limit'
-        d.mkdir(parents=True)
+        d.mkdir(parents=True, exist_ok=True)
         (d / 'cpufreq_max_limit').write_text(cfl + '\n')
-        log = self.run_loop(rounds)
+        # camera=True: Samsung Camera is running, so cam_limit leaves the cfl alone.
+        log = self.run_loop(rounds, cfl=cfl, camera=True)
         lines = (self.stage / 'heat_series.log').read_text().splitlines()
         return log, lines
 
     def test_every_third_tick(self):
-        hot = (46.0, {'cpu-1-3': 76000}, 44.5)
+        hot = (46.0, {'cpu-1-3': 83000}, 44.5)
         log, lines = self.series([hot] * 7)
         self.assertTrue(lines[0].startswith('# '))
         body = [l.split(' ', 1)[1] for l in lines[1:]]
-        self.assertEqual(['skin=46.0 ap=44.5 cpu=76.0(cpu-1-3) lvl=1 s=1 c=1 cfl=2246400'] * 2, body)
+        self.assertEqual(['skin=46.0 ap=44.5 cpu=83.0(cpu-1-3) lvl=1 s=1 c=1 cfl=2246400'] * 2, body)
         for l in lines[1:]:
             self.assertRegex(l, r'^\d\d:\d\d:\d\d ')
         # heat_cap.log keeps its own lines.
