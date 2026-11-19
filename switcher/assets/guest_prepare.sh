@@ -3366,14 +3366,14 @@ fi
 #   update_engine" (session 161a843fbaddcd7a, 18:51:13 and 18:54:35): the guest has no
 #   update_engine and must never update itself, so it is disabled the same way.
 #   com.oplus.games (Game Assistant) ran at 82.1% CPU plus a 46.4% sandboxed WebView
-#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34). It stays
-#   enabled for the in-game sidebar, and since 2026-11-18 it is no longer restricted
-#   either: S25 Ultra, coloros17-findx9u-in-1105, session 22343aacdd4e1d6c, the sidebar
-#   did not appear when a game was opened while RUN_ANY_IN_BACKGROUND was ignore and
-#   the standby bucket restricted. Game Assistant sees the game start from the
-#   background, so the restriction is the likely cause (inferred: the part of the
-#   logcat with the game was not in the report). The owner wants the sidebar more than
-#   the CPU saving. RESTRICT_PKGS is empty, so run_restrict only undoes what OneOS
+#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34). It was first
+#   restricted, then left unrestricted for its in-game sidebar; the sidebar did not
+#   appear either way (sessions 22343aacdd4e1d6c restricted, f8c0108ef1bea94a
+#   unrestricted, Mobile Legends at 03:50), so the restriction was not the cause. The
+#   owner has no use for the game services (2026-11-19): Game Assistant, Game Center
+#   (com.nearme.gamecenter) and Quick games (com.heytap.quickgame) are disabled with the
+#   rest; ColorOS's game boost needs OPPO's ORMS, which Samsung does not have (see
+#   docs/dead-ends.md). RESTRICT_PKGS is empty, so run_restrict only undoes what OneOS
 #   recorded in /data/oneos_oplus_restricted (appops default, bucket active) on the next
 #   switch; com.oplus.cosa and com.oplus.statistics.rom (135 callers) stay enabled and
 #   unrestricted. An owner's own disabled/restricted
@@ -3389,7 +3389,7 @@ if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
 BLOAT_MODE=${BLOAT_MODE:-off}
 TELE_PKGS="com.oplus.onetrace com.oplus.olc"
 TELE_REC=/data/oneos_oplus_telemetry_off
-BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota"
+BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota com.oplus.games com.nearme.gamecenter com.heytap.quickgame"
 BLOAT_REC=/data/oneos_oplus_bloat_off
 RESTRICT_PKGS=""
 RESTRICT_REC=/data/oneos_oplus_restricted
