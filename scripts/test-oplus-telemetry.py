@@ -7,9 +7,8 @@
   turns back on only those recorded packages.
 - Phase 1 debloat + restrict (2026-11-18): S25 Ultra, coloros17-findx9u-in-1105,
   sessions db475ad5017133c4 and a12bf19e1931e81a: 15 bloat packages off for user 0 (16 with com.oplus.ota, session 161a843fbaddcd7a)
-  -> /data/oneos_oplus_bloat_off; com.oplus.games stays enabled and gets
-  RUN_ANY_IN_BACKGROUND ignore + standby bucket restricted ->
-  /data/oneos_oplus_restricted; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
+  -> /data/oneos_oplus_bloat_off (19 with the game services, owner 2026-11-19); RESTRICT_PKGS is empty and
+  only undoes an old /data/oneos_oplus_restricted record; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
   unrestricts only what OneOS recorded.
 """
 import os
@@ -100,6 +99,9 @@ BLOAT_EXPECTED = [
     'com.oplus.member',
     'com.heytap.browser',
     'com.oplus.ota',
+    'com.oplus.games',
+    'com.nearme.gamecenter',
+    'com.heytap.quickgame',
 ]
 DEFERRED_OR_DROPPED = [
     'com.oplus.aiunit',
@@ -281,9 +283,9 @@ class ListsAndStatic(unittest.TestCase):
     def test_exact_package_lists(self):
         self.assertEqual(extract_pkg_list('TELE_PKGS'), [ONT, OLC])
         self.assertEqual(extract_pkg_list('BLOAT_PKGS'), BLOAT_EXPECTED)
-        self.assertEqual(len(BLOAT_EXPECTED), 16)
-        # Game Assistant is not restricted any more (S25 Ultra session 22343aacdd4e1d6c: the in-game
-        # sidebar did not appear while it was); the list stays empty and only undoes old records.
+        self.assertEqual(len(BLOAT_EXPECTED), 19)
+        # Nothing is restricted any more: Game Assistant is disabled with the game services instead (S25 Ultra
+        # sessions 22343aacdd4e1d6c and f8c0108ef1bea94a: no in-game sidebar either way; owner, 2026-11-19).
         self.assertEqual(extract_pkg_list('RESTRICT_PKGS'), [])
         all_pkgs = set(extract_pkg_list('TELE_PKGS')) | set(BLOAT_EXPECTED)
         for p in DEFERRED_OR_DROPPED:
@@ -388,7 +390,7 @@ class Telemetry(unittest.TestCase):
 
 
 class Bloat(unittest.TestCase):
-    def test_off_disables_all_16_and_is_idempotent(self):
+    def test_off_disables_all_19_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as d:
             g = Guest(d, bloat_mode='off')
             for p in BLOAT_EXPECTED:
@@ -398,7 +400,7 @@ class Bloat(unittest.TestCase):
             for p in BLOAT_EXPECTED:
                 self.assertTrue(g.disabled(p), p)
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED)
-            self.assertIn('OPPO bloat apps: 16 turned off, 0 failed', log)
+            self.assertIn('OPPO bloat apps: 19 turned off, 0 failed', log)
             log2 = g.run()
             self.assertEqual(g.assert_exit0, 0)
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED)
@@ -419,7 +421,7 @@ class Bloat(unittest.TestCase):
             self.assertNotIn(f'disable-user --user 0 {BLOAT_EXPECTED[0]}', g.calls('pm'))
             self.assertNotIn(f'disable-user --user 0 {BLOAT_EXPECTED[1]}', g.calls('pm'))
             self.assertEqual(g.bloat_record(), BLOAT_EXPECTED[2:])
-            self.assertIn('OPPO bloat apps: 14 turned off, 0 failed', log)
+            self.assertIn('OPPO bloat apps: 17 turned off, 0 failed', log)
 
     def test_off_failure_logged_not_recorded(self):
         with tempfile.TemporaryDirectory() as d:
@@ -719,7 +721,8 @@ class Restrict(unittest.TestCase):
 
 
 class GameAssistantNotRestricted(unittest.TestCase):
-    """S25 Ultra, coloros17-findx9u-in-1105, session 22343aacdd4e1d6c: com.oplus.games is left alone."""
+    """S25 Ultra, coloros17-findx9u-in-1105: com.oplus.games is never restricted (sessions 22343aacdd4e1d6c and
+    f8c0108ef1bea94a); a record from an earlier switch is undone, and the bloat list disables it instead."""
 
     def test_record_from_an_earlier_switch_is_undone_and_dropped(self):
         with tempfile.TemporaryDirectory() as d:
@@ -751,7 +754,8 @@ class GameAssistantNotRestricted(unittest.TestCase):
                 self.assertEqual(g.bucket(GAMES), 'active')
                 self.assertFalse(g.restrict_rec.exists())
                 self.assertNotIn('OPPO restricted apps:', log)
-                self.assertNotIn(GAMES, log)
+                self.assertNotIn(f'{GAMES}: unrestricted', log)
+                self.assertNotIn(f'{GAMES}: already restricted', log)
                 self.assertNotRegex(log, r'(?m)^\S+ : ')  # no log line for an empty package name
 
     def test_owner_restriction_is_not_undone(self):
