@@ -20,7 +20,12 @@ class MigrationTests(unittest.TestCase):
                      if line and not line.startswith('#'))
         remote = dict(line.split(None, 1) for line in (packages / 'remote.txt').read_text().splitlines()
                       if line and not line.startswith('#'))
-        for sha in remote:
+        for sha, source in remote.items():
+            if sha not in items:
+                # A pin added after fork-payloads-v1 may still come from its original GitHub release.
+                self.assertTrue(source.startswith('gh:'), sha)
+                continue
+            self.assertEqual(source, f'gh:{migration.REPO}:{migration.TAG}')
             self.assertEqual(int(sizes[sha]), items[sha]['bytes'])
         for manifest in (migration.ROOT / 'scripts/patch-migration').glob('*-*.json'):
             import json

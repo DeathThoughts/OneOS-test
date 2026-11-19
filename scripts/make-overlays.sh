@@ -365,7 +365,13 @@ for g in guest_no_gatekeeper guest_pdb_readonly guest_pdb_frp_writes_fail guest_
 done
 # The guest's own screen lock: a PIN, pattern or password kept in the guest's own
 # /data/system and checked there, without the phone's gatekeeper, weaver or keystore
-# (patches/guest_local_lock.py, helper OneOSGuestLock). It goes in front of
+# (patches/guest_local_lock.py, helper OneOSGuestLock). A matched credential is answered
+# with the guest lock's own gatekeeper-password handle, which
+# LockSettingsService.verifyGatekeeperPasswordHandle turns into a placeholder
+# token: guest Settings needs one before any biometric page (Nothing OS's Settings
+# crashed on Fingerprint without it). The phone's HAL checks a token's MAC and refuses
+# the placeholder, and guest_no_biometric_writes.py above fails every enroll and
+# removal before the HAL. The two patchers touch different classes. It goes in front of
 # guest_no_gatekeeper's guard, so it runs after that loop; a framework of another
 # shape is left as it is (no guest lock there, as before).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_local_lock.py" "$WORK/services")"
@@ -396,6 +402,13 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_wipe_secrets.p
 # constructs an UpdateEngine then dies at boot (Nothing OS 5.0, first run);
 # a build that has none is left alone (Pixel).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_update_engine.py" "$WORK/services")"
+# MediaProvider's mount scan waits (15 s at most) until guest_start.sh has bound One UI's
+# albums into the guest's OneUI/: it ran first, found OneUI/ empty, dropped every row and
+# indexed them all again (S25 Ultra, ColorOS 17, session a12bf19e1931e81a). Only with
+# oneos.media.hold=1 ("mediahold" in guards.txt; nothing on the phone requires the word,
+# so sets built before it keep starting). patches/guest_media_mount_hold.py, helper
+# OneOSMediaHold.
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_media_mount_hold.py" "$WORK/services")"
 # vivo OriginOS: the face HAL's extension only when it is vivo's, and AOSP's
 # AlarmManagerService instead of MediaTek's RTC power-off alarms
 # (patches/vivo_guards.py; vivo-services.jar below).
@@ -1127,7 +1140,7 @@ fi
 # service.incremental_patched.so are listed with the services_patched.jar that
 # looks up "gvld": guest_prepare.sh binds all three or none of them.
 {
-    echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
+    echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets, ksuappid and mediahold guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
     [ "$VOLD_GVLD" = 1 ] && echo "# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)"
     # HyperOS images (miui-services_patched.jar) and Pixel images list their
     # files in the order and with the notes each set was built with.
