@@ -35,6 +35,13 @@ BUILDS = {
         # constructAvailableRefreshRates() filter: ldrb w8, [x8, #48] -> ldr w8, [x8, #48]
         (0x4B3210, "08c14039", "083140b9"),
     ),
+    # HyperOS OS4.0.5.0.XFRMIXM Global (hongkong)
+    "795d4a96c32007a612fc62956fabd40fb2c279b4ddb83e625c122d633239c8ad": (
+        # constructAvailableRefreshRates()::$_2 filter (std::function body): ldrb w8, [x8, #48] -> ldr w8, [x8, #48]
+        (0x4B7EE4, "08c14039", "083140b9"),
+        # getRankedFrameRatesLocked, active mode's group: ldrb w9, [x23, #48] -> ldr w9, [x23, #48]
+        (0x4A65D4, "e9c24039", "e93240b9"),
+    ),
 }
 
 

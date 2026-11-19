@@ -667,3 +667,65 @@ New in 0.5.20: Share my files, fingerprint and Samsung Camera in ColorOS on the 
 - Website badge in the README (thanks to the website contributors).
 - Galaxy Z Fold8: patch channels from a contributor are found automatically (never selected for you); Pixel fold fixes and equal Settings panes for LineageOS and Infinity-X follow with the next system sets (thanks thatjoshguy67).
 - Galaxy S24+ (and other phones whose firmware has One UI's Bluetooth-offload audio file): volume steps work in Nothing OS, LineageOS and HyperOS; sound played at full volume at any setting, untested.
+
+New in 0.5.21: sound, videos and updates.
+- **Louder, clearer speaker** in the other systems on Galaxy phones: Samsung's Dolby and the speaker amplifier's
+  temperature are set as One UI sets them.
+- **Videos from Samsung Camera play upright** on the Galaxy A phones in ColorOS, Nothing OS and LineageOS (they had
+  no rotation and showed sideways).
+- **Updating a system you already use** needs room for the update only, not for a new setup (ColorOS asked for
+  27.4 GB).
+
+New in 0.5.22: **One UI 9.5 on One UI 9 Galaxies.**
+- **One UI 9.5 (the Galaxy S26 Ultra's, S948BXXU6ZZKN) as a OneOS system** for every Galaxy on One UI 9,
+  months before Samsung sends it to most of them. Tested on the Galaxy A36: it boots, runs fast, Wi-Fi
+  with internet, apps brought with their data (Add apps). It comes with One UI 9.5's software features
+  (Color Lens, the AI erasers and document scan, desktop windowing) on top of the phone's own hardware
+  features, and the phone shows as a Galaxy S26 Ultra in it (Galaxy Store then offers Live Effect).
+  Your One UI stays as it is.
+  **Untested yet:** every other Galaxy (it should work on the S25, S24 and S23 series, the Folds and Flips
+  and the A series on One UI 9), the camera (fixed for the A36, not confirmed), calls with the S26 Ultra
+  model name, Live Effect and the AI features on phones without the S26 Ultra's NPU. Please send a report
+  from the app if something does not work.
+- **App optimizing after the first start is gone** for every system: it made phones warm and slow for a
+  long time and gave no visible gain.
+- **ColorOS on the Galaxy S24 Ultra and other QHD phones:** the fingerprint icon sits on the sensor again (it was
+  drawn near the top of the screen).
+- **Add apps from inside the other system** works again ("not an installed user app" for every app).
+
+New in 0.5.23: **One UI 9.5 test fix for heat and calls.**
+- **One UI 9.5 no longer overheats from a calling crash loop.** Started from the app, it got One UI 9's Samsung
+  calling files on top of its own; its calling service then crashed hundreds of times (A56: 260 in 10 minutes),
+  kept three cores busy and the phone throttled (choppy sound, "IMS services keeps stopping", no calls or SMS).
+  One UI 9.5 now keeps its own. Untested with a SIM: please report calls, SMS and heat.
+- **Privacy Display is off in One UI 9.5** (set r2): it is the Galaxy S26 Ultra's own panel feature, and One UI 9.5
+  had it switched on for every phone.
+- Phones stuck in the setup wizard or with "keeps stopping" messages: the calling crash loop above kept the system
+  too busy; please report if setup still does not finish.
+- **The One UI 9.5 card** shows "One UI 9.5" above the Set up button.
+
+New in 0.5.24: **reports go to Telegram.**
+- **Send report posts to the private OneOSReports Telegram group:** tap Post to OneOSReports, pick the group in Telegram,
+  send. Join it once from the Send screen; members of the OneOS group are let in automatically. The bot checks
+  membership, files the report and shows it as one card with its summary. Nothing in the app can be abused any more:
+  no keys, no upload service (the old one was flooded and is switched off; older OneOS versions can no longer send).
+- **Fingerprint: set it up in One UI, not in the other system.** OneOS uses the fingerprints saved in One UI.
+
+New in 0.5.25: **One UI 9.5 fixes from your reports, and fixes for every system.**
+- **One UI 9.5: SystemUI no longer crashes every few seconds** (set r4). The Privacy Display switch-off in 0.5.23
+  left SystemUI asking for a Privacy Display list the system no longer had; it now gets an empty one (A16, A17, S23,
+  S23 Ultra reports).
+- **One UI 9.5 on the Galaxy S23, S23+ and S23 Ultra: setup and "System isn't responding"** no longer wait forever
+  for a Samsung service those phones do not have. Untested on an S23: please report setup and Bluetooth (Bluetooth may
+  still not turn on there).
+- **One UI 9.5 black screen on some Galaxy A36 phones** (the screen stayed black and OneOS returned after 30 s) fixed.
+- **One UI 9.5 on slow first boots** (A17): OneOS no longer returns to One UI while the setup screen is still coming up.
+- **Galaxy S23 family, every system:** after Back to One UI the phone could restart by itself a minute later
+  ("rollback"): One UI's 32-bit system process was crash-looping during the session. Fixed.
+- **Every system:** a forced restart could block every later start ("Performance limit snapshot failed"); fixed.
+  Back to One UI no longer restarts the phone when a Samsung Camera library was left in use.
+- **Exynos phones:** video recording in the other system uses the phone's hardware encoder (the rear camera froze
+  after 2 s and could not save on the A56 with Nothing OS). Untested: please report video recording.
+- **Galaxy Z Fold7:** One UI 9.5 no longer runs at a tablet-sized tiny layout (both screens at 213 dpi).
+- Session logs now show the real session time.
+- Returning from One UI 9.5 still restarts the phone (being worked on).

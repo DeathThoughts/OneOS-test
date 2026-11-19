@@ -21,7 +21,7 @@ example "mISupplicantXm is null"). The helper class is added to the jar.
 Every getExtension() call in the jar must be such a cast, and their number
 must be the expected one, or nothing is written (fail closed).
 
-Usage: hyperos_hal_ext.py --expect N <apktool decoded jar directory> <helper class name>
+Usage: hyperos_hal_ext.py [--hongkong] --expect N <apktool decoded jar directory> <helper class name>
 Prints the smali_* directories (dex files) it changed.
 """
 import hashlib
@@ -85,6 +85,9 @@ HELPER_METHOD = """
 
 
 def main(argv):
+    hongkong = argv[:1] == ["--hongkong"]
+    if hongkong:
+        argv = argv[1:]
     if len(argv) != 4 or argv[0] != "--expect" or not argv[1].isdigit():
         sys.exit(__doc__)
     expect, root, helper = int(argv[1]), argv[2], argv[3]
@@ -113,6 +116,12 @@ def main(argv):
         return m.group(1) + descriptor_check(m.group(4), m.group(2)) + m.group(3)
 
     for p, (s, raw) in sorted(files.items()):
+        # Not a HAL: WifiOptimizationImpl.getMiuiExtension asks the IpClient binder of the guest's own NetworkStack for
+        # IMiuiIpClientExtension (HyperOS OS4.0.5.0 Global, 11-19). Skipped only in that exact shape.
+        if hongkong and p.endswith("/com/android/server/wifi/WifiOptimizationImpl.smali") and s.count(EXT) == 1 \
+                and "Lcom/xiaomi/net/ip/IMiuiIpClientExtension$Stub;->asInterface" in s and not CAST.findall(s):
+            print("hyperos_hal_ext: WifiOptimizationImpl's IpClient extension left as it is (the guest's own NetworkStack)", file=sys.stderr)
+            continue
         calls = s.count(EXT)
         casts = len(CAST.findall(s))
         relative = os.path.relpath(p, root)
