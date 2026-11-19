@@ -37,7 +37,9 @@ def inventory():
     packages = ROOT / 'app-android/packages'
     remote = dict(line.split(None, 1) for line in (packages / 'remote.txt').read_text().splitlines()
                   if line and not line.startswith('#'))
-    assert all(sha in items and src == f'gh:{REPO}:{TAG}' for sha, src in remote.items())
+    # Every migrated payload still shipped must come from this fork's immutable store. Payloads pinned after
+    # the migration may still name their original GitHub release until the next one; they are not inventoried.
+    assert all(src == f'gh:{REPO}:{TAG}' for sha, src in remote.items() if sha in items)
     return items
 
 

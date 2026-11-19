@@ -14,7 +14,14 @@ START = SCRIPT.index(HEAD) + len(HEAD)
 BODY = SCRIPT[START:SCRIPT.index('\nAPPLOOP\n', START) + 1]
 SUBS = [('/system/bin/sh /data/local/tmp/ensure_app_storage.sh', '"$T/ensure.sh"'),
         ('/data/system/packages.list', '"$T/packages.list"'),
-        ('/data/app_storage.log', '"$T/app_storage.log"')]
+        ('/data/app_storage.log', '"$T/app_storage.log"'),
+        # 0.5.20 (merged from upstream): the one-time full compile two minutes after boot keeps its marker and
+        # log in /data and keys on the framework jars; the test points all of them into $T.
+        ('/data/oneos_dexopt.done', '"$T/dexopt.done"'),
+        ('/data/oneos_dexopt.log', '"$T/dexopt.log"'),
+        ('/data/oneos_bin/busybox', '"$T/nobusybox"'),
+        ('/system/framework/framework.jar', '"$T/fw.jar"'),
+        ('/system/framework/services.jar', '"$T/svc.jar"')]
 LOOP = BODY
 for a, b in SUBS:
     assert a in LOOP, a
@@ -54,6 +61,9 @@ def run(shell, plan, rounds=None):
             p.write_text('#!/bin/sh\n' + body)
             p.chmod(0o755)
         (t / 'packages.list').write_text('com.a 10100 0 /data/user/0/com.a default 3003 0 1\n')
+        # The compile's marker already names this framework (the hash of no jar at all, as no jar is in $T): a
+        # session whose apps were compiled for it does not start the compile again, so no round here runs it.
+        (t / 'dexopt.done').write_text('d41d8cd98f00b204e9800998ecf8427e\n')
         (t / 'plan').write_text('\n'.join(plan) + '\n')
         # busybox sh runs sleep and md5sum as built-in applets, not from PATH,
         # so each stub is also bound as a function ahead of the loop.
