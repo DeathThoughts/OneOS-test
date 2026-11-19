@@ -430,24 +430,63 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/qti_builtin_display_pub
 # A dex the added OneOS classes push past 65536 method references (the Pixel 9
 # Pro XL's classes2: 65568) gets them moved to a dex of their own after the
 # last one: one jar, one class loader, so they keep their package access.
-# Builds that fit are unchanged.
-if ! java -jar "$APKTOOL" b -q -o "$WORK/rebuilt.jar" "$WORK/services" 2> "$WORK/apktool.err"; then
+# A dex already at 65535 (ColorOS 17 Twinity's classes.dex) needs the call
+# sites moved too, not just the helper: the new invoke still occupies a method
+# ID in the source dex. If that is not enough, move the largest files from the
+# overflowing dex until it fits. Builds that fit are unchanged.
+SPLIT_DIRS=
+SPLIT_ATTEMPT=0
+while ! java -jar "$APKTOOL" b -q -o "$WORK/rebuilt.jar" "$WORK/services" 2> "$WORK/apktool.err"; do
+    SPLIT_ATTEMPT=$((SPLIT_ATTEMPT + 1))
     FULL=$(sed -n 's/.*Could not smali folder: \(smali[_a-z0-9]*\).*/\1/p' "$WORK/apktool.err" | head -1)
-    if [ -z "$FULL" ] || ! grep -q 'Unsigned short value out of range' "$WORK/apktool.err" ||
-       [ -z "$(cd "$WORK/services/$FULL" && find . -name 'OneOS*.smali')" ]; then
+    if [ "$SPLIT_ATTEMPT" -gt 8 ] || [ -z "$FULL" ] ||
+       ! grep -q 'Unsigned short value out of range' "$WORK/apktool.err"; then
         cat "$WORK/apktool.err" >&2
         exit 1
     fi
     LAST=$(ls -d "$WORK"/services/smali_classes* 2>/dev/null | sed 's/.*smali_classes//' | sort -n | tail -1)
     OWN="smali_classes$((${LAST:-1} + 1))"
-    (cd "$WORK/services/$FULL" && find . -name 'OneOS*.smali') | while read -r f; do
-        mkdir -p "$WORK/services/$OWN/$(dirname "$f")"
-        mv "$WORK/services/$FULL/$f" "$WORK/services/$OWN/$f"
-        echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
-    done
-    java -jar "$APKTOOL" b -q -o "$WORK/rebuilt.jar" "$WORK/services"
-    KEY_DIRS="$KEY_DIRS $OWN"
-fi
+    MOVED=0
+    case " $SPLIT_DIRS " in
+        *" $FULL "*) ;;
+        *)
+            for f in $(cd "$WORK/services/$FULL" &&
+                       { find . -name 'OneOS*.smali';
+                         grep -rl 'OneOS' --include='*.smali' .; } | sort -u); do
+                mkdir -p "$WORK/services/$OWN/$(dirname "$f")"
+                mv "$WORK/services/$FULL/$f" "$WORK/services/$OWN/$f"
+                echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
+                MOVED=$((MOVED + 1))
+            done
+            ;;
+    esac
+    if [ "$MOVED" -eq 0 ]; then
+        # No OneOS helper or call site left: this dex was already full before
+        # our patches. Move up to half of the largest files out of it, so both
+        # sides end up below the limit (moving all of them just moves the
+        # overflow to the new dex).
+        COUNT=$(cd "$WORK/services/$FULL" && find . -name '*.smali' | wc -l)
+        TAKE=$((COUNT / 2))
+        if [ "$TAKE" -lt 1 ]; then TAKE=1; fi
+        if [ "$TAKE" -gt 10 ]; then TAKE=10; fi
+        for f in $(cd "$WORK/services/$FULL" &&
+                   find . -name '*.smali' -printf '%s %p\n' |
+                   sort -nr | head -"$TAKE" | cut -d' ' -f2-); do
+            mkdir -p "$WORK/services/$OWN/$(dirname "$f")"
+            mv "$WORK/services/$FULL/$f" "$WORK/services/$OWN/$f"
+            echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
+            MOVED=$((MOVED + 1))
+        done
+    fi
+    if [ "$MOVED" -eq 0 ]; then
+        cat "$WORK/apktool.err" >&2
+        exit 1
+    fi
+    SPLIT_DIRS="$SPLIT_DIRS $OWN"
+done
+for d in $SPLIT_DIRS; do
+    KEY_DIRS="$KEY_DIRS $d"
+done
 cp "$WORK/services.jar" "$OUT/services_patched.jar"
 for d in $(printf '%s\n' "$DISPLAY_DIR" $KEY_DIRS | sort -u); do
     DEX="$(echo "$d" | sed 's/^smali_//; s/^smali$/classes/').dex"

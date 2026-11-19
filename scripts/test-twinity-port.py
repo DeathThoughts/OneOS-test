@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shlex
 import struct
 import subprocess
 import sys
@@ -764,6 +765,88 @@ class RealImageResolverGuardTest(unittest.TestCase):
             self.assertFalse(second["overlay_table_updated"])
             self.assertEqual(initial, overlay.read_text(encoding="utf-8"))
             self.assertIn("Synthetic Twinity", initial)
+
+
+class ServicesDexSplitTest(unittest.TestCase):
+    """ColorOS 17's classes.dex is at 65535 methods: the split must move call sites too."""
+
+    def run_split(self, files):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            work = root / "work"
+            smali = work / "services" / "smali"
+            smali.mkdir(parents=True)
+            (smali / "huge.smali").write_text("invoke-static {}\n" * 65535)
+            for name, body in files.items():
+                (smali / name).write_text(body)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            fake_java = bin_dir / "java"
+            fake_java.write_text(
+                "#!/bin/sh\n"
+                'for d in "$WORK/services/smali" "$WORK/services"/smali_classes*; do\n'
+                '    [ -d "$d" ] || continue\n'
+                '    n=$(find "$d" -name "*.smali" -exec cat {} + | wc -l)\n'
+                '    if [ "$n" -gt 65536 ]; then\n'
+                '        echo "Could not smali folder: $(basename "$d")" >&2\n'
+                '        echo "Unsigned short value out of range: 65541" >&2\n'
+                '        exit 1\n'
+                '    fi\n'
+                'done\n'
+            )
+            fake_java.chmod(0o755)
+            text = (SCRIPT_DIR / "make-overlays.sh").read_text()
+            start = text.index("SPLIT_DIRS=\n")
+            end = text.index('cp "$WORK/services.jar"', start)
+            block = text[start:end]
+            script = root / "run.sh"
+            script.write_text(
+                "set -eu\n"
+                f"WORK={shlex.quote(str(work))}\n"
+                "APKTOOL=/nonexistent\n"
+                "DISPLAY_DIR=smali\n"
+                'KEY_DIRS="$DISPLAY_DIR"\n'
+                "export WORK\n"
+                f"PATH={shlex.quote(str(bin_dir))}:$PATH\n"
+                "export PATH\n"
+                + block
+                + '\nprintf "KEY_DIRS=%s\\n" "$KEY_DIRS"\n'
+                + 'for d in "$WORK/services"/smali*; do [ -d "$d" ] || continue; '
+                  'printf "COUNT %s %s\\n" "$(basename "$d")" '
+                  '"$(find "$d" -name "*.smali" -exec cat {} + | wc -l)"; done\n'
+            )
+            done = subprocess.run(["bash", str(script)], text=True, capture_output=True)
+            self.assertEqual(0, done.returncode, done.stderr)
+            key = ""
+            counts = {}
+            for line in done.stdout.splitlines():
+                if line.startswith("KEY_DIRS="):
+                    key = line.removeprefix("KEY_DIRS=")
+                elif line.startswith("COUNT "):
+                    _, name, count = line.split()
+                    counts[name] = int(count)
+            return key, counts
+
+    def test_moves_the_helper_and_its_call_site(self):
+        key, counts = self.run_split({
+            "OneOSMediaHold.smali": "OneOS helper\n",
+            "StorageManagerService.smali": "OneOS call\n",
+        })
+        self.assertIn("smali_classes2", key.split())
+        self.assertEqual(65535, counts["smali"])
+        self.assertEqual(2, counts["smali_classes2"])
+
+    def test_splits_a_new_dex_in_half_when_the_call_sites_overflow_it(self):
+        key, counts = self.run_split({
+            "OneOSMediaHold.smali": "OneOS helper\n",
+            **{f"Caller{i}.smali": "OneOS call\n" + "invoke-virtual {}\n" * 29999
+               for i in range(1, 4)},
+        })
+        self.assertIn("smali_classes2", key.split())
+        self.assertIn("smali_classes3", key.split())
+        self.assertEqual(65535, counts["smali"])
+        self.assertLessEqual(counts["smali_classes2"], 65536)
+        self.assertLessEqual(counts["smali_classes3"], 65536)
 
 
 if __name__ == "__main__":
