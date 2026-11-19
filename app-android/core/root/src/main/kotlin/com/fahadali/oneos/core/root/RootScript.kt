@@ -32,8 +32,8 @@ import com.fahadali.oneos.core.model.PackageSets
  * name the profile, the image and its file set (root refuses a set that is not
  * that image's on that phone); `launch` carries this launch's
  * `ONEOS_GUEST_HIDE_GMS`, `ONEOS_HEAT_CAP`, `ONEOS_GUEST_SEC_IMS` and (0.4.32)
- * `ONEOS_GUEST_EDM_STUB`, then optionally `ONEOS_VERBOSE_BOOT` and `ONEOS_FULL_LOGS`
- * (0 or 1 each; default 0 and 1).
+ * `ONEOS_GUEST_EDM_STUB`, then optionally `ONEOS_VERBOSE_BOOT`, `ONEOS_FULL_LOGS`,
+ * `ONEOS_PATCH_AUTO` and (0.5.20) `ONEOS_SHARE_FILES` (0 or 1 each; default 0, 1, 0 and 0).
  */
 object RootScript {
     const val ASSET = "root/oneos_root.sh"
@@ -268,7 +268,7 @@ object RootScript {
                 arg(3, DEC, "a versionCode")
             }
             Verb.LAUNCH -> {
-                if (args.size !in 7..12) need(12)
+                if (args.size !in 7..13) need(13)
                 args.getOrNull(0)?.let { if (it != "session" && it != "dry") p += "launch: mode '$it'" }
                 arg(1, DEC, "a versionCode")
                 arg(2, HEX16, "a session id")
@@ -282,6 +282,7 @@ object RootScript {
                 args.getOrNull(9)?.let { if (!DEC.matches(it) || it.length > 3 || it.toInt() !in 5..100) p += "launch: battery minimum '$it' is not 5..100" }
                 args.getOrNull(10)?.let { if (!DEC.matches(it) || it.length > 3 || it.toInt() !in 300..500) p += "launch: battery maximum '$it' is not 300..500 (tenths of a degree)" }
                 args.getOrNull(11)?.let { if (it != "0" && it != "1") p += "launch: automatic patch downloads is not 0 or 1" }
+                args.getOrNull(12)?.let { if (it != "0" && it != "1") p += "launch: share my files is not 0 or 1" }
             }
             Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.REMOVE_SYSTEM, Verb.RESET_DATA, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
             Verb.BRING_COLLECT, Verb.BRING_CATALOG -> {

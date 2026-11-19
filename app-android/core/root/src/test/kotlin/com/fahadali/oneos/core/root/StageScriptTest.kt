@@ -92,11 +92,18 @@ class StageScriptTest {
             mode: String = "session", hideGms: String = "0", code: String = this.code,
             heatCap: String = "1", secIms: String = "0", edmStub: String = "0", verboseBoot: String = "0",
             fullLogs: String? = null, batMin: String? = null, batMaxT: String? = null,
+            patchAuto: String? = null, shareFiles: String? = null,
         ) = fr.run(
             RootScript.Verb.LAUNCH, mode, code, "0123456789abcdef", hideGms, heatCap, secIms, edmStub, verboseBoot,
-            // Owner's decision, 2026-11-17: the battery limits are args 10 and 11 (after fullLogs, whose default is 1).
-            *(if (batMin != null || batMaxT != null) listOfNotNull(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420")
-            else listOfNotNull(fullLogs)).toTypedArray(),
+            // Owner's decision, 2026-11-17: the battery limits are args 10 and 11 (after fullLogs, whose default is 1);
+            // automatic patch downloads is arg 12, and 0.5.20's Share my files is arg 13. A launch that names a
+            // later argument names every earlier one too.
+            *(when {
+                patchAuto != null || shareFiles != null ->
+                    listOf(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420", patchAuto ?: "0") + listOfNotNull(shareFiles)
+                batMin != null || batMaxT != null -> listOf(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420")
+                else -> listOfNotNull(fullLogs)
+            }).toTypedArray(),
         )
 
         fun prepare(mode: String = "new") {
@@ -1757,20 +1764,33 @@ class StageScriptTest {
 
     @Test
     fun patchAutoLaunchArgumentReachesRootChecks() = eachShell { fr ->
-        val profile = Profiles.S_8550
-        fr.props["ro.product.model"] = "SM-S911B"
-        fr.props["ro.product.device"] = profile.codename
-        fr.props["ro.soc.model"] = profile.socModel
-        fr.writeProps()
-        val s = Stager(fr, profile)
+        val s = Stager(fr)
         s.prepare()
-        val launch = listOf("session", s.code, "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500")
         for (patchAuto in listOf("0", "1")) {
-            refused(fr.run(RootScript.Verb.LAUNCH, *(launch + patchAuto).toTypedArray()),
-                "test root: every launch check passed")
+            refused(s.launch(patchAuto = patchAuto), "test root: every launch check passed")
         }
+        val before = File(fr.stage, "session.env").readText()
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(patchAuto = "2") }
+        assertEquals(before, File(fr.stage, "session.env").readText())
+    }
+
+    @Test
+    fun shareFilesChoiceIsWrittenOnlyAfterLaunchChecks() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val env = File(fr.stage, "session.env")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=0"))
+        refused(s.launch(shareFiles = "1"), "test root: every launch check passed")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=1"))
+        // The shorter launches (no shareFiles) still mean off.
+        refused(s.launch(), "test root: every launch check passed")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=0"))
+        val before = env.readText()
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(shareFiles = "2") }
+        assertEquals(before, env.readText())
+        val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500", "0")
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "1").isEmpty())
     }
 
     @Test

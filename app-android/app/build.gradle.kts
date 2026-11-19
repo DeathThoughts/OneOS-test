@@ -75,8 +75,8 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     // the signal poll and the image's payloads.
     "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r29") to listOf("tethering_payload.img")),
     // Nothing OS 5.0 (0.4.33), the Z Fold8 Ultra only: its chips need SVE/SME.
-    "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r35") to listOf("tethering_payload.img")),
-    "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r1") to listOf("tethering_payload.img")),
+    "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r38") to listOf("tethering_payload.img")),
+    "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r5") to listOf("tethering_payload.img")),
     // OxygenOS 16 (0.4.67, experimental), for the phones on One UI 8 (Android 16): no fold overlays, no
     // tethering (One UI's stays), no apex requirement list (no ColorOS set ships one).
     "oxygen16" to (File(repoRoot, "out/overlays_oxygen16_r3") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk",
@@ -357,7 +357,7 @@ abstract class OneOsFilesTask : DefaultTask() {
             require(Regex("[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*").matches(source["repository"] as String))
             require(Regex("[a-z0-9][a-z0-9.-]{0,39}").matches(source["tag"] as String))
             val targets = source["targets"] as List<*>
-            require(targets.isNotEmpty() && targets.distinct().size == targets.size)
+            require((source["discover"] == true || targets.isNotEmpty()) && targets.distinct().size == targets.size)
             for (value in targets) {
                 val target = value as Map<*, *>
                 require(listOf(target["profile"], target["image"], target["set"]) in pairs) { "Unsupported patch target: $target" }
