@@ -17,6 +17,13 @@ class ProfilesTest {
     }
 
     @Test
+    fun twinityIsOfferedOnlyOnTheBaseGalaxyS23() {
+        val image = Images.ID_COLOROS17_TWINTY4C
+        assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
+        assertEquals(ImageChoice(image, PackageSets.ID_TWINTY_S23, tested = false), Profiles.S_8550.choice(image))
+    }
+
+    @Test
     fun theFourBundlesResolveToTheirProfiles() {
         assertEquals(Profiles.F8U, Profiles.resolve(Bundles.F8U.facts).profile)
         assertEquals(Profiles.S_ULTRA_8850, Profiles.resolve(Bundles.S26U.facts).profile)
@@ -266,8 +273,9 @@ class ProfilesTest {
             val original = listOf(xin, ImageChoice(Images.ID_PIXEL_KOMODO, PackageSets.ID_PIXEL9_SULTRA, tested = false), ifx, lineage, hyper,
                 ImageChoice(Images.ID_OXYGEN16, PackageSets.ID_OXYGEN16, tested = false), nothing, origin)
             val popsicle = ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false)
-            assertEquals(if (p == s23) original + popsicle else original, p.choices)
-            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == popsicle })
+            val twinity = ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false)
+            assertEquals(if (p == s23) original + popsicle + twinity else original, p.choices)
+            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == popsicle || it == twinity })
             assertEquals(listOf(Profiles.ID_NOTE_EXPECT_NO_START), p.notes.map { it.id })
             assertEquals(Level.WARN, p.notes.single().level)
         }
@@ -293,7 +301,7 @@ class ProfilesTest {
         )
         assertEquals(listOf(Profiles.ID_F8U), offerOrigin.filter { it.choice(Images.ID_ORIGINOS7)!!.tested }.map { it.id })
         for (p in offerOrigin) {
-            val last = p.choices.last { it.imageId != Images.ID_HYPEROS_POPSICLE }
+            val last = p.choices.last { it.imageId != Images.ID_HYPEROS_POPSICLE && it.imageId != Images.ID_COLOROS17_TWINTY4C }
             assertEquals(p.id, Images.ID_ORIGINOS7, last.imageId)
         }
         assertEquals(

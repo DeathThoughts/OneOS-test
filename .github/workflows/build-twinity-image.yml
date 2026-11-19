@@ -1,0 +1,191 @@
+name: Build ColorOS Twinity4c image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/coloros-twinity-4c]
+    paths:
+      - ".github/workflows/build-twinity-image.yml"
+      - "scripts/build-twinity-image.py"
+      - "scripts/mysticgsi-from-images.py"
+      - "scripts/package-twinity-image.py"
+      - "scripts/publish-twinity-payloads.py"
+      - "scripts/test-twinity-*.py"
+      - "scripts/make-overlays.sh"
+      - "scripts/apk-replace-dex.py"
+      - "scripts/check-dex.py"
+      - "scripts/check-oneos-refs.py"
+      - "scripts/patch-bootanim-multidisplay.py"
+      - "scripts/patch-built-jar.sh"
+      - "scripts/patch-camera-native.sh"
+      - "scripts/patch-framework-camera.sh"
+      - "switcher/patches/**"
+
+concurrency:
+  group: twinity4c-image-release
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/test/coloros-twinity-4c'
+    environment: debug-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          repository: MysticGSI/mysticgsi
+          ref: 825b850dd8ddff11fdb8ed024034fc00e94b1451
+          path: mysticgsi
+          persist-credentials: false
+          sparse-checkout: |
+            /*.py
+            /requirements.txt
+            /patches/
+            /tools/
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install image and overlay build tools
+        run: |
+          set -euo pipefail
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on the runner}}
+          sudo rm -rf -- /usr/share/dotnet /opt/ghc "${sdk:?}/ndk"
+          df -h "$GITHUB_WORKSPACE"
+          sudo apt-get update
+          sudo apt-get install -y zstd e2fsprogs zip unzip python3-venv
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+          fi
+          [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+
+          python3 -m venv mysticgsi/.venv
+          mysticgsi/.venv/bin/python -m pip install -r mysticgsi/requirements.txt capstone
+          chmod +x mysticgsi/tools/bin/Linux/x86_64/{e2fsdroid,extract.erofs,mke2fs,mkfs.erofs}
+          # The pinned dependency is a separate checkout inside this workspace.
+          echo "/mysticgsi/" >> "$(git rev-parse --git-path info/exclude)"
+
+      - name: Test Twinity tooling
+        run: |
+          set -euo pipefail
+          mkdir -p out/twinity-logs
+          {
+            python3 scripts/test-twinity-image.py
+            python3 scripts/test-twinity-services-dex.py
+            python3 scripts/test-twinity-surfaceflinger.py
+            python3 scripts/test-twinity-package.py
+            python3 scripts/test-twinity-publisher.py
+          } 2>&1 | tee out/twinity-logs/tests.log
+
+      - name: Download pinned Twinity source parts
+        run: |
+          set -euo pipefail
+          mkdir -p out/twinity-source
+          python3 - <<'PY' > out/twinity-source/parts.tsv
+          import runpy
+          builder = runpy.run_path("scripts/build-twinity-image.py")
+          release = builder["RELEASE"].replace("/releases/tag/", "/releases/download/")
+          for name, size, _ in builder["source_parts"]():
+              print(name, size, f"{release}/{name}", sep="\t")
+          PY
+          {
+            pids=()
+            while IFS=$'\t' read -r name size url; do
+              (
+                part="out/twinity-source/$name"
+                curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+                  --connect-timeout 30 --max-time 900 --retry 3 --retry-all-errors --retry-max-time 1200 \
+                  --max-filesize "$size" --output "$part.tmp" "$url"
+                [ "$(stat -c %s "$part.tmp")" = "$size" ] || { echo "unexpected size for $name" >&2; exit 1; }
+                mv "$part.tmp" "$part"
+                echo "Downloaded $name ($size bytes)"
+              ) &
+              pids+=("$!")
+            done < out/twinity-source/parts.tsv
+            any_failed=0
+            for pid in "${pids[@]}"; do
+              if ! wait "$pid"; then
+                any_failed=1
+              fi
+            done
+            if ((any_failed)); then
+              echo "Failed to download all pinned Twinity source parts" >&2
+              exit 1
+            fi
+          } 2>&1 | tee out/twinity-logs/download.log
+
+      - name: Build Twinity ext4 image
+        run: |
+          set -euo pipefail
+          python3 scripts/build-twinity-image.py --source-dir out/twinity-source --work-dir out/twinity-image \
+            2>&1 | tee out/twinity-logs/image.log
+          rm -- out/twinity-image/super.raw
+          df -h "$GITHUB_WORKSPACE" | tee -a out/twinity-logs/image.log
+
+      - name: Build Twinity overlays
+        id: overlays
+        env:
+          APKTOOL: ${{ github.workspace }}/mysticgsi/tools/apktool/apktool.jar
+          EXTRACT_EROFS: ${{ github.workspace }}/mysticgsi/tools/bin/Linux/x86_64/extract.erofs
+        run: |
+          set -euo pipefail
+          rro_key_dir=$(mktemp -d "$RUNNER_TEMP/twinity-rro.XXXXXX")
+          export KEYSTORE="$rro_key_dir/debug.keystore"
+          {
+            keytool -genkeypair -keystore "$KEYSTORE" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 3650 \
+              -dname "CN=OneOS Twinity RRO Debug,O=OneOS,C=US"
+            sh scripts/make-overlays.sh out/twinity-image/system.img out/twinity-overlays
+          } 2>&1 | tee out/twinity-logs/overlays.log
+
+      - name: Build and publish Twinity payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/publish-twinity-payloads.py --existing-overlays out/twinity-overlays \
+            --image-metadata out/twinity-image/system.json --metadata out/twinity-payload-metadata \
+            --target "$GITHUB_SHA" --publish 2>&1 | tee out/twinity-logs/payloads.log
+
+      - name: Package and publish Twinity image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/package-twinity-image.py --image out/twinity-image/system.img \
+            --image-metadata out/twinity-image/system.json --out out/twinity-package \
+            --target "$GITHUB_SHA" --publish 2>&1 | tee out/twinity-logs/package.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: twinity4c-build-report
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            out/twinity-logs/
+            out/twinity-image/system.json
+            out/twinity-payload-metadata/
+            out/twinity-package/inventory.json
+            out/twinity-package/release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.overlays.outcome == 'success'
+        with:
+          name: twinity4c-overlays
+          retention-days: 14
+          path: out/twinity-overlays/

@@ -258,6 +258,23 @@ jobs:
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23'
 
+      - name: Verify ColorOS Twinity image and staging
+        env:
+          GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
+          GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/test-twinity-image.py
+          python3 scripts/test-twinity-services-dex.py
+          python3 scripts/test-twinity-surfaceflinger.py
+          python3 scripts/test-twinity-package.py
+          python3 scripts/test-twinity-publisher.py
+          cd app-android
+          ./gradlew --console=plain :core:model:test \
+            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.twinityStagingSetMatchesItsPayloadAndGuardPins' \
+            --tests '*ProfilesTest.twinityIsOfferedOnlyOnTheBaseGalaxyS23' --tests '*SingleImageZipInputStreamTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.twinityStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23'
+
       - name: Verify signed guest startup patch lifecycle
         run: |
           classes=$(mktemp -d)

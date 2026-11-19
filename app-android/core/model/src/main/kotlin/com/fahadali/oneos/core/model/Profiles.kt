@@ -541,7 +541,8 @@ object Profiles {
         codename = "dm1q",
         socModel = "SM8550",
         form = FormFactor.BAR,
-        choices = S23_CHOICES + ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false),
+        choices = S23_CHOICES + ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false) +
+            ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false),
         notes = listOf(EXPECT_NO_START),
     )
 

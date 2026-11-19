@@ -449,6 +449,12 @@ fi
 # Z Fold's cover becomes display 0 when it folds: no app could use it
 # (patches/qti_builtin_display_public.py; nothing in images without them).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/qti_builtin_display_public.py" "$WORK/services")"
+# Twinity ColorOS 17 starts with 65535 method references in classes.dex.
+# Move the generated INetd classes together so the guest guards fit.
+SERVICES_SHA=$(sha256sum < "$WORK/services.jar")
+if [ "${SERVICES_SHA%% *}" = f669c8373f10043d674cc3cd7391627de4d6d958fe5ebb8b5dd303ab46e64270 ]; then
+    KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/twinity_services_dex.py" "$WORK/services")"
+fi
 # A dex the added OneOS classes push past 65536 method references (the Pixel 9
 # Pro XL's classes2: 65568) gets them moved to a dex of their own after the
 # last one: one jar, one class loader, so they keep their package access.
@@ -1245,7 +1251,12 @@ if mtk:
     sys.exit(0)
 if b"IMtkSF_ext" in data:
     sys.exit("surfaceflinger: a MediaTek build with MtkSF_ext this was not written against, not patching")
-off = SITES.get(hashlib.sha1(data).hexdigest()[:12])
+# Twinity4c ColorOS 17: the PLT relocations identify AIBinder_getExtension
+# and IQtiComposer3Client::fromBinder on either side of the cbz at 0x470a58.
+if hashlib.sha256(data).hexdigest() == "4c51f07dd84fb8161f9791dd2a3403fce74e6a520784cfe426f60c6058f22445":
+    off = 0x470a58
+else:
+    off = SITES.get(hashlib.sha1(data).hexdigest()[:12])
 if off is None and b"IQtiComposer3Client" not in data:
     # Google's own build (Pixel image): no QTI composer client to skip.
     if os.path.exists(dst):
@@ -2093,6 +2104,8 @@ if in_image /system/framework/oplus-framework.jar; then
         python3 -I "$ROOT/scripts/check-dex.py" "$WORK/oplus-framework_patched.jar"
         mv -f "$WORK/oplus-framework_patched.jar" "$OUT/oplus-framework_patched.jar"
         chmod 644 "$OUT/oplus-framework_patched.jar"
+        # PackageSets.OPLUS_FRAMEWORK_IMS requires this guard JAR's checksum.
+        (cd "$OUT" && sha256sum oplus-framework_patched.jar) >> "$OUT/guards.txt"
     fi
     rm -rf "$WORK/of" "$WORK/of-rebuilt.jar" "$WORK/ofdex" "$WORK/oplus-framework.jar"
 fi
