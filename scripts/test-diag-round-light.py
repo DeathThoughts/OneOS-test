@@ -15,7 +15,11 @@ run in the foreground with $BB, dumpsys, getprop, logcat, pidof, getevent and ls
 logs its arguments). Checked:
 - Full logs off and the home screen up: no debuggerd, no fd scan, no getevent, one line in
   heavy_skipped.txt; the rest of the round (user0, windows, thread listings) still runs.
-- Home not reached yet, or Full logs on: all of them run and nothing is skipped.
+- Full logs off, home not reached and the 40 s round: skipped too, with a reason of its own (a
+  normal boot has no home screen at 40 s: S25 Ultra sessions db19aee410bd79ff and
+  75e538ac0ed725df froze SystemUI and the touchscreen 03:15:53 to 03:16:36).
+- Full logs off, home not reached and the 90 s (or final) round: all of them run, nothing skipped.
+- Full logs on: all of them run in every round and nothing is skipped.
 - A SurfaceFlinger that never registered still gets its native dump with Full logs off.
 - The 20 s round has none of them, and no skip file.
 - The start and end lines of the round are in auto_return.log.
@@ -38,6 +42,8 @@ SWITCH = ROOT / 'switcher/assets/oneos_switch.sh'
 ROUND_START = '( read -r dpid _ < /proc/self/stat && echo \\$dpid > $STAGE/diag.pid\n'
 ROUND_END = ') </dev/null >/dev/null 2>&1 &'
 SKIPPED = 'debuggerd stacks, touch fd scan and getevent skipped: Full logs off and the home screen was up'
+SKIPPED_40 = ('debuggerd stacks, touch fd scan and getevent skipped: Full logs off; a normal boot has no home '
+              'screen yet at 40 s, the 90 s round takes them if it still has none')
 TOUCH_GLOB = '/sys/class/input/event*'
 
 # The listings as they were before the change, with only the proc root made a variable.
@@ -172,7 +178,7 @@ class Round(unittest.TestCase):
             'user0': [l for l in log if 'get-started-user-state' in l],
         }, diag, stage, (launcher, systemui, sf)
 
-    def assert_heavy(self, got, diag, ran):
+    def assert_heavy(self, got, diag, ran, reason=SKIPPED):
         for k in ('debuggerd -j', 'fd scan', 'getevent'):
             self.assertEqual(ran, bool(got[k]), k)
         # Both apps' native dumps (the SurfaceFlinger one is not asked for here).
@@ -183,7 +189,7 @@ class Round(unittest.TestCase):
         if ran:
             self.assertFalse(skip.exists())
         else:
-            self.assertEqual(SKIPPED + '\n', skip.read_text())
+            self.assertEqual(reason + '\n', skip.read_text())
             self.assertFalse((diag / 'stack_com.android.launcher.txt').exists())
             self.assertFalse((diag / 'native_com.android.systemui.txt').exists())
             self.assertFalse((diag / 'touch_events.txt').exists())
@@ -205,17 +211,32 @@ class Round(unittest.TestCase):
         self.assertEqual([], got['debuggerd sf'])
         self.assertFalse((stage / 'diag.pid').exists())
 
-    def test_home_not_reached_runs_everything(self):
-        got, diag, _, _ = self.run_round('0', '0')
+    def test_home_not_reached_at_40_with_full_logs_off_is_skipped(self):
+        got, diag, _, _ = self.run_round('0', '0', dname='40')
+        self.assert_heavy(got, diag, ran=False, reason=SKIPPED_40)
+        self.assert_light_rest(got, diag)
+
+    def test_home_not_reached_at_90_with_full_logs_off_runs_everything(self):
+        got, diag, _, _ = self.run_round('0', '0', dname='90')
         self.assert_heavy(got, diag, ran=True)
         self.assert_light_rest(got, diag)
 
+    def test_home_not_reached_in_the_final_round_runs_everything(self):
+        got, diag, _, _ = self.run_round('0', '0', dname='final')
+        self.assert_heavy(got, diag, ran=True)
+
+    def test_home_up_at_90_with_full_logs_off_is_skipped(self):
+        got, diag, _, _ = self.run_round('0', '1', dname='90')
+        self.assert_heavy(got, diag, ran=False)
+        self.assert_light_rest(got, diag)
+
     def test_full_logs_on_runs_everything(self):
-        for home in ('0', '1'):
-            with self.subTest(home=home):
-                got, diag, _, _ = self.run_round('1', home)
-                self.assert_heavy(got, diag, ran=True)
-                self.assert_light_rest(got, diag)
+        for dname in ('40', '90', 'final'):
+            for home in ('0', '1'):
+                with self.subTest(dname=dname, home=home):
+                    got, diag, _, _ = self.run_round('1', home, dname=dname)
+                    self.assert_heavy(got, diag, ran=True)
+                    self.assert_light_rest(got, diag)
 
     def test_stuck_surfaceflinger_still_dumped(self):
         got, diag, _, pids = self.run_round('0', '1', sf_stuck=True)

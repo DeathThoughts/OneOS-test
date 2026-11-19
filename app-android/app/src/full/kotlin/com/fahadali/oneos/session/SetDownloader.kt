@@ -20,14 +20,19 @@ object SetDownloader {
     /** The repository whose releases hold the set files as assets named by their SHA-256 (0.4.53). */
     const val FILES_REPO = "DeathThoughts/OneOS-test"
 
-    /** Only this fork may serve patch payloads. Historical origin URLs are kept in the migration inventory. */
+    /**
+     * The pinned release asset for [source]. The fork's own payloads use `gh:DeathThoughts/OneOS-test:<tag>`;
+     * pins added after fork-payloads-v1 may still name their original `gh:owner/repo:<tag>` release until the
+     * next migration, so the hash, size and release tag remain the gate. GSI images never use this path.
+     */
     fun url(source: String, sha256: String): String {
         require(Regex("[0-9a-f]{64}").matches(sha256))
-        require(source.startsWith("gh:")) { "Patch payload source is not a fork release" }
+        require(source.startsWith("gh:")) { "Patch payload source is not a GitHub release" }
         val parts = source.removePrefix("gh:").split(':')
         val repo = if (parts.size == 2) parts[0] else FILES_REPO
         val tag = parts.last()
-        require(repo == FILES_REPO && Regex("[a-z0-9][a-z0-9.-]{0,39}").matches(tag)) { "Patch payload source is outside this fork" }
+        require(Regex("[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*").matches(repo) &&
+            Regex("[a-z0-9][a-z0-9.-]{0,39}").matches(tag)) { "Patch payload source is not a pinned release" }
         return "https://github.com/$repo/releases/download/$tag/$sha256"
     }
 

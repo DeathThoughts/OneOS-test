@@ -253,6 +253,7 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 SwitchGates.BATTERY_MIN_PERCENT.toString(), SwitchGates.BATTERY_MAX_TENTHS_C.toString(),
                 if (SessionPrefs.autoGuestPatches(app)) "1" else "0",
                 if (guestVulkan) "1" else "0",
+                if (SessionPrefs.shareFiles(app)) "1" else "0",
             ),
             silenceMs = 5 * 60_000L,
         )
