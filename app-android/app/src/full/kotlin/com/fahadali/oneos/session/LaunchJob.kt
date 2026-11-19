@@ -13,6 +13,7 @@ import com.fahadali.oneos.core.model.Images
 import com.fahadali.oneos.core.model.Level
 import com.fahadali.oneos.core.model.Plain
 import com.fahadali.oneos.core.model.PlainMessage
+import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.model.ScreenLockRule
 import com.fahadali.oneos.core.model.SwitchGates
 import com.fahadali.oneos.core.model.Units
@@ -240,6 +241,8 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
             SessionPrefs.Launch(sid, dryRun, profile.id, image.id, System.currentTimeMillis(), SystemClock.elapsedRealtime(), logsCollected = false),
         )
         update(state.copy(detail = "Root is checking everything again and starting the switch…"))
+        val guestVulkan = BuildConfig.DEBUG && !dryRun && profile.id == Profiles.ID_S_8550 &&
+            image.id == Images.ID_FIND_X9U_IN_1105 && SessionPrefs.guestVulkan(app)
         val reply = RootVerbs.run(
             app, RootScript.Verb.LAUNCH,
             listOf(
@@ -249,6 +252,7 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 // The same limits the app's gate used (owner's decision, 2026-11-17), so root never differs from it.
                 SwitchGates.BATTERY_MIN_PERCENT.toString(), SwitchGates.BATTERY_MAX_TENTHS_C.toString(),
                 if (SessionPrefs.autoGuestPatches(app)) "1" else "0",
+                if (guestVulkan) "1" else "0",
                 if (SessionPrefs.shareFiles(app)) "1" else "0",
             ),
             silenceMs = 5 * 60_000L,

@@ -237,6 +237,9 @@ object SessionPrefs {
     fun autoGuestPatches(ctx: Context): Boolean = p(ctx).getBoolean("auto_guest_patches", false)
     fun setAutoGuestPatches(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("auto_guest_patches", enabled).apply() }
 
+    fun guestVulkan(ctx: Context): Boolean = p(ctx).getBoolean("guest_vulkan", false)
+    fun setGuestVulkan(ctx: Context, enabled: Boolean) { p(ctx).edit().putBoolean("guest_vulkan", enabled).apply() }
+
 
     /** Share my files (Settings / Advanced), `ONEOS_SHARE_FILES` for every launch: off by default; on shows One UI's DCIM, Pictures, Download, Documents, Movies and Music in the other system. */
     fun shareFiles(ctx: Context): Boolean = p(ctx).getBoolean("share_files", false)

@@ -25,13 +25,14 @@
 #   env <bytes>                       stdin: session.env
 #   finish <profile> <image> <set> <versionCode>
 #   launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub>
-#          [verboseBoot [fullLogs [patchAuto [shareFiles]]]]
-#                                     (0|1 each; defaults 0, 1, 0 and 0: fullLogs
+#          [verboseBoot [fullLogs [patchAuto [guestVulkan [shareFiles]]]]]
+#                                     (0|1 each; defaults 0, 1, 0, 0 and 0: fullLogs
 #                                     is ONEOS_FULL_LOGS, the session's whole logcat
 #                                     capture; patchAuto is ONEOS_PATCH_AUTO, the
-#                                     signed guest_start.sh downloads; shareFiles is
-#                                     ONEOS_SHARE_FILES, One UI's DCIM, Pictures...
-#                                     shown in the guest)
+#                                     signed guest_start.sh downloads; guestVulkan
+#                                     is ONEOS_GUEST_VULKAN for the S23 experiment;
+#                                     shareFiles is ONEOS_SHARE_FILES, One UI's
+#                                     DCIM, Pictures... shown in the guest)
 #                                     secIms 0|1: this launch's
 #                                     ONEOS_GUEST_SEC_IMS (this phone's
 #                                     Samsung IMS app in the guest)
@@ -1353,8 +1354,8 @@ switch_verdict() {
 }
 
 do_launch() {
-    [ $# -ge 7 ] && [ $# -le 13 ] || usage "launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub> [verboseBoot [fullLogs [batMinPercent [batMaxTenthsC [patchAuto [shareFiles]]]]]]"
-    mode=$1 code=$2 sid=$3 gms=$4 heat=$5 secims=$6 edmstub=$7 verbose=${8:-0} fulllogs=${9:-1} batmin=${10:-30} batmaxt=${11:-420} patchauto=${12:-0} sharefiles=${13:-0}
+    [ $# -ge 7 ] && [ $# -le 14 ] || usage "launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub> [verboseBoot [fullLogs [batMinPercent [batMaxTenthsC [patchAuto [guestVulkan [shareFiles]]]]]]]"
+    mode=$1 code=$2 sid=$3 gms=$4 heat=$5 secims=$6 edmstub=$7 verbose=${8:-0} fulllogs=${9:-1} batmin=${10:-30} batmaxt=${11:-420} patchauto=${12:-0} guestvulkan=${13:-0} sharefiles=${14:-0}
     case "$mode" in session|dry) ;; *) usage "launch mode $mode" ;; esac
     is_dec "$code" || usage "launch versionCode $code"
     case "$sid" in *[!0-9a-f]*|'') usage "launch session id" ;; esac
@@ -1369,12 +1370,15 @@ do_launch() {
     is_dec "$batmin" && [ "$batmin" -ge 5 ] && [ "$batmin" -le 100 ] || usage "launch batMinPercent $batmin"
     is_dec "$batmaxt" && [ "$batmaxt" -ge 300 ] && [ "$batmaxt" -le 500 ] || usage "launch batMaxTenthsC $batmaxt"
     case "$patchauto" in 0|1) ;; *) usage "launch patchAuto $patchauto" ;; esac
+    case "$guestvulkan" in 0|1) ;; *) usage "launch guestVulkan $guestvulkan" ;; esac
     case "$sharefiles" in 0|1) ;; *) usage "launch shareFiles $sharefiles" ;; esac
     [ -n "$T" ] || [ "$(id -u)" = 0 ] || refuse "not root"
     step "checks"
     [ ! -e "$STAGE/.oneos_update" ] || refuse "the installed system update did not finish: retry the update"
     read_marker || refuse "the stage has no OneOS marker: prepare first"
     [ "$M_CODE" = "$code" ] || refuse "prepared by app build $M_CODE, this is build $code: prepare again"
+    [ "$guestvulkan" = 0 ] || [ "$mode:$M_PROFILE:$M_IMAGE" = "session:s-8550:coloros17-findx9u-in-1105" ] ||
+        refuse "guest Vulkan requires a Galaxy S23 ColorOS 17 session"
     pinfo=$(profile_info "$M_PROFILE") || refuse "the stage is prepared for $M_PROFILE, which this build does not switch"
     # The staged image decides the set: the marker's must be that image's on this phone.
     [ -n "$M_SET" ] && [ "$(pair_set "$M_PROFILE" "$M_IMAGE")" = "$M_SET" ] ||
@@ -1469,11 +1473,11 @@ do_launch() {
     # Out of the app's cgroup: ActivityManager kills an app's whole cgroup when
     # the app dies, and the app dies when One UI's framework stops.
     echo $$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
-    # Only session.env (and, for the dry run, ONEOS_PREPARE_ONLY) set ONEOS_*.
+    # Drop inherited overrides and load only this launch's options.
     for v in $(env | sed -n 's/^\(ONEOS_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
     [ "$mode" = dry ] && export ONEOS_PREPARE_ONLY=1
     "$BB" nsenter -t 1 -m -- "$BB" setsid /system/bin/sh -c \
-        'set -a; . "$1/session.env"; set +a; export ONEOS_PATCH_AUTO="$2"; exec /system/bin/sh "$1/oneos_switch.sh"' oneos-session "$STAGE" "$patchauto" \
+        'set -a; . "$1/session.env"; set +a; export ONEOS_PATCH_AUTO="$2" ONEOS_GUEST_VULKAN="$3"; exec /system/bin/sh "$1/oneos_switch.sh"' oneos-session "$STAGE" "$patchauto" "$guestvulkan" \
         </dev/null >>"$STAGE/takeover_app.log" 2>&1 &
     # The switch checks once more by itself before it changes anything and can
     # still refuse there, with its reason only in takeover_app.log. Up to 0.4.95
