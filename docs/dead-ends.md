@@ -62,7 +62,27 @@ planning and to add to it whenever a new dead end is found.
   because SurfaceFlinger thrashed 10-120 Hz during the fingerprint wave)
   (same audit, from the image's jars).
 - `cpufreq_max_limit` 1958400 appearing mid-session: only while Samsung's
-  camera runs (log9 05:57:25, log11 07:30:29 and 07:31:09; 3 of 3, never
-  without the camera). It is Samsung camera's own CPU limit, the same as in
-  One UI; the heat cap lifts it at its next level 0. Samsung's design, not a
-  bug (same audit).
+  camera (`com.sec.android.app.camera`) runs (log9 05:57:25, log11 07:30:29
+  and 07:31:09; 3 of 3, never without the camera). It is Samsung camera's own
+  CPU limit, the same as in One UI (not a bug while the camera is running).
+  In session `a12bf19e1931e81a` (`04:03:39`-`04:05:11`, S25 Ultra
+  `coloros17-findx9u-in-1105`) it lingered 92 s after camera exit while
+  `oneos_heat_cap` stayed warm at level 1, so `oneos_heat_cap` now also lifts
+  a leftover `cpufreq_max_limit` (writing `-1` and recording
+  `cpufreq_max_limit.released`) on any level 1 or 2 tick once
+  `com.sec.android.app.camera` is gone (when One UI power saving
+  `HOST_LOW_POWER=0`). Samsung's design while active, not a bug (same audit).
+- MediaProvider's `StorageManager: Failed to set extended attributes for
+  /storage/emulated/0/<path> to set project id.: Operation not permitted`
+  (then `Failed to update quota type`, StorageManager.updateExternalStorageFileQuotaType
+  from MediaProvider's onInsert): the guest's MediaProvider cannot set the
+  quota project id on any file, its own included (20-22 lines a session in the
+  album mode, guest paths such as Android/media). It only shows in volume when
+  thousands of rows are inserted at once: with Share my files (full access) on
+  for the first time, session `f8c0108ef1bea94a` (S25 Ultra,
+  `coloros17-findx9u-in-1105`) logged 13,020 of them in 79 s (03:45:01-03:46:20,
+  DCIM 10,566), from MediaProvider's own scan after the binds, not OneOS's
+  rescan. Log-only; the rows are inserted. The cause of the EPERM is inferred
+  (no kernel log shows the check) and no AOSP property turns the call off. The
+  heat of that session was the first index of One UI's library (MediaProvider
+  and Google Photos), not this error.

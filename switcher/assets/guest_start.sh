@@ -22,6 +22,7 @@ echo "[Pivoted Root] time $($BB date +%T) start"
 echo "[Pivoted Root] Preparing pivot..."
 cd /data/local/tmp/oneos/rootfs
 oneos_media_enabled=0
+oneos_media_share_off=0
 # Every failed media check sets oneos_media_why and the skip line prints it:
 # each prototype test is a single phone run, so takeover.log alone has to
 # name the cause (the root manager's busybox may lack nosymfollow, say).
@@ -37,6 +38,13 @@ oneos_media_opt=/data/local/tmp/oneos-oneui-media
 if [ -e "$oneos_media_opt" ] || [ -L "$oneos_media_opt" ]; then
     if [ -n "$oneos_media_why" ]; then
         :
+    elif [ "${ONEOS_SHARE_FILES:-0}" = 1 ]; then
+        # Share my files (0.5.20) puts One UI's DCIM, Pictures, Download, Documents, Movies and Music over the
+        # guest's own folders for this boot: the album prototype would list the same photos a second time, once
+        # under OneUI/ and once in the shared folders. It stays off for the boot, and with it the media hold
+        # (no prototype, no hold, below).
+        oneos_media_share_off=1
+        echo "[Pivoted Root] Media prototype: off (Share my files is on; its folders carry the same photos)"
     elif [ -L "$oneos_media_opt" ]; then
         oneos_media_why="opt-in marker $oneos_media_opt is a symlink"
     elif [ ! -d "$oneos_media_opt" ]; then
@@ -66,7 +74,7 @@ if [ -e "$oneos_media_opt" ] || [ -L "$oneos_media_opt" ]; then
             oneos_media_enabled=1
         fi
     fi
-    [ "$oneos_media_enabled" = 1 ] ||
+    [ "$oneos_media_enabled" = 1 ] || [ "$oneos_media_share_off" = 1 ] ||
         echo "[Pivoted Root] Media prototype off: ${oneos_media_why:-unknown reason}"
 fi
 if ! $BB pivot_root . postinstall; then
@@ -824,12 +832,25 @@ oneos_media_logcat() {
         ExternalStorageServiceImpl:V MediaVolume:V IdleService:V FuseDaemon:W
     oneos_media_lall=$("$BB" timeout 15 logcat "$@" 2>&1 | "$BB" grep -v '^--------- ' | "$BB" grep .)
     oneos_media_lseen=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep -c .)
-    oneos_media_lkept=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep . | "$BB" tail -n "$oneos_media_lkeep" |
+    # Without MediaProvider's "Failed to update quota type for
+    # /storage/emulated/0/OneUI/..." warnings and their IOException stack
+    # lines: in both S25 Ultra sessions of 2026-11-18 they were every line
+    # kept (106,133 seen in 92 s), so nothing else of MediaProvider's was
+    # left. A stack line is one of the warning's thread (pid and tid of
+    # threadtime), so another thread's line in between ends nothing; the
+    # first other line of that thread ends the stack. logcat writes the
+    # trace's "at" lines with a tab after the tag.
+    oneos_media_lrest=$(printf '%s\n' "$oneos_media_lall" | "$BB" grep . | "$BB" awk '
+        index($0, "Failed to update quota type") { k = $3 " " $4; next }
+        k != "" && $3 " " $4 == k && /MediaProvider: [ \t]*(at |java\.io\.IOException)/ { next }
+        { if ($3 " " $4 == k) k = ""; print }')
+    oneos_media_lquota=$((oneos_media_lseen - $(printf '%s\n' "$oneos_media_lrest" | "$BB" grep -c .)))
+    oneos_media_lkept=$(printf '%s\n' "$oneos_media_lrest" | "$BB" grep . | "$BB" tail -n "$oneos_media_lkeep" |
         "$BB" sed 's/[^ -~]//g' | "$BB" cut -c 1-300 |
         "$BB" sed -E -e 's#((/emulated/[0-9]+|/media/[0-9]+|/sdcard)/)OneUI/.*#\1OneUI/…#' -e t \
             -e 's#((/emulated/[0-9]+|/media/[0-9]+|/sdcard)/).+#\1…#')
     oneos_media_lcount=$(printf '%s\n' "$oneos_media_lkept" | "$BB" grep -c .)
-    echo "[Pivoted Root] Media log ($oneos_media_lpart): $oneos_media_lcount line(s) kept of $oneos_media_lseen; $oneos_media_lage"
+    echo "[Pivoted Root] Media log ($oneos_media_lpart): $oneos_media_lcount line(s) kept of $oneos_media_lseen; $oneos_media_lquota quota-type error line(s) left out; $oneos_media_lage"
     [ "$oneos_media_lcount" = 0 ] ||
         printf '%s\n' "$oneos_media_lkept" | "$BB" grep . | "$BB" sed "s/^/[Pivoted Root] Media log ($oneos_media_lpart): /"
     return 0
@@ -890,6 +911,42 @@ oneos_media_watch() {
     return 0
 }
 
+# The end of the media hold (set next to the zygote launch, see there): the
+# guest's services.jar holds StorageManagerService's "emulated volume
+# mounted" call to MediaProvider until oneos.media.published is 1 (15 s at
+# most). Sent once per boot, as soon as the albums are mounted or the
+# publish has given up; $1 says which. Never before the album loop's summary
+# on the normal path: an empty OneUI/ at MediaProvider's mount scan is what
+# the hold is for (S25 Ultra session a12bf19e1931e81a).
+oneos_media_hold_done() {
+    [ "$oneos_media_hold_on" = 1 ] && [ "$oneos_media_hold_sent" != 1 ] || return 0
+    oneos_media_hold_sent=1
+    oneos_media_hnow=$("$BB" date +%s)
+    if setprop oneos.media.published 1 2>/dev/null; then
+        echo "[Pivoted Root] Media hold: released at $("$BB" date +%T) ($((oneos_media_hnow - ${oneos_media_t0:-$oneos_media_hnow})) s after the zygote launch, $1)"
+    else
+        echo "[Pivoted Root] Media hold: setprop oneos.media.published 1 failed ($1); StorageManagerService waits out its 15 s"
+    fi
+    return 0
+}
+
+# system_server's own line of the hold (tag OneOSMediaHold: how long
+# StorageManagerService waited and why it went on), next to MediaProvider's
+# lines: the proof that the mount scan came after the albums. Last 3 lines.
+oneos_media_hold_log() {
+    oneos_media_hlines=$("$BB" timeout 15 logcat -d -b main,system -s OneOSMediaHold 2>/dev/null |
+        "$BB" grep -v '^--------- ' | "$BB" grep . | "$BB" tail -n 3 |
+        "$BB" sed 's/[^ -~]//g' | "$BB" cut -c 1-300)
+    if [ -n "$oneos_media_hlines" ]; then
+        printf '%s\n' "$oneos_media_hlines" | "$BB" sed 's/^/[Pivoted Root] Media hold: system_server: /'
+    elif [ "$oneos_media_hold_on" = 1 ]; then
+        echo "[Pivoted Root] Media hold: system_server logged nothing (the set's services_patched.jar has no hold yet, or logcat had rotated)"
+    else
+        echo "[Pivoted Root] Media hold: system_server logged nothing (the hold was off this boot)"
+    fi
+    return 0
+}
+
 oneos_media_late() {
     oneos_media_t0=$("$BB" date +%s)
     oneos_media_n=0
@@ -931,8 +988,10 @@ oneos_media_late() {
     if [ "$oneos_media_ready" != 1 ]; then
         if [ -n "$oneos_media_first" ]; then
             echo "[Pivoted Root] Media prototype skipped: the guest's storage views did not settle in $oneos_media_n s (last seen: $oneos_media_bases)"
+            oneos_media_hold_done "skipped: the storage views did not settle"
         else
             echo "[Pivoted Root] Media prototype skipped: the guest's vold built no storage view of /data/media in 180 s (seen: ${oneos_media_bases:-none})"
+            oneos_media_hold_done "skipped: vold built no storage view"
         fi
         oneos_media_release_late
         return 0
@@ -951,6 +1010,7 @@ oneos_media_late() {
     esac
     if [ "$#" != 4 ] || [ ! -f "$oneos_media_tmp/albums" ]; then
         echo "[Pivoted Root] Media prototype skipped: One UI's albums could not be listed in the hold"
+        oneos_media_hold_done "skipped: the albums could not be listed"
         oneos_media_release_late
         return 0
     fi
@@ -1013,6 +1073,14 @@ oneos_media_late() {
         fi
     fi
     echo "[Pivoted Root] Media prototype: albums: $oneos_media_listed found, $oneos_media_unticked excluded, $oneos_media_mounted mounted, $oneos_media_skipped skipped"
+    # Every album that will be there is mounted (and checked after
+    # propagation): MediaProvider's mount scan may run now. Before the hold
+    # dir's release, whose unmounts it does not need to wait for.
+    if [ "$oneos_media_mounted" != 0 ]; then
+        oneos_media_hold_done "albums published: $oneos_media_mounted mounted, $oneos_media_skipped skipped"
+    else
+        oneos_media_hold_done "no album mounted: $oneos_media_skipped skipped"
+    fi
     oneos_media_release_late
     [ "$oneos_media_mounted" != 0 ] || return 0
 
@@ -1099,12 +1167,52 @@ oneos_media_late() {
     oneos_media_lt=$("$BB" date +%s)
     printf '%s' "$oneos_media_lt" > /data/oneos_media_logt 2>/dev/null
     oneos_media_logcat boot 250 ""
+    oneos_media_hold_log
 }
 
 # OneOS: pivot_root left the host's whole old root at /postinstall, including
 # vold's bind of the phone's real /data/media and every unbridged /data tree.
 # The optional media prototype has already pinned One UI's media/0, read-only.
 # The old root still must be detached before any guest process starts.
+# Nothing in the guest needs it (this namespace is rprivate, so this does not
+# touch the host).
+# Shared folders (0.5.20, owner: "they wanna see their storage, gallery"),
+# ONEOS_SHARE_FILES=1 only: One UI's own DCIM, Pictures, Download, Documents,
+# Movies and Music, held here from the phone's real shared storage
+# (this namespace's copy of host /data with the /data/media bridge taken off;
+# the bridge also covers its pass_through peer) on a root-only tmpfs in this
+# namespace.
+# They are put over the guest's folders only after its vold has mounted its
+# storage (share_folders below): the chown -R/chmod -R of /data/media further
+# down and every recursive pass of guest_prepare.sh over the staged
+# /data/media must never reach One UI's files. This namespace is rprivate, so
+# none of it is ever seen by One UI; all of it ends with the guest.
+SHARE_DIRS="DCIM Pictures Download Documents Movies Music"
+SHARE_HOLD=/dev/.oneos_share
+SHARE_HELD=""
+if [ "${ONEOS_SHARE_FILES:-0}" = 1 ]; then
+    # This namespace's copy of host /data still has the /data/media bridge on it; taken off here only
+    # (rprivate: One UI and its daemons keep theirs), One UI's real storage is under it. A bind from a
+    # mount of another namespace is refused (EINVAL: /proc/<pid>/cwd of a host process, 0.5.20 test).
+    SRC=/postinstall/data/media/0
+    if awk '$5 == "/postinstall/data/media"' /proc/self/mountinfo | grep -q .; then
+        $BB umount -l /postinstall/data/media 2>/dev/null
+    fi
+    awk '$5 == "/postinstall/data/media"' /proc/self/mountinfo | grep -q . && SRC=/nonexistent
+    # Never the guest's own storage (the staged /data/media, this root's /data/media).
+    [ "$(stat -c %d:%i "$SRC" 2>/dev/null)" = "$(stat -c %d:%i /data/media/0 2>/dev/null)" ] && SRC=/nonexistent
+    if [ -d "$SRC/" ] && mkdir -p "$SHARE_HOLD" && $BB mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs "$SHARE_HOLD" &&
+       $BB mount --make-private "$SHARE_HOLD"; then
+        for d in $SHARE_DIRS; do
+            [ -d "$SRC/$d" ] && [ ! -L "$SRC/$d" ] || continue
+            mkdir -p "$SHARE_HOLD/$d" && $BB mount --bind "$SRC/$d" "$SHARE_HOLD/$d" &&
+                $BB mount --make-private "$SHARE_HOLD/$d" && SHARE_HELD="$SHARE_HELD $d"
+        done
+        echo "[Pivoted Root] Shared folders held from One UI's storage:${SHARE_HELD:- none}"
+    else
+        echo "[Pivoted Root] Shared folders: One UI's storage not reachable ($SRC); this session keeps its own"
+    fi
+fi
 $BB umount -l /postinstall 2>/dev/null
 if awk '$5 ~ "^/postinstall(/|$)"' /proc/self/mountinfo | grep -q .; then
     echo "[Pivoted Root] FATAL: host mounts still under /postinstall. Not starting the guest."
@@ -1150,12 +1258,42 @@ $BB mount --bind /data/misc/profiles/cur /data_mirror/cur_profiles 2>/dev/null |
 $BB mount --bind /data/misc/profiles/ref /data_mirror/ref_profiles 2>/dev/null || true
 
 echo "[Pivoted Root] Setting up /data/media and emulated storage..."
-# The recursive chown and chmod below must never reach One UI's albums: they
-# are bound only later, in the background after the zygote launch (and are
-# read-only), never before these lines.
+# The recursive chown and chmod below must never reach One UI's albums
+# (/data/media/0/OneUI, bound only later in the background after the zygote
+# launch, read-only, never before these lines) or per-app external storage
+# under /data/media/0/Android/{data,media,obb}/<pkg>. Recursive /data/media
+# here overwrote ensure_app_storage.sh's <uid>:1078 0770 owners on every boot
+# (S25 Ultra, coloros17-findx9u-in-1105, sessions db19aee410bd79ff and
+# 75e538ac0ed725df: guest/app_storage.log "realigned 1485 to new uids"),
+# leaving those folders 0777 for ~80 s and spawning ~4,000 chown processes to
+# repair them.
 mkdir -p /data/media/0/Android /data/media/0/Pictures/Screenshots /data/media/0/Download /data/media/0/DCIM /data/media/0/Documents
-chown -R 1023:1023 /data/media 2>/dev/null || true
-chmod -R 777 /data/media 2>/dev/null || true
+if [ -d /data/media ] && [ ! -L /data/media ]; then
+    chown 1023:1023 /data/media 2>/dev/null || true
+    chmod 777 /data/media 2>/dev/null || true
+    if [ -d /data/media/0 ] && [ ! -L /data/media/0 ]; then
+        chown 1023:1023 /data/media/0 2>/dev/null || true
+        chmod 777 /data/media/0 2>/dev/null || true
+        if [ -d /data/media/0/Android ] && [ ! -L /data/media/0/Android ]; then
+            for d in /data/media/0/Android /data/media/0/Android/data /data/media/0/Android/media /data/media/0/Android/obb; do
+                [ -d "$d" ] && [ ! -L "$d" ] || continue
+                chown 1023:1023 "$d" 2>/dev/null || true
+                chmod 777 "$d" 2>/dev/null || true
+            done
+        fi
+    fi
+    for m in /data/media /data/media/0; do
+        [ -d "$m" ] && [ ! -L "$m" ] || continue
+        for d in "$m"/* "$m"/.*; do
+            case "$d" in
+                */.|*/..|/data/media/0|/data/media/0/Android|/data/media/0/OneUI) continue ;;
+            esac
+            [ ! -L "$d" ] && [ -e "$d" ] || continue
+            chown -R 1023:1023 "$d" 2>/dev/null || true
+            chmod -R 777 "$d" 2>/dev/null || true
+        done
+    done
+fi
 $BB mount -t tmpfs tmpfs /storage 2>/dev/null || true
 mkdir -p /storage/emulated/0
 $BB mount --bind /data/media/0 /storage/emulated/0 2>/dev/null || true
@@ -1854,7 +1992,10 @@ fi
 #    0.4.74 (A34 7e5896b0 81 of 510, A15 336e9373, A17 5G 98780abb, A24 80412f38
 #    ...), the slider did nothing. Only for that pair. A system that goes through
 #    Samsung's lights HAL (HyperOS, Pixel, Infinity-X: "force_anyway? false") is
-#    left alone: two writers on one node would fight.
+#    left alone: two writers on one node would fight. A HAL that silently stops
+#    reaching the panel gets taken over: the bridge watches (fail-closed) and
+#    takes the node over after 15 s of a node stuck at 0 with the screen awake
+#    and asking for light (HyperOS on the A15, 2026-11-15).
 # The guest's brightness (cmd display get-brightness) and wakefulness (dumpsys
 # power) are copied once a second. ColorOS and OxygenOS give a level, not 0..1
 # (222..8191, sunlight boost to 10239: the 0.4.65 loop took that for no value and
@@ -1865,13 +2006,15 @@ fi
 # a panel node; dozing: 1/20. Ends with the guest.
 # ONEOS_GUEST_LED_BRIDGE=0 / ONEOS_GUEST_BL_BRIDGE=0: off.
 BRIDGE=0
+case "${ONEOS_GUEST_BL_BRIDGE:-1}" in force) BLFORCE=1 ;; *) BLFORCE=0 ;; esac
 if [ $LEDBL = 1 ]; then [ "${ONEOS_GUEST_LED_BRIDGE:-1}" = 1 ] && BRIDGE=1
-elif [ "${ONEOS_GUEST_BL_BRIDGE:-1}" = 1 ] && [ "$BL" = /sys/class/backlight/panel ] && [ -w "$BL/brightness" ]; then
+elif [ "${ONEOS_GUEST_BL_BRIDGE:-1}" != 0 ] && [ "$BL" = /sys/class/backlight/panel ] && [ -w "$BL/brightness" ]; then
     case "$BLMAX" in ''|*[!0-9]*) ;; *) BRIDGE=1 ;; esac
 fi
 if [ $BRIDGE = 1 ]; then
     cat > /data/oneos_bl_bridge.sh <<'BLEOF'
 BL=$1; MAX=$2; ON=$3; LED=$4
+case "${ONEOS_GUEST_BL_BRIDGE:-1}" in force) BLFORCE=1 ;; *) BLFORCE=0 ;; esac
 i=0
 while [ "$(getprop service.bootanim.exit)" != 1 ] && [ $i -lt 600 ]; do sleep 1; i=$((i + 1)); done
 D=""; n=0
@@ -1889,9 +2032,43 @@ force=$(echo "$D" | sed -n 's/^useSurfaceControl=[a-z]* (force_anyway? \([a-z]*\
 lo=$(echo "$D" | sed -n 's/^mScreenBrightnessRangeMinimum=//p' | head -n 1)
 hi=$(echo "$D" | sed -n 's/^mScreenBrightnessRangeMaximum=//p' | head -n 1)
 nm=$(echo "$D" | sed -n 's/^mScreenBrightnessNormalMaximum=//p' | head -n 1)
-if [ "$LED" != 1 ] && { [ "$usc" != false ] || [ "$force" != true ]; }; then
-    echo "$(date +%T) brightness bridge: not needed for $BL (useSurfaceControl=${usc:-not read}, force_anyway=${force:-not read})"
-    exit 0
+if [ "$LED" != 1 ] && [ "${BLFORCE:-0}" = 1 ]; then
+    # ONEOS_GUEST_BL_BRIDGE=force skips the watch entirely: for a stage whose
+    # HAL thrashes the node instead of sticking at 0 (HyperOS on the A15,
+    # 2026-11-15: the node jumped 90..469 with the slider at minimum, and a
+    # direct write was over-written within seconds), the bridge restores the
+    # proportional value every second — one writer wins by out-writing.
+    echo "$(date +%T) brightness bridge: forced by ONEOS_GUEST_BL_BRIDGE=force (the HAL thrashes the node; restoring every second)"
+elif [ "$LED" != 1 ] && { [ "$usc" != false ] || [ "$force" != true ]; }; then
+    # A lights-HAL system is normally left alone: two writers on one node would
+    # fight. But a HAL can silently stop reaching the panel: HyperOS on the A15
+    # (2026-11-15) read the node at 0 of 483 while the panel glowed at the
+    # host's last level, and the slider moved the setting without moving the
+    # panel. Watch, fail-closed: take the node over only when it sits at 0 for
+    # 15 s in a row while the screen is awake and asks for light (a real
+    # minimum is a wish, not a dead HAL), and give up after 600 s if the node
+    # moves on its own. Healthy systems never see the takeover.
+    echo "$(date +%T) brightness bridge: watching $BL (useSurfaceControl=${usc:-not read}, force_anyway=${force:-not read}; takes over after 15 s of a dead node)"
+    n=0; i=0
+    while [ $i -lt 600 ]; do
+        i=$((i + 1)); sleep 1
+        [ "$(cat $BL/brightness 2>/dev/null)" = 0 ] || { n=0; continue; }
+        case "$(dumpsys power 2>/dev/null | sed -n 's/^ *mWakefulness=//p' | head -n 1)" in
+            Awake) ;;
+            *) n=0; continue ;;
+        esac
+        f=$(timeout 3 cmd display get-brightness 0 2>/dev/null | head -n 1)
+        light=$(echo "$f" | awk -v lo="${lo:-0}" -v hi="${hi:-1}" '{
+            for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]*[.]?[0-9]+(E-?[0-9]+)?$/) {
+                print ($i + 0 > lo + 0.05 * (hi - lo)) ? 1 : 0; exit } }')
+        [ "$light" = 1 ] && n=$((n + 1)) || n=0
+        [ $n -ge 15 ] && break
+    done
+    if [ $n -lt 15 ]; then
+        echo "$(date +%T) brightness bridge: the node moved on its own after $i s; leaving it to the lights HAL"
+        exit 0
+    fi
+    echo "$(date +%T) brightness bridge: the lights HAL does not reach the panel (node 0, awake and asking for light for 15 s); taking the node over"
 fi
 # A level scale when the range ends above 1 (ColorOS, OxygenOS); else 0..1.
 SCALE=$(echo "${lo:-x} ${hi:-x} ${nm:-x}" | awk '{ t = $3; if (t !~ /^[0-9.]+$/) t = $2
@@ -2076,6 +2253,62 @@ fi
 VOLD_PID=$!
 echo "[Pivoted Root] Vold PID: $VOLD_PID"
 echo "[Pivoted Root] time $($BB date +%T) vold-wait"
+# Shared folders (held above): once the guest's vold has bound its /data/media
+# to /mnt/pass_through/0/emulated (the storage its MediaProvider serves apps
+# from; /mnt is shared in this namespace, so the binds there reach the app
+# namespaces as slaves), each held folder goes over the guest's own at both
+# places; the guest's files in those folders stay underneath, untouched.
+# Then a rescan of the volume so the gallery lists them. Log: /data/oneos_share.log.
+# The media hold for these folders (owner's decision of 2026-11-18, S25 Ultra): MediaProvider's mount scan races
+# these binds the way it raced the albums (it scanned the empty DCIM and the rest, dropped the rows, and a rescan
+# had to index everything again). The hold is set next to the zygote launch, far below; this background part
+# must not release it before then (the launch sets published to 0 first), so it waits for the launch's note in
+# /data/oneos_share_hold_set (1: the hold is on, 0: it is not) and releases only on a 1.
+oneos_share_hold_release() {
+    hw=0
+    until [ -e /data/oneos_share_hold_set ] || [ $hw -ge 120 ]; do sleep 1; hw=$((hw + 1)); done
+    [ "$(cat /data/oneos_share_hold_set 2>/dev/null)" = 1 ] || return 0
+    if setprop oneos.media.published 1 2>/dev/null; then
+        echo "$(date +%T) Media hold: released ($1)"
+    else
+        echo "$(date +%T) Media hold: setprop oneos.media.published 1 failed ($1); StorageManagerService waits out its 15 s"
+    fi
+}
+if [ -n "$SHARE_HELD" ]; then
+    # Last boot's note must not release this boot's hold early.
+    rm -f /data/oneos_share_hold_set
+    (
+        PT=/mnt/pass_through/0/emulated
+        n=0
+        until awk -v m="$PT" '$5 == m {f = 1} END {exit !f}' /proc/self/mountinfo && [ -d "$PT/0" ]; do
+            n=$((n + 1))
+            [ $n -ge 300 ] && {
+                echo "$(date +%T) the guest's storage ($PT) never came up; nothing shared"
+                oneos_share_hold_release "the guest's storage never came up"
+                exit 0
+            }
+            sleep 1
+        done
+        done_=""
+        for d in $SHARE_HELD; do
+            ok=1
+            for t in "$PT/0/$d" "/data/media/0/$d"; do
+                [ -L "$t" ] && { ok=0; break; }
+                mkdir -p "$t" && chown 1023:1023 "$t" 2>/dev/null
+                $BB mount --bind "$SHARE_HOLD/$d" "$t" || { ok=0; break; }
+            done
+            [ $ok = 1 ] && done_="$done_ $d"
+        done
+        echo "$(date +%T) shared from One UI after ${n}s:${done_:- none}"
+        $BB umount -l "$SHARE_HOLD" 2>/dev/null
+        oneos_share_hold_release "after the binds"
+        n=0
+        while [ "$(getprop sys.boot_completed)" != 1 ] && [ $n -lt 600 ]; do sleep 2; n=$((n + 2)); done
+        sleep 20
+        /system/bin/content call --uri content://media --method scan_volume --arg external_primary >/dev/null 2>&1 &&
+            echo "$(date +%T) media rescan asked" || echo "$(date +%T) media rescan refused; the gallery lists them at its next scan"
+    ) </dev/null >> /data/oneos_share.log 2>&1 &
+fi
 n=0
 while [ $n -lt 50 ]; do
     [ "$(svc_pid $VOLD_NAME)" = "$VOLD_PID" ] && break
@@ -2168,9 +2401,59 @@ echo "[Pivoted Root] time $($BB date +%T) audio"
 if [ -f /data/guest_audio.flag ]; then
     echo "[Pivoted Root] Starting guest audioserver..."
     mkdir -p /data/misc/audioserver && chown 1041:1005 /data/misc/audioserver && chmod 0700 /data/misc/audioserver
+    # A guest restart that keeps the previous generation's audio HAL leaves the
+    # new audioserver without a primary output: the HAL holds the old streams,
+    # openOutput for AUDIO_DEVICE_OUT_SPEAKER fails ("Cannot open output stream
+    # ... on hw module primary", "The policy configuration does not declare a
+    # primary output") and every createTrack gets error -19 for the rest of the
+    # session. Galaxy A15 Infinity-X: audioserver 8035 registered at 16:10:33,
+    # two minutes after the 16:10 soft reboot, and the sound stayed dead until
+    # the 14:25 full launch; the 03:33 and 04:05 sessions died the same way
+    # (sound_watch.log / sound_watch.prev). A full launch never sees this:
+    # oneos_switch.sh restarts the HAL services before us, so only a HAL whose
+    # pid survived the guest restart needs this. Restart it the way the full
+    # launch does, through the HAL's init services, and fall back to the
+    # pid when the property did not move it: init starts the service again,
+    # and the fresh HAL takes the new audioserver's streams. The recorded pid
+    # lives in the guest's /data like the other keeper logs; the pid file also
+    # guards against pid reuse restarting a fresh HAL, which would only cost
+    # another HAL restart, never a broken one.
+    hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+    hprev=$(cat /data/oneos_audio_hal.pid 2>/dev/null)
+    if [ -n "$hpid" ] && [ "$hpid" = "$hprev" ]; then
+        echo "[Pivoted Root] audio HAL survived the guest restart as pid $hpid; restarting it for a fresh primary output"
+        for hsv in $(getprop | sed -n 's/^\[init\.svc\.\(vendor\.audio-hal[^]]*\)\]: \[running\]$/\1/p' | tr '\n' ' '); do
+            setprop ctl.restart "$hsv"
+        done
+        n=0
+        while [ $n -lt 100 ]; do
+            sleep 0.2
+            hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+            if [ -n "$hpid" ] && [ "$hpid" != "$hprev" ]; then break; fi
+            n=$((n + 1))
+        done
+        if [ -n "$hpid" ] && [ "$hpid" = "$hprev" ]; then
+            echo "[Pivoted Root] audio HAL still pid $hpid after the ctl.restart; killing it"
+            kill -9 "$hpid" 2>/dev/null || true
+            n=0
+            while [ $n -lt 100 ]; do
+                sleep 0.2
+                hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+                if [ -n "$hpid" ] && [ "$hpid" != "$hprev" ]; then break; fi
+                n=$((n + 1))
+            done
+        fi
+        echo "[Pivoted Root] audio HAL pid after the restart: ${hpid:-none} (waited $((n / 5))s)"
+    fi
+    if [ -n "$hpid" ]; then echo "$hpid" > /data/oneos_audio_hal.pid; fi
     n=0
     while [ $n -lt 50 ] && ! service check android.hardware.audio.core.IModule/default 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.2; done
     echo "[Pivoted Root] audio HAL IModule/default:$(service check android.hardware.audio.core.IModule/default 2>/dev/null | cut -d: -f2) after $((n / 5))s"
+    # The record above ran while the full launch's own HAL restart (oneos_switch.sh)
+    # may not have registered the module yet; record the pid now that it is up, so
+    # the next guest restart can tell a surviving HAL from a fresh one.
+    hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+    if [ -n "$hpid" ]; then echo "$hpid" > /data/oneos_audio_hal.pid; fi
     # A2DP offload (run 44): Samsung's QTI HAL turns its Bluetooth offload path
     # on only from the vendor parameter l_a2dp_format (bit 21 of the number,
     # Platform+8), which One UI's audioserver sends and a GSI's never does: every
@@ -2636,6 +2919,97 @@ if [ -f /data/guest_audio.flag ] && [ "${ONEOS_GUEST_CALL_SIM:-1}" != 0 ]; then
         done' sh "$BB" "${ONEOS_GUEST_CALL_SIM:-1}" "${ONEOS_GUEST_CALL_SIM_VIA:-}" </dev/null >> /data/call_audio.log 2>&1 &
 fi
 
+# MediaTek Bluetooth audio HALs close the whole A2DP session when AudioFlinger
+# closes its short format-probe output.  The real output opens a few
+# milliseconds later, but its port is already DISABLED and every start fails
+# until Bluetooth is restarted.  This is visible as an active A2DP device
+# together with AHAL_BluetoothAudioPort's "state=DISABLED failure" — a
+# MediaTek-only log tag, so a Qualcomm or Exynos phone can never fire this
+# watchdog.  The Galaxy A15/A16 4G (Helio G99 / MT6789) are the
+# device-confirmed cases and the same HAL generation ships on the other
+# MediaTek Galaxy phones, so arm the whole MediaTek family and let the exact
+# signature below decide.  Match the family across the four SoC properties,
+# not ro.soc.model alone: builds leave it empty or suffix it (MT6789V/CD),
+# Samsung reports it uppercase while the platform and hardware names are
+# lowercase, and boards like the A25/A33 put universalNNNN/s5eNNNN on
+# ro.board.platform/ro.hardware instead.  Restart Bluetooth after that exact
+# first-boot failure and retry once if the replacement session is also
+# consumed by the probe.  Do not touch deliberate disconnects or a session
+# which started normally.  ONEOS_GUEST_BT_RECOVER=0 disables it.
+bt_soc="$(getprop ro.board.platform)$(getprop ro.hardware)$(getprop ro.soc.manufacturer)$(getprop ro.soc.model)"
+case "$bt_soc" in
+    *mt[0-9]*|*MT[0-9]*|*[Mm]edia[Tt]ek*) bt_mtk=1 ;;
+    *) bt_mtk= ;;
+esac
+if [ "$bt_mtk" = 1 ] && [ "${ONEOS_GUEST_BT_RECOVER:-1}" = 1 ]; then
+    cat > /data/oneos_bt_recover.sh <<'BTRECOVEREOF'
+#!/system/bin/sh
+LOG=/data/oneos_bt_recover.log
+start=$(date +%s)
+echo "=== $(date '+%F %T') MediaTek A2DP first-session recovery" >> "$LOG"
+i=0
+while [ $i -lt 300 ]; do
+    sleep 1
+    bad=$(logcat -d -v epoch -T "$start.000" -s 'AHAL_BluetoothAudioPort:*' '*:S' 2>/dev/null |
+        grep -F 'session_type=A2DP_SOFTWARE_ENCODING_DATAPATH' |
+        grep -F 'state=DISABLED failure' | tail -n 1)
+    if [ -n "$bad" ] && dumpsys bluetooth_manager 2>/dev/null | grep -q '<- ACTIVE'; then
+        echo "$(date +%T) active A2DP session disabled by the probe output" >> "$LOG"
+        attempt=1
+        while [ $attempt -le 2 ]; do
+            attempt_start=$(date +%s)
+            echo "$(date +%T) Bluetooth recovery attempt $attempt/2" >> "$LOG"
+            cmd bluetooth_manager disable >> "$LOG" 2>&1
+            # The stack boots slowly on some ROMs (HyperOS's wait-for-state timed
+            # out before it reached OFF or ON, and the earbuds' auto-reconnect
+            # then bound to the half-initialized stack, whose A2DP session never
+            # came up: Galaxy A15 HyperOS, sound dead after every recovery; a
+            # slow manual restart with long pauses brought it back). Poll each
+            # state over long timeouts and settle after ON, so the earbuds'
+            # auto-reconnect binds to a fully initialized stack.
+            btoff=1; n=0
+            while [ $n -lt 30 ]; do
+                sleep 1
+                if dumpsys bluetooth_manager 2>/dev/null | grep -q '^  State:  *OFF$'; then btoff=0; break; fi
+                n=$((n + 1))
+            done
+            echo "$(date +%T) stack OFF after ${n}s (reached $((1 - btoff)))" >> "$LOG"
+            cmd bluetooth_manager enable >> "$LOG" 2>&1
+            bton=1; n=0
+            while [ $n -lt 45 ]; do
+                sleep 1
+                if dumpsys bluetooth_manager 2>/dev/null | grep -q '^  State:  *ON$'; then bton=0; break; fi
+                n=$((n + 1))
+            done
+            sleep 8
+            echo "$(date +%T) stack ON after ${n}s (reached $((1 - bton))); settled 8s for the earbuds' auto-reconnect" >> "$LOG"
+            waited=0
+            while [ $waited -lt 25 ]; do
+                sleep 1
+                if logcat -d -v epoch -T "$attempt_start.000" -s 'AHAL_BluetoothAudioPort:*' '*:S' 2>/dev/null |
+                   grep -F 'session_type=A2DP_SOFTWARE_ENCODING_DATAPATH' | grep -q 'state=STARTED'; then
+                    echo "$(date +%T) replacement A2DP session STARTED on attempt $attempt (stack reached: OFF=$((1 - btoff)) ON=$((1 - bton)))" >> "$LOG"
+                    exit 0
+                fi
+                waited=$((waited + 1))
+            done
+            echo "$(date +%T) replacement A2DP session not STARTED after attempt $attempt (stack reached: OFF=$((1 - btoff)) ON=$((1 - bton)))" >> "$LOG"
+            attempt=$((attempt + 1))
+        done
+        echo "$(date +%T) A2DP recovery exhausted after 2 attempts" >> "$LOG"
+        exit 0
+    fi
+    i=$((i + 1))
+done
+echo "$(date +%T) no disabled active A2DP session in 300 s" >> "$LOG"
+BTRECOVEREOF
+    chmod 700 /data/oneos_bt_recover.sh
+    /system/bin/sh /data/oneos_bt_recover.sh < /dev/null > /dev/null 2>&1 &
+    echo "[Pivoted Root] MediaTek A2DP first-session recovery armed (/data/oneos_bt_recover.log)"
+else
+    rm -f /data/oneos_bt_recover.sh
+fi
+
 # ColorOS system daemons that its init would start on demand ("interface aidl"
 # in cotad.rc / defrag.rc). The host's init refuses ctl.interface_start for
 # services it does not know, and oplus-services waits for them.
@@ -3038,6 +3412,15 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
             # IC in low-power mode, and at that time did not switch it back on.
             e0=$(cat $T/enabled 2>/dev/null)
             case "$e0" in 0|1) eon=1 ;; 2) eon=2 ;; *) log "$t ($ev): enabled reads ${e0:-nothing}, not a known protocol: double tap left to the guest"; continue ;; esac
+            power=1
+            # S23 STM requires both enum and input readback to confirm a transition.
+            if [ "$(getprop ro.product.vendor.model)" = SM-S918B ] &&
+               [ "$(readlink -f $I/device/driver)" = /sys/bus/spi/drivers/stm_ts_spi ]; then
+                case "$e0:$(cat $I/enabled 2>/dev/null)" in
+                    1:0|2:1) power=2; eon=2 ;;
+                    *) log "$t: unmeasured STM power state; double tap left to the guest"; continue ;;
+                esac
+            fi
             # KEY_WAKEUP (143) among its keys: bit 15 of the third word from the end.
             set -- $(cat $I/capabilities/key 2>/dev/null)
             w=""; [ $# -ge 3 ] && eval w=\${$(($# - 2))}
@@ -3048,7 +3431,7 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                 *) C=/sys/class/drm/card0-DSI-1/dpms; B=/sys/class/backlight/panel0-backlight; [ -e $B/brightness ] || B=/sys/class/backlight/panel ;;
             esac
             [ -r $B/brightness ] || { log "$t ($ev): no backlight to follow ($B)"; continue; }
-            eval "EV_$t=$ev C_$t=$C B_$t=$B/brightness ON_$t=1 L_$t=1 GP_$t= EON_$t=$eon"
+            eval "EV_$t=$ev C_$t=$C B_$t=$B/brightness ON_$t=1 L_$t=1 GP_$t= EON_$t=$eon POWER_$t=$power WR_$t=0"
             IDS="$IDS $t"
             log "$t: $ev ($(cat $I/name 2>/dev/null)), panel $C=$(cat $C 2>/dev/null), $B=$(cat $B/brightness 2>/dev/null), enabled=$(cat $T/enabled 2>/dev/null)"
         done
@@ -3169,6 +3552,21 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
             [ "$e" = 2 ] && eval EON_$1=2
             eval eon=\$EON_$1
         }
+        power_tsp() {
+            T=/sys/class/sec/$1
+            eval p=\$POWER_$1
+            if [ "$p" = 2 ]; then
+                # Only 1,0 and 2,1 act on this STM driver.
+                case "$2" in
+                    1) echo 1,0 > $T/enabled || return 1 ;;
+                    2) echo 2,1 > $T/enabled || return 1 ;;
+                    *) return 1 ;;
+                esac
+                [ "$(cat $T/enabled)" = "$2" ] && [ "$(cat $T/input/enabled)" = "$(( $2 - 1 ))" ]
+            else
+                case "$2" in 1) tsp_off $T ;; 2) tsp_on $T ;; *) return 1 ;; esac
+            fi
+        }
         arm() {
             eval g=\$GP_$1 no=\$NO_$1
             [ -z "$g" ] && [ -z "$no" ] || return 0
@@ -3187,11 +3585,12 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                   fi
                   if in_call; then log "$1: double tap during a call: ignored"; continue; fi
                   log "$1: double tap: waking the guest"
+                  # Let the panel-on loop restore touch even while input waits for dispatch.
+                  setaod 0
                   timeout 5 cmd input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || log "$1: cmd input keyevent failed"
                   # 0.5.15: a click, as One UI gives for its double tap (owner: "there should be haptic
                   # feedback for dt2w"). EFFECT_CLICK through the guest vibrator service; -f: also on silent.
                   timeout 3 cmd vibrator_manager synced -f -d oneos_dt2w prebaked 0 >/dev/null 2>&1 &
-                  setaod 0
               done < $P ) &
             # 1,0 only counts once getevent holds the touchscreen: the driver closes only
             # a device somebody has open, and the guest lets go of it when its panel goes
@@ -3207,16 +3606,21 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
             [ $i -lt 20 ] || log "$1: getevent has not opened $ev after 1 s"
             # The marker first: only a marked IC is ever put back on (here, by wake_tsp
             # and by the return).
-            : > /data/oneos_dt2w_armed.$1
-            if tsp_off $T; then
+            eval p=\$POWER_$1
+            echo "$p" > /data/oneos_dt2w_armed.$1
+            if power_tsp $1 1; then
                 tsp_read $1
                 log "$1: $2: low-power mode (enabled=$e)"
             else
                 log "$1: panel off, but $T/enabled refused 1,0: back on, double tap left to the guest"
-                tsp_on $T
+                restored=0; power_tsp $1 2 && restored=1
                 tsp_read $1
-                [ "$e" = "$eon" ] && rm -f /data/oneos_dt2w_armed.$1
-                disarm $1
+                if [ "$restored:$e" = "1:$eon" ]; then
+                    rm -f /data/oneos_dt2w_armed.$1
+                    disarm $1
+                elif [ "$p" != 2 ]; then
+                    disarm $1
+                fi
                 eval NO_$1=1
             fi
         }
@@ -3228,11 +3632,22 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
         }
         wake_tsp() {
             T=/sys/class/sec/$1
-            [ -f /data/oneos_dt2w_armed.$1 ] || { disarm $1; return; }
-            tsp_on $T
+            [ -f /data/oneos_dt2w_armed.$1 ] || { eval WR_$1=0; disarm $1; return; }
+            restored=0; power_tsp $1 2 && restored=1
             tsp_read $1
-            [ "$e" = "$eon" ] || { sleep 0.2; tsp_on $T; tsp_read $1; }
-            rm -f /data/oneos_dt2w_armed.$1
+            if [ "$restored:$e" != "1:$eon" ]; then
+                sleep 0.2; restored=0; power_tsp $1 2 && restored=1; tsp_read $1
+            fi
+            if [ "$restored:$e" = "1:$eon" ]; then
+                rm -f /data/oneos_dt2w_armed.$1
+                eval WR_$1=0
+            else
+                eval p=\$POWER_$1
+                if [ "$p" = 2 ]; then
+                    log "$1: $2: restore not confirmed (enabled=$e), keeping reader and recovery marker"
+                    return
+                fi
+            fi
             disarm $1
             log "$1: $2: enabled=$e"
         }
@@ -3278,7 +3693,16 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                 s=$l; [ $D = 1 ] && s=0
                 eval o=\$ON_$t ol=\$L_$t
                 [ $l = $ol ] || { eval L_$t=$l; LC=1; }
-                [ $s = $o ] && continue
+                if [ $s = $o ]; then
+                    eval retry=\$WR_$t
+                    [ $s = 1 ] && [ "${retry:-0}" -gt 0 ] || continue
+                    retry=$((retry - 1)); eval WR_$t=$retry
+                    [ $((retry % 10)) = 0 ] || continue
+                else
+                    eval WR_$t=0 p=\$POWER_$t
+                    # Five paced retries while the S23 panel stays on after a failed restore.
+                    [ "$s:$p" != 1:2 ] || eval WR_$t=50
+                fi
                 eval ON_$t=$s
                 CH="$CH $t"
             done
@@ -3501,13 +3925,25 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
         [ -f "$P/stock/${1##*/}" ] && awk -v b="${1##*/}" '$1 == b { f = 1 } END { exit !f }' "$P/stock.list" 2>/dev/null
     }
     prof_count() { awk 'END { print NR }'; }
+    prof_fail() { # <name> <what failed>: logged with profman's own lines; that profile's files go
+        plog "$1.prof: $2"
+        # ART's tools log to logd, not stderr: session db475ad5017133c4 had only "create with
+        # the patched jars failed (exit 255)", and Full logs off keeps no logcat.
+        if command -v logcat >/dev/null 2>&1; then
+            pf_l=$(timeout 10 logcat -d -b main,system -v time -s profman 2>/dev/null | tail -n 20)
+            if [ -n "$pf_l" ]; then plog "$1.prof: profman's log:"; printf '%s\n' "$pf_l" >> "$PLOG"
+            else plog "$1.prof: no profman lines in logcat"; fi
+        fi
+        rm -f "$P/out/$1.prof" "$P/out/$1.txt"
+        return 1
+    }
     prof_make() { # <name> <boot|app> <the image's profile> <stock jar args> <patched jar args>
         pm_n=$1; pm_o=$3; pm_s=$4; pm_p=$5; pm_ty=""
         [ "$2" = boot ] && pm_ty="--output-profile-type=boot"
         timeout 120 "$PROFMAN" --dump-classes-and-methods --profile-file="$pm_o" $pm_s > "$P/out/$pm_n.txt" 2>> "$PLOG"; pm_rc=$?
-        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.txt" ]; then plog "$pm_n.prof: dump with the stock jars failed (exit $pm_rc)"; return 1; fi
+        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.txt" ]; then prof_fail "$pm_n" "dump with the stock jars failed (exit $pm_rc)"; return 1; fi
         timeout 120 "$PROFMAN" $pm_ty --create-profile-from="$P/out/$pm_n.txt" $pm_p --reference-profile-file="$P/out/$pm_n.prof" >> "$PLOG" 2>&1; pm_rc=$?
-        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.prof" ]; then plog "$pm_n.prof: create with the patched jars failed (exit $pm_rc)"; return 1; fi
+        if [ "$pm_rc" != 0 ] || [ ! -s "$P/out/$pm_n.prof" ]; then prof_fail "$pm_n" "create with the patched jars failed (exit $pm_rc)"; return 1; fi
         pm_c1=$(prof_count < "$P/out/$pm_n.txt")
         pm_c2=$(timeout 60 "$PROFMAN" --dump-classes-and-methods --profile-file="$pm_o" $pm_p 2>/dev/null | prof_count)
         pm_c3=$(timeout 60 "$PROFMAN" --dump-classes-and-methods --profile-file="$P/out/$pm_n.prof" $pm_p 2>/dev/null | prof_count)
@@ -3531,7 +3967,10 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
         # B1: build the profiles, once per key from guest_prepare.sh. Without a profman the
         # key is closed as failed too: guest_prepare.sh would copy the stock jars again on every
         # switch while pending stays. After a success only the .prof files are kept (the text
-        # dumps are just the way from the stock jars to the patched ones).
+        # dumps are just the way from the stock jars to the patched ones). The key is ok when
+        # at least one profile was made: in session db475ad5017133c4 boot-image.prof failed
+        # and the two good system server profiles (5.4x the entries, and 39452 from 0) were
+        # thrown away with it. B2 binds only the ones there; a failed one stays the image's.
         if [ -f "$P/pending" ] && [ ! -L "$P/pending" ] && [ ! -x "$PROFMAN" ]; then
             echo "$(cat "$P/pending" 2>/dev/null) failed" > "$P/key"
             rm -rf "$P/stock" "$P/stock.list" "$P/pending" "$P/out"
@@ -3542,31 +3981,44 @@ if [ "$ONEOS_GUEST_ODREFRESH" = 1 ] && [ "$ONEOS_GUEST_JIT_ZYGOTE" != 1 ] && [ -
             PK=$(cat "$P/pending" 2>/dev/null)
             plog "building profiles for $PK"
             rm -rf "$P/out"; mkdir -p "$P/out"
-            PFAIL=0; PMADE=0
+            PFAIL=0; PMADE=0; PFN=""
             if [ -f /system/etc/boot-image.prof ]; then
-                PA_S=""; PA_P=""; PN=0
+                PA_S=""; PA_P=""; PN=0; PBN=0; PNN=""
                 for e in $BCP; do
-                    if prof_patched "$e"; then PA_S="$PA_S --apk=$P/stock/${e##*/} --dex-location=$e"; PN=$((PN + 1))
+                    PBN=$((PBN + 1))
+                    if prof_patched "$e"; then PA_S="$PA_S --apk=$P/stock/${e##*/} --dex-location=$e"; PN=$((PN + 1)); PNN="$PNN ${e##*/}"
                     else PA_S="$PA_S --apk=$e --dex-location=$e"; fi
                     PA_P="$PA_P --apk=$e --dex-location=$e"
                 done
                 if [ "$PN" -gt 0 ]; then
-                    if prof_make boot-image boot /system/etc/boot-image.prof "$PA_S" "$PA_P"; then PMADE=$((PMADE + 1)); else PFAIL=1; fi
+                    # profman's boot profile fails ("Failed to add dex file to boot image profile",
+                    # exit 255) when two dex files share a profile key, the jar's name; inferred for
+                    # session db475ad5017133c4, so the log says whether that is so.
+                    plog "boot class path: $PBN entries, $PN patched:$PNN"
+                    PDUP=$(printf '%s\n' $BCP | awk -F/ 'NF { p[NR] = $0; b[NR] = $NF; n[$NF]++ } END { for (i = 1; i <= NR; i++) if (n[b[i]] > 1) printf " %s", p[i] }')
+                    if [ -n "$PDUP" ]; then plog "boot class path jars sharing a name:$PDUP"
+                    else plog "boot class path jar names: all distinct ($PBN)"; fi
+                    if prof_make boot-image boot /system/etc/boot-image.prof "$PA_S" "$PA_P"; then PMADE=$((PMADE + 1))
+                    else PFAIL=$((PFAIL + 1)); PFN="$PFN${PFN:+, }boot-image"; fi
                 fi
             fi
             for e in $SSCP; do
                 prof_patched "$e" && [ -f "$e.prof" ] || continue
                 [ -s "$P/out/${e##*/}.prof" ] && continue
-                if prof_make "${e##*/}" app "$e.prof" "--apk=$P/stock/${e##*/} --dex-location=$e" "--apk=$e --dex-location=$e"; then PMADE=$((PMADE + 1)); else PFAIL=1; fi
+                if prof_make "${e##*/}" app "$e.prof" "--apk=$P/stock/${e##*/} --dex-location=$e" "--apk=$e --dex-location=$e"; then PMADE=$((PMADE + 1))
+                else PFAIL=$((PFAIL + 1)); PFN="$PFN${PFN:+, }${e##*/}"; fi
             done
-            if [ "$PFAIL" = 0 ] && [ "$PMADE" -gt 0 ]; then
-                echo "$PK ok" > "$P/key"; PRES=ok; rm -f "$P/out"/*.txt
+            if [ "$PMADE" -gt 0 ]; then
+                echo "$PK ok" > "$P/key"; rm -f "$P/out"/*.txt
+                if [ "$PFAIL" = 0 ]; then PRES="ok ($PMADE made)"; PSUM="$PMADE profiles ok"
+                else PRES="ok ($PMADE made, $PFAIL failed: $PFN)"; PSUM="$PMADE profiles made, $PFAIL failed ($PFN)"; fi
             else
-                echo "$PK failed" > "$P/key"; rm -rf "$P/out"; PRES=failed
+                echo "$PK failed" > "$P/key"; rm -rf "$P/out"; PRES="failed ($PMADE made)"; PSUM="$PMADE profiles failed"
             fi
             rm -rf "$P/stock" "$P/stock.list" "$P/pending"
-            plog "profiles $PRES ($PMADE made) in $(( $(date +%s) - PT0 )) s"
-            PSUM="$PMADE profiles $PRES in $(( $(date +%s) - PT0 )) s"
+            PT=$(( $(date +%s) - PT0 ))
+            plog "profiles $PRES in $PT s"
+            PSUM="$PSUM in $PT s"
         fi
         # B2: bind them, every boot
         PKL=$(cat "$P/key" 2>/dev/null)
@@ -4083,7 +4535,10 @@ if [ -f "$WAVE_APK" ]; then
     if $BB mount -o bind "$WAVE_APK" /system/system_ext/priv-app/SystemUI/SystemUI.apk 2>/dev/null; then
         echo "[Pivoted Root] SystemUI: fingerprint wave APK bound"
         # SurfaceFlinger thrashes 10 Hz <-> 120 Hz during the wave without a
-        # floor; the setting lives in the guest's data and resets on boot.
+        # floor; this runs only when the separate wave APK is bound, and the
+        # setting lives in the guest's settings database and persists across
+        # boots (S25 Ultra, coloros17-findx9u-in-1105, sessions
+        # db19aee410bd79ff and 75e538ac0ed725df).
         (
             n=0
             while [ "$(getprop sys.boot_completed)" != 1 ] && [ "$n" -lt 120 ]; do
@@ -4150,8 +4605,57 @@ fi
 # pinned before /postinstall went, is published album by album once the
 # guest's vold has built its storage views, which is after this point. In the background: the
 # boot never waits for it, and the hold goes with it.
+# The media hold: MediaProvider's own volume scan at mount time ran a few
+# seconds before the albums were there, found OneUI/ empty and deleted every
+# row, so all was indexed again (S25 Ultra session a12bf19e1931e81a,
+# coloros17-findx9u-in-1105: 4560 items under OneUI/ 25 s after the zygote
+# launch, 0 at 38 s, ~100 s of re-indexing after the scan request at 70 s).
+# The guest's services.jar (StorageManagerService) waits, before it tells
+# MediaProvider the emulated volume is mounted, while oneos.media.hold is 1
+# and until oneos.media.published is 1, at most 15 s and once per boot;
+# oneos_media_hold_done sends published. Both are set on every boot, before
+# system_server starts: they may survive from the last one. published goes
+# to 0 first, so a hold never meets the last boot's 1. A set whose
+# services.jar has no hold reads neither and nothing changes.
+# ONEOS_GUEST_MEDIA_HOLD=0 leaves the hold off.
+# Share my files (full access in "One UI files in the other system") has the same race with its binds: with
+# folders held and the albums off, the hold is set the same way and released by the share_folders part above
+# (oneos_share_hold_release), not by oneos_media_late.
+oneos_media_hold_on=0
+oneos_media_hold_sent=0
+oneos_media_share_hold=0
+if [ -z "$oneos_media_tmp" ] && [ -n "$SHARE_HELD" ]; then
+    if [ "${ONEOS_GUEST_MEDIA_HOLD:-1}" = 0 ]; then
+        oneos_media_hold_why="ONEOS_GUEST_MEDIA_HOLD=0"
+    elif setprop oneos.media.published 0 2>/dev/null && setprop oneos.media.hold 1 2>/dev/null; then
+        oneos_media_share_hold=1
+    else
+        oneos_media_hold_why="setprop failed"
+    fi
+elif [ -z "$oneos_media_tmp" ]; then
+    oneos_media_hold_why="the media prototype does not run this boot"
+elif [ "${ONEOS_GUEST_MEDIA_HOLD:-1}" = 0 ]; then
+    oneos_media_hold_why="ONEOS_GUEST_MEDIA_HOLD=0"
+elif setprop oneos.media.published 0 2>/dev/null && setprop oneos.media.hold 1 2>/dev/null; then
+    oneos_media_hold_on=1
+else
+    oneos_media_hold_why="setprop failed"
+fi
+# Tells the share_folders part whether it has a hold to release (only when it runs at all).
+[ -z "$SHARE_HELD" ] || echo "$oneos_media_share_hold" > /data/oneos_share_hold_set 2>/dev/null
+if [ "$oneos_media_hold_on" = 1 ]; then
+    echo "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the albums before MediaProvider's mount scan)"
+elif [ "$oneos_media_share_hold" = 1 ]; then
+    echo "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the shared folders before MediaProvider's mount scan)"
+else
+    setprop oneos.media.hold 0 2>/dev/null
+    setprop oneos.media.published 0 2>/dev/null
+    echo "[Pivoted Root] Media hold: off ($oneos_media_hold_why)"
+fi
 if [ -n "$oneos_media_tmp" ]; then
-    ( oneos_media_late ) </dev/null &
+    # oneos_media_hold_done again once the publish has ended for any reason:
+    # it is sent once, so this only covers a path that forgot it.
+    ( oneos_media_late; oneos_media_hold_done "oneos_media_late ended without releasing it" ) </dev/null &
 fi
 echo "[Pivoted Root] time $($BB date +%T) zygote"
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."
