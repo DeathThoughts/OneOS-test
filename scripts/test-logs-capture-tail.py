@@ -100,5 +100,18 @@ class Capture(unittest.TestCase):
         self.assertEqual(self.run_block(), ['boot.log', 'boot.log.01'])
 
 
+
+class ReadOnlyAuditRules(unittest.TestCase):
+    """The app audits collect.list before every log collection (ProbeAudit) and refuses the whole list on one
+    problem; CI does not run that Kotlin test. S25 Ultra, session f8c0108ef1bea94a: "the bundled list failed
+    its read-only check: logs.capture: arithmetic $(( ))" after the end-of-session rule used a $((n + 1)) counter."""
+
+    def test_no_arithmetic_backticks_or_case(self):
+        text = (ROOT / 'app-android/app/src/full/assets/logs/collect.list').read_text()
+        body = '\n'.join(l for l in text.splitlines() if not l.startswith('#'))
+        self.assertNotIn('$((', body)
+        self.assertNotIn('`', body)
+        self.assertIsNone(re.search(r'(^|[;\s])case\s', body))
+
 if __name__ == '__main__':
     unittest.main()

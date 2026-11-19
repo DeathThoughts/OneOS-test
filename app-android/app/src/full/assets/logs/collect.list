@@ -145,19 +145,17 @@ S=/data/local/tmp/oneos
 [ -e "$S" ] || [ -L "$S" ] || [ ! -d /data/local/tmp/lineage_stage ] || [ -L /data/local/tmp/lineage_stage ] || S=/data/local/tmp/lineage_stage
 R=""
 [ -f "$S/return_inplace.done" ] && R=$(stat -c %Y "$S/return_inplace.done" 2>/dev/null)
-n=0
-if [ -n "$R" ]; then
-  for f in "$L"/boot.log.[0-9][0-9]; do
-    [ -f "$f" ] && [ "$f" != "$L/boot.log.01" ] && [ "$n" -lt 2 ] || continue
-    m=$(stat -c %Y "$f")
-    [ -n "$m" ] && [ "$m" -le "$R" ] || continue
-    i=$(stat -c %i "$f")
-    [ -n "$i" ] && printf "%s\n" "$T" | grep -q " $i " && continue
-    printf "%s\n" "$f"
-    [ -n "$i" ] && T="$T$i "
-    n=$((n + 1))
-  done
-fi
+n=""
+for f in "$L"/boot.log.[0-9][0-9]; do
+  [ -n "$R" ] && [ -f "$f" ] && [ "$f" != "$L/boot.log.01" ] && [ "$n" != xx ] || continue
+  m=$(stat -c %Y "$f")
+  [ -n "$m" ] && [ "$m" -le "$R" ] || continue
+  i=$(stat -c %i "$f")
+  [ -n "$i" ] && printf "%s\n" "$T" | grep -q " $i " && continue
+  printf "%s\n" "$f"
+  [ -n "$i" ] && T="$T$i "
+  n="${n}x"
+done
 c=""
 for f in "$L"/boot.log.[0-9][0-9]; do
   [ -f "$f" ] && [ "$f" != "$L/boot.log.01" ] && [ "$c" != xx ] || continue
