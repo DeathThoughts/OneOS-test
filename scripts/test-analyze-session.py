@@ -230,8 +230,22 @@ class AnalyzeSessionTest(unittest.TestCase):
         self.assertLessEqual(len(first_entries), 5)
         self.assertLessEqual(len(rest_entries), 5)
         self.assertNotIn("dex2oat64", sec3)
-        # The sampler's "| forks/s N ctxt/s N" tail (bceaef29fb128e94) is not a process.
-        self.assertNotIn("ctxt", sec3)
+        # The sampler's "| forks/s N ctxt/s N" tail (bceaef29fb128e94) is summarized
+        # in its own line and never counted as a process entry.
+        proc_lines = "\n".join(first_entries + rest_entries)
+        self.assertNotIn("ctxt", proc_lines)
+        self.assertNotIn("forks", proc_lines)
+        self.assertIn(
+            "totais de CPU: user mediana 97%, máx 99% em 10:00:10; "
+            "sys mediana 3%, máx 32% em 10:07:10",
+            sec3,
+        )
+        self.assertIn(
+            "forks/ctxt (/proc/stat, 1 amostra(s)): "
+            "forks/s mediana 123, máx 123 em 10:05:10; "
+            "ctxt/s mediana 45678, máx 45678 em 10:05:10",
+            sec3,
+        )
         self.assertNotIn("installd", sec3)
         self.assertNotIn("artd", sec3)
 
@@ -509,6 +523,64 @@ class AnalyzeSessionTest(unittest.TestCase):
         self.assertIn("Skin máxima (diag_series.txt): 50.5 °C em 10:01:30", out)
         self.assertIn("Fim do relatório. Nenhum arquivo da sessão foi alterado.", out)
         self.assertTrue(any("relatório truncado" in line for line in out))
+
+    def test_cpu_toybox_totals_high_sys_and_forks_rates(self):
+        files = {
+            "session.env": SESSION_FILES["session.env"],
+            "cpu_top.log": (
+                "# 2026-11-16 OneOS session sampler\n"
+                "05:18:29 800%cpu 40%user 0%nice 180%sys 572%idle 0%iow 8%irq 0%sirq 0%host "
+                "| 10.0 system_server 4.0 busybox | forks/s - ctxt/s -\n"
+                "05:18:59 800%cpu 71%user 0%nice 239%sys 482%idle 0%iow 8%irq 0%sirq 0%host "
+                "| 12.0 system_server 4.0 busybox | forks/s 140 ctxt/s 52000\n"
+                "05:19:29 800%cpu 25%user 0%nice 45%sys 726%idle 0%iow 4%irq 0%sirq 0%host "
+                "| 8.0 system_server 2.0 top | forks/s 12 ctxt/s 9000\n"
+            ),
+        }
+        result = self.run_tree("cpu_toybox_rates", files)
+        self.assertEqual(0, result.returncode, result.stderr)
+        sec3 = section(result.stdout, 3)
+        self.assertIn(
+            "totais de CPU: user mediana 40%, máx 71% em 05:18:59; "
+            "sys mediana 180%, máx 239% em 05:18:59 (2x >=150%); "
+            "idle mediana 572%",
+            sec3,
+        )
+        self.assertIn(
+            "forks/ctxt (/proc/stat, 2 amostra(s)): "
+            "forks/s mediana 76, máx 140 em 05:18:59; "
+            "ctxt/s mediana 30500, máx 52000 em 05:18:59",
+            sec3,
+        )
+        proc_lines = [
+            line for line in sec3.splitlines() if re.match(r"\s+\d+\. ", line)
+        ]
+        self.assertFalse(any("forks" in line or "ctxt" in line for line in proc_lines))
+
+    def test_cpu_dash_only_rates_and_legacy_log_without_rates(self):
+        dash_only = {
+            "session.env": SESSION_FILES["session.env"],
+            "cpu_top.log": (
+                "10:00:10 800%cpu 20%user 10%sys 770%idle "
+                "| 12.0 system_server | forks/s - ctxt/s -\n"
+            ),
+        }
+        res_dash = self.run_tree("cpu_dash_only", dash_only)
+        self.assertEqual(0, res_dash.returncode, res_dash.stderr)
+        sec3_dash = section(res_dash.stdout, 3)
+        self.assertIn("forks/ctxt (/proc/stat): sem leitura numérica (apenas '-')", sec3_dash)
+
+        legacy = {
+            "session.env": SESSION_FILES["session.env"],
+            "cpu_top.log": (
+                "10:00:10 cpu 80% user 20% system | 15.0 system_server 8.0 surfaceflinger\n"
+            ),
+        }
+        res_legacy = self.run_tree("cpu_legacy", legacy)
+        self.assertEqual(0, res_legacy.returncode, res_legacy.stderr)
+        sec3_legacy = section(res_legacy.stdout, 3)
+        self.assertIn("totais de CPU: user mediana 80%, máx 80% em 10:00:10", sec3_legacy)
+        self.assertNotIn("forks/ctxt", sec3_legacy)
 
 
 if __name__ == "__main__":
