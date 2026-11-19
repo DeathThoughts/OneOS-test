@@ -295,11 +295,24 @@ jobs:
       - name: Verify guest media mount safety
         run: python3 scripts/test-guest-media-share.py
 
+      - name: Verify guest telemetry policy
+        run: |
+          python3 scripts/test-oplus-telemetry.py
+          python3 scripts/test-guest-telemetry.py
+          python3 scripts/test-miui-telemetry.py
+
       - name: Verify guest audio, Bluetooth, and camera policy
         run: |
           python3 scripts/test-guest-audio-policy.py
           python3 scripts/test-oplus-bt-origin.py
           python3 scripts/test-samsung-camera-bind.py
+
+      - name: Verify model and root staging after upstream sync
+        working-directory: app-android
+        env:
+          GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
+          GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: ./gradlew --console=plain :core:model:test :core:root:testDebugUnitTest
 
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.
