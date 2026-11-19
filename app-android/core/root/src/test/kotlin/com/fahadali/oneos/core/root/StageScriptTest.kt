@@ -241,11 +241,12 @@ class StageScriptTest {
             assertEquals("$min $max: $r", RootScript.EXIT_USAGE, r.exit)
             assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf(min, max)).isNotEmpty())
         }
-        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + "0").exit)
+        val tooMany = good + listOf("0", "0")
+        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, tooMany).exit)
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(10)))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf("100", "300")))
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + "0").isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, tooMany).isNotEmpty())
     }
 
     @Test
@@ -1771,8 +1772,9 @@ class StageScriptTest {
         val before = env.readText()
         org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(shareFiles = "2") }
         assertEquals(before, env.readText())
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "1", "2")).isNotEmpty())
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "1", "1")).isEmpty())
+        val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "1", "5", "500")
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "1").isEmpty())
     }
 
     @Test

@@ -1033,7 +1033,7 @@ check_files() { # <names>
             # fit_guest_panel); it outlives an in-place return like the feeder.
             # oneos_switch.sh writes it for the guest panel's own shape at every switch
             guest_panel_fit.sh) ;;
-            *_patched*|*_payload.img|*.apk|*.jar|*.so|*.sh|*.tar|Fold8AngleRelay.dex|zygote_exec|oneos_btaudio|oneos_essential_key|socket_exec|clean_apex_info_list.xml|oneos-*)
+            *_patched*|*_payload.img|*.apk|*.jar|*.so|*.sh|*.tar|Fold8AngleRelay.dex|SystemUI_wave.dex|OneOSWaveRepack.dex|zygote_exec|oneos_btaudio|oneos_essential_key|socket_exec|clean_apex_info_list.xml|oneos-*)
                 in_list "$n" "$1" || refuse "$n is in the stage but was not prepared (left from an older stage)" ;;
         esac
     done
@@ -2234,9 +2234,9 @@ bring_host_view() {
     if [ "${ONEOS_BRING_NS:-}" != "$$" ]; then
         [ -f "$0" ] || refuse "bring-add from inside the guest needs the script's own path"
         ONEOS_BRING_NS=$$ exec "$BB" unshare -m -- /system/bin/sh "$0" bring-add "$1"
-        refuse "could not make a mount namespace of its own"
+        refuse "could not make a private namespace of its own"
     fi
-    "$BB" mount --make-rprivate / 2>/dev/null || refuse "could not make a mount namespace of its own"
+    "$BB" mount --make-rprivate / 2>/dev/null || refuse "could not make a private namespace of its own"
     mkdir_mine "$STAGE/incoming" || die "could not make $STAGE/incoming"
     BV="$STAGE/incoming/onui_data"
     [ ! -L "$BV" ] || refuse "${BV#$T} is a link"
@@ -2249,7 +2249,7 @@ bring_host_view() {
         *)
             bv_seen=$(awk '$5 ~ /\/incoming\/onui_data$/ { printf "%s %s; ", $5, $6 }' "$PROC/self/mountinfo" 2>/dev/null | cut -c1-200)
             "$BB" umount "$BV" 2>/dev/null || "$BB" umount -l "$BV" 2>/dev/null
-            refuse "could not make One UI's data read only (mountinfo: ${bv_seen:-no mount at the view})"
+            refuse "could not make One UI's data read only (namespace table: ${bv_seen:-no view entry})"
             ;;
     esac
     [ -d "$BV/app" ] || refuse "One UI's app folder is not in the view"
