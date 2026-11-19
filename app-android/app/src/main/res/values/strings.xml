@@ -211,4 +211,6 @@
     <string name="github_report_open_summary">Copies the detailed report and opens a short draft. Paste the details, attach the saved ZIP and submit when ready. A GitHub account is required.</string>
     <string name="github_report_copied">Report details copied. Paste into the issue and attach the saved log ZIP.</string>
     <string name="github_report_prepare_failed">Could not prepare the report. Use the log preview to save or share the ZIP.</string>
+    <string name="unofficial_debug_title">Unofficial debug build</string>
+    <string name="unofficial_debug_message">This is a debug build of an unofficial OneOS fork. Please send all bug reports directly to @death_s2 on Telegram.</string>
 </resources>
