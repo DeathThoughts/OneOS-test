@@ -184,13 +184,39 @@ def diagnose_vold_sites(data: bytes) -> dict[str, object]:
     }
 
 
+def _is_bl(word: int) -> bool:
+    return word & 0xfc000000 == 0x94000000
+
+
+def _is_ldr_x8(word: int) -> bool:
+    """LDR (immediate, unsigned offset, 64-bit) into x8, any base/offset.
+
+    The reviewed ColorOS builds load the AIBinder_getExtension result with
+    "ldr x8, [sp, #8]" (0xf94007e8), but the compiler may choose another stack
+    slot on the same guard shape. The cbz encoding below is still the exact
+    one make-overlays.sh patches.
+    """
+    return word & 0xffc00000 == 0xf9400000 and word & 31 == 8
+
+
+def _is_conditional_branch(word: int) -> bool:
+    """CBZ/CBNZ (32/64-bit) or TBZ/TBNZ."""
+    return (word & 0x7e000000) in (0x34000000, 0x36000000)
+
+
+def _branch_target(word: int, pc: int) -> int:
+    if word & 0x7e000000 == 0x34000000:
+        return pc + (_sign_extend((word >> 5) & 0x7ffff, 19) << 2)
+    return pc + (_sign_extend((word >> 5) & 0x3fff, 14) << 2)
+
+
 def resolve_surfaceflinger_cbz_site(data: bytes) -> int:
     """Locate the guarded Qualcomm composer extension call shape."""
-    _segments(data)
+    segments = _segments(data)
     if b"IQtiComposer3Client" not in data or b"AIBinder_getExtension" not in data:
         raise ValueError("surfaceflinger: expected Qualcomm composer symbols")
     candidates = []
-    for a, b, _, flags in _segments(data):
+    for a, b, va, flags in segments:
         if not flags & 1:
             continue
         for off in range(a + 8, b - 7, 4):
@@ -198,13 +224,79 @@ def resolve_surfaceflinger_cbz_site(data: bytes) -> int:
             load = struct.unpack_from("<I", data, off - 4)[0]
             cbz = struct.unpack_from("<I", data, off)[0]
             after = struct.unpack_from("<I", data, off + 4)[0]
-            if (before & 0xfc000000 == 0x94000000 and
-                load == 0xf94007e8 and cbz == 0xb4000268 and
-                after & 0xfc000000 == 0x94000000):
+            if (_is_bl(before) and _is_ldr_x8(load) and
+                    cbz == 0xb4000268 and _is_bl(after)):
                 candidates.append(off)
     if len(candidates) != 1:
         raise ValueError(f"surfaceflinger: expected one composer guard, found {len(candidates)}")
     return candidates[0]
+
+
+def diagnose_surfaceflinger_sites(data: bytes) -> dict[str, object]:
+    """Bounded, nonpatching diagnostics for an unfamiliar SurfaceFlinger ELF.
+
+    Return instruction words and offsets only; never publish copyrighted
+    executable images. Nothing in this report authorizes a binary patch.
+    """
+    import hashlib
+
+    segments = _segments(data)
+
+    def word(off: int) -> int | None:
+        if 0 <= off <= len(data) - 4:
+            return struct.unpack_from("<I", data, off)[0]
+        return None
+
+    def window(off: int) -> list[str]:
+        out = []
+        for p in range(off - 16, off + 20, 4):
+            w = word(p)
+            out.append(f"0x{w:08x}" if w is not None else "--")
+        return out
+
+    guards = []
+    calls = []
+    for a, b, va, flags in segments:
+        if not flags & 1:
+            continue
+        for off in range(a + 8, b - 7, 4):
+            before = word(off - 8)
+            load = word(off - 4)
+            branch = word(off)
+            after = word(off + 4)
+            if branch is None or after is None:
+                continue
+            if _is_conditional_branch(branch) and _is_bl(after):
+                pc = va + off - a
+                guards.append({
+                    "branch_offset": f"0x{off:x}",
+                    "branch_word": f"0x{branch:08x}",
+                    "branch_register": branch & 31,
+                    "branch_target": f"0x{_branch_target(branch, pc):x}",
+                    "before_word": f"0x{before:08x}" if before is not None else None,
+                    "load_word": f"0x{load:08x}" if load is not None else None,
+                    "window": window(off),
+                })
+            if _is_bl(branch) and _is_conditional_branch(after):
+                pc = va + off - a
+                calls.append({
+                    "call_offset": f"0x{off:x}",
+                    "call_target": f"0x{pc + (_sign_extend(branch & 0x03ffffff, 26) << 2):x}",
+                    "branch_offset": f"0x{off + 4:x}",
+                    "branch_word": f"0x{after:08x}",
+                    "branch_target": f"0x{_branch_target(after, pc + 4):x}",
+                    "window": window(off),
+                })
+    return {
+        "warning": "DIAGNOSTIC ONLY. DO NOT PATCH WITHOUT INSTRUCTION FLOW ANALYSIS.",
+        "surfaceflinger_sha256": hashlib.sha256(data).hexdigest(),
+        "file_size": len(data),
+        "qti_composer_symbol_present": b"IQtiComposer3Client" in data,
+        "aibinder_get_extension_symbol_present": b"AIBinder_getExtension" in data,
+        "guard_windows": guards[:64],
+        "call_windows": calls[:64],
+        "truncated": len(guards) > 64 or len(calls) > 64,
+    }
 
 
 def update_make_overlays_text(
@@ -333,7 +425,19 @@ def resolve_and_update_for_image(
         if len(inc_names) != 1:
             raise ValueError(f"incremental: expected one referenced vold service name, found {len(inc_names)}")
         inc_off = inc_names[0]
-        sf_off = resolve_surfaceflinger_cbz_site(sf)
+        try:
+            sf_off = resolve_surfaceflinger_cbz_site(sf)
+        except ValueError:
+            if diagnostics_dir is not None:
+                import json
+                target_dir = Path(diagnostics_dir)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                report = diagnose_surfaceflinger_sites(sf)
+                (target_dir / "twinity-surfaceflinger-native-diagnostics.json").write_text(
+                    json.dumps(report, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            raise
 
         if vold[name_off:name_off + 6] != b"\x00vold\x00":
             raise ValueError("vold string bytes changed")
