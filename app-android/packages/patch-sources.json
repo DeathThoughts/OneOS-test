@@ -3,9 +3,9 @@
   "contributors": [
     {
       "id": "that-josh-guy",
-      "label": "That Josh Guy's patches (Experimental)",
-      "repository": "thatjoshguy67/OneOS-files",
-      "tag": "fold8-experimental",
+      "label": "That Josh Guy\u2019s patches (Fork mirror, Experimental)",
+      "repository": "DeathThoughts/OneOS-test",
+      "tag": "fork-fold8-experimental-v1",
       "targets": [
         {
           "profile": "f8",

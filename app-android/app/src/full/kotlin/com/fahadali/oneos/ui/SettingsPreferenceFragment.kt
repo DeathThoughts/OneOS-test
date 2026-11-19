@@ -109,8 +109,10 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
         val sessions = category(R.string.advanced_card_sessions)
         row(sessions, R.string.last_title, target = LastSessionActivity::class.java)
         toggle(sessions, R.string.advanced_heat_cap_title, R.string.advanced_heat_cap_summary, SessionPrefs.heatCap(ctx)) { SessionPrefs.setHeatCap(ctx, it) }
+        toggle(sessions, R.string.guest_patch_auto_title, R.string.guest_patch_auto_summary, SessionPrefs.autoGuestPatches(ctx)) {
+            SessionPrefs.setAutoGuestPatches(ctx, it)
+        }
         toggle(sessions, R.string.advanced_full_logs_title, R.string.advanced_full_logs_summary, SessionPrefs.fullLogs(ctx)) { SessionPrefs.setFullLogs(ctx, it) }
-        toggle(sessions, R.string.usage_count_title, R.string.usage_count_summary, SessionPrefs.usageCount(ctx)) { SessionPrefs.setUsageCount(ctx, it) }
         // One UI files in the other system: one choice instead of the two switches there were (the owner found two
         // confusing; owner's decision of 2026-11-18, after the S25 Ultra). It writes the two mechanisms underneath
         // as they were: view = root's oneui-media marker (read-only albums), full = SessionPrefs.shareFiles

@@ -132,13 +132,17 @@ Android versions) is refused by the app's compatibility checks.
 
 ## Your phone is not listed?
 
-Run **OneOS Probe** on it. It is a separate read-only app: it changes nothing,
-and it strips the IMEI, phone numbers and Wi-Fi names from its report (it
-needs root to read the system). Tap **Run tests**, then **Send to the OneOS
-team** (from 0.4.29), or **Share** and post the zip with your phone model in
-**Phone reports** in the [OneOS Telegram group](https://t.me/TheoneOS). New releases are announced
-there too. Probe is in the same download folder as the app (see the latest
-release).
+Run **OneOS Probe** or collect the last session’s logs in OneOS. Tap
+**Report on GitHub**, preview the redacted files, save the complete ZIP, and
+open a report in [this fork’s issues](https://github.com/DeathThoughts/OneOS-test/issues).
+Describe the problem, attach the ZIP and review it before submitting. The report
+copies device and session details with line breaks. The full collected logs stay
+in the attachment. Issues are public, so check for personal information first.
+
+This fork’s patches have been tested only on the **base Galaxy S23** and
+**Galaxy S25 Ultra**. They are likely to fail on other Galaxy S and A models
+and may also fail on other phones. Proceed with caution. The app requires an
+acknowledgement on phones outside those two model families.
 
 ## Getting started
 
@@ -261,7 +265,7 @@ and [root-provider compatibility limits](docs/guest-root-provider-compatibility.
 ## Building from source
 
 ```sh
-git clone https://github.com/fahadalijaved/OneOS.git
+git clone https://github.com/DeathThoughts/OneOS-test.git
 cd OneOS/app-android
 ./gradlew assembleProbeDebug     # OneOS Probe: needs nothing outside this repository
 ./gradlew test                   # unit tests (dash or busybox for the root script tests)
@@ -306,6 +310,11 @@ OneLineage-derived session scripts (published with WeWaffles' permission). See
 [NOTICE](NOTICE) and [CREDITS.md](CREDITS.md).
 
 ## Credits
+
+This independent fork builds on **OneOS by Fahad Ali Javed**, including the app,
+framework patches and session scripts. Original authorship and license notices
+are retained. Guest system image download sources are separate from this fork’s
+patch payloads and issue reporting.
 
 - **[OneLineage](https://github.com/WeWaffles/OneLineage)** by **WeWaffles**:
   the container hot-switch OneOS is built on. OneOS's session scripts started

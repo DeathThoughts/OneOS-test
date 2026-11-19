@@ -95,9 +95,6 @@ class AdvancedFragment : CardsFragment() {
         }
         // "One UI files in the other system" (the old Share my files switch) is one three-way setting now, in
         // Settings (owner's decision of 2026-11-18, S25 Ultra): this card keeps no second way to change it.
-        CardRows.toggle(sessions, getString(R.string.usage_count_title), getString(R.string.usage_count_summary), SessionPrefs.usageCount(ctx)) { on ->
-            SessionPrefs.setUsageCount(ctx, on)
-        }
         val logs = LogJob.state
         val zip = LogJob.latestZip(ctx)
         if (zip != null && !logs.busy) {

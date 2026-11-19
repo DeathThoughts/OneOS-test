@@ -18,7 +18,20 @@ val releaseKeys: Properties? =
         Properties().apply { f.inputStream().use(::load) }
     }
 
+fun patchKey(channel: String): String {
+    val value = providers.environmentVariable("ONEOS_PATCH_${channel.uppercase()}_PUBLIC_KEY").orNull.orEmpty()
+    require(value.isEmpty() || value.matches(Regex("[A-Za-z0-9+/]{59}="))) {
+        "OneOS patch key must be a base64 Ed25519 X.509 public key"
+    }
+    return "\"$value\""
+}
+
+val debugPatchKey = patchKey("debug")
+val releasePatchKey = patchKey("release")
+require(debugPatchKey == "\"\"" || debugPatchKey != releasePatchKey) { "Patch channels require distinct keys" }
+
 android {
+    sourceSets.getByName("main").java.srcDir(rootProject.file("patch-protocol/src/main/java"))
     sourceSets.getByName("main").kotlin.srcDir(rootProject.file("shared-guest-ui"))
     namespace = "com.fahadali.oneos.guest"
     compileSdk { version = release(37) }
@@ -28,8 +41,8 @@ android {
         minSdk = 31
         targetSdk = 36
         // 0.2 (OneOS 0.4.30): How's it going?, the checklist for Send to the OneOS team.
-        versionCode = 165
-        versionName = "0.5.20-s23.7-teste"
+        versionCode = 166
+        versionName = "0.5.19-fork-teste.1"
     }
 
     signingConfigs {
@@ -58,9 +71,11 @@ android {
 
     buildTypes {
         debug {
+            buildConfigField("String", "SIGNED_PATCH_PUBLIC_KEY", debugPatchKey)
             signingConfig = signingConfigs.getByName("debug")
         }
         release {
+            buildConfigField("String", "SIGNED_PATCH_PUBLIC_KEY", releasePatchKey)
             // R8 drops the unused Kotlin stdlib: the APK sits in the guest's /oem.
             isMinifyEnabled = true
             isShrinkResources = true

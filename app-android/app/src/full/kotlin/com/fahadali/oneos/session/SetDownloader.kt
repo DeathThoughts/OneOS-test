@@ -10,16 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
-/**
- * The package set files this phone's set needs, downloaded by SHA-256 (0.4.41).
- *
- * The APK carries no set files any more, only their hashes, sizes and Drive ids
- * ([AppAssets]). Each file is fetched from the owner's shared Drive folder into
- * the app's own storage (`files/oneos-files/<sha256>`), resumed from a `.part`
- * after an interruption, and kept only when its size and SHA-256 are the ones
- * the app's pinned list names. [AppAssets.open] streams it to root from there,
- * hashing it again, and root checks it once more.
- */
+/** Downloads this fork’s pinned patch payloads by SHA-256. GSI downloads use a separate path. */
 object SetDownloader {
     open class Failed(message: String) : IOException(message)
 
@@ -27,29 +18,23 @@ object SetDownloader {
     class Refused(message: String) : Failed(message)
 
     /** The repository whose releases hold the set files as assets named by their SHA-256 (0.4.53). */
-    const val FILES_REPO = "fahadalijaved/OneOS-files"
-
-    /** SourceForge's folder of the set files, each named by its SHA-256 (0.4.65; the source "sf"). */
-    const val SF_FILES = "https://downloads.sourceforge.net/project/oneos-mirror/files/"
+    const val FILES_REPO = "DeathThoughts/OneOS-test"
 
     /**
-     * Where [source] hands out the file [sha256]: "gh:<tag>" is that release's asset (GitHub's CDN, no daily
-     * limit), "sf" SourceForge's mirror of them (no daily limit either; it redirects to a download server), anything
-     * else a public file of the shared Drive folder, without the virus-scan page large files get.
+     * The pinned release asset for [source]. The fork's own payloads use `gh:DeathThoughts/OneOS-test:<tag>`;
+     * pins added after fork-payloads-v1 may still name their original `gh:owner/repo:<tag>` release until the
+     * next migration, so the hash, size and release tag remain the gate. GSI images never use this path.
      */
-    fun url(source: String, sha256: String): String =
-        if (source == "sf") {
-            require(Regex("[0-9a-f]{64}").matches(sha256))
-            SF_FILES + sha256
-        }
-        else if (source.startsWith("gh:")) {
-            val parts = source.removePrefix("gh:").split(':')
-            val repo = if (parts.size == 2) parts[0] else FILES_REPO
-            val tag = parts.last()
-            require(Regex("[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*").matches(repo) && Regex("[a-z0-9][a-z0-9.-]{0,39}").matches(tag))
-            "https://github.com/$repo/releases/download/$tag/$sha256"
-        }
-        else "https://drive.usercontent.google.com/download?id=$source&export=download&confirm=t"
+    fun url(source: String, sha256: String): String {
+        require(Regex("[0-9a-f]{64}").matches(sha256))
+        require(source.startsWith("gh:")) { "Patch payload source is not a GitHub release" }
+        val parts = source.removePrefix("gh:").split(':')
+        val repo = if (parts.size == 2) parts[0] else FILES_REPO
+        val tag = parts.last()
+        require(Regex("[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*").matches(repo) &&
+            Regex("[a-z0-9][a-z0-9.-]{0,39}").matches(tag)) { "Patch payload source is not a pinned release" }
+        return "https://github.com/$repo/releases/download/$tag/$sha256"
+    }
 
     fun dir(ctx: Context): File = File(ctx.applicationContext.filesDir, "oneos-files").apply { mkdirs() }
 
@@ -57,19 +42,7 @@ object SetDownloader {
     fun cached(ctx: Context, f: AppAssets.Staged): File? =
         File(dir(ctx), f.sha256).takeIf { it.isFile && it.length() == f.bytes }
 
-    /**
-     * Downloads [f] unless it is already here, from the first of its [sources] that hands
-     * it out. [progress] gets the bytes of this file done so far. Runs on the caller's
-     * thread; [cancelled] is checked between reads.
-     *
-     * 0.4.53: Drive refuses a shared file for the rest of the day once "too many users"
-     * downloaded it (0.4.51, the first public release with downloads). GitHub's release
-     * assets come first; then the Drive copies, each with its own limit, starting at a
-     * random one so a release's downloads spread over all of them. A source that hands
-     * out a page instead of the file moves on to the next at once; one that fails
-     * otherwise is tried three times. A `.part` carries over between sources: they hand
-     * out the same file, and the hash decides.
-     */
+    /** Resumes an interrupted download, retaining a file only after the pinned size and hash match. */
     fun fetch(
         ctx: Context, f: AppAssets.Staged, sources: List<String>, cancelled: () -> Boolean,
         connections: MutableSet<HttpURLConnection>? = null, progress: (Long) -> Unit,
@@ -78,12 +51,9 @@ object SetDownloader {
         if (sources.isEmpty()) throw Failed("${f.name} has no download source")
         val part = File(dir(ctx), "${f.sha256}.part")
         if (part.length() > f.bytes) part.delete()
-        // 0.4.65: SourceForge right after GitHub (11-08: github.com answered 504 for hours, every phone fell on
-        // the Drive copies and they ran out the same day).
-        val (github, others) = sources.partition { it.startsWith("gh:") }
-        val (sf, drive) = others.partition { it == "sf" }
-        val start = if (drive.isEmpty()) 0 else drive.indices.random()
-        val order = github + sf + drive.indices.map { drive[(start + it) % drive.size] }
+        val order = sources.distinct()
+        // Reject stale external sources before any request or partial-file write.
+        order.forEach { url(it, f.sha256) }
         var last: Exception? = null
         var refused = 0
         for (source in order) {
@@ -108,7 +78,7 @@ object SetDownloader {
             }
         }
         if (refused == order.size) {
-            throw Failed("no download server is handing out ${f.name} right now (Google Drive's daily limit, or GitHub): try again in a few hours")
+            throw Failed("the fork release is not handing out ${f.name} right now: try again later")
         }
         throw Failed("${f.name}: ${last?.message ?: "download failed"}")
     }

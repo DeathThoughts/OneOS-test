@@ -108,6 +108,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        GuestPatches.checkAutomatically(this)
         if (::back.isInitialized) {
             showState()
             renderRuntime(GuestRuntime.State(error = "Reading guest runtime…"))

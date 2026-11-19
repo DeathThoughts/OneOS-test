@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.SignatureException;
@@ -61,6 +62,26 @@ public final class GuestStartPatch {
 
         public long sequence() { return sequence; }
         public byte[] payload() { return payload.clone(); }
+    }
+
+    public static byte[] sign(byte[] payload, PrivateKey key, Compatibility target, long sequence)
+            throws IOException, GeneralSecurityException {
+        require(payload.length > 0 && payload.length <= MAX_PAYLOAD_BYTES, "invalid payload size");
+        require(sequence > 0, "invalid patch sequence");
+        byte[] header = String.join("\n", MAGIC, target.channel, Long.toString(target.hostBuild),
+                target.imageId, target.imageSha256, target.baseSha256, Long.toString(sequence),
+                payload.length + " " + sha256(payload), "").getBytes(StandardCharsets.US_ASCII);
+        Signature signature = Signature.getInstance("Ed25519");
+        signature.initSign(key);
+        signature.update(header);
+        byte[] signed = signature.sign();
+        require(signed.length == SIGNATURE_BYTES, "unexpected Ed25519 signature size");
+
+        ByteArrayOutputStream envelope = new ByteArrayOutputStream(header.length + signed.length + payload.length);
+        envelope.write(header);
+        envelope.write(signed);
+        envelope.write(payload);
+        return envelope.toByteArray();
     }
 
     public static Verified verify(InputStream source, PublicKey pinnedKey, Compatibility expected,

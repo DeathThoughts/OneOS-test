@@ -11,7 +11,6 @@ import com.fahadali.oneos.core.model.Images
 import com.fahadali.oneos.core.model.Level
 import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.root.OutcomeKind
-import com.fahadali.oneos.report.ReportSender
 import com.fahadali.oneos.session.LogJob
 import com.fahadali.oneos.session.SessionPrefs
 import dev.oneuiproject.oneui.R as OuiIcons
@@ -127,14 +126,10 @@ class LastSessionFragment : CardsFragment() {
             CardRows.status(logs, Level.OK, getString(R.string.last_collected), getString(R.string.last_collected_summary))
         }
         if (zip != null && !job.busy) {
-            // 0.4.29: the checklist and the logs straight to the team; Share and Save stay under View.
-            if (ReportSender.offered) {
-                val code = SendReportActivity.sentCode(ctx, zip)
-                Cards.row(
-                    logs, OuiIcons.drawable.ic_oui_send, getString(R.string.send_title),
-                    if (code != null) getString(R.string.last_send_sent, code) else getString(R.string.last_send_summary),
-                ) { startActivity(SendReportActivity.intent(ctx, zip)) }
-            }
+            Cards.row(
+                logs, OuiIcons.drawable.ic_oui_send, getString(R.string.send_title),
+                getString(R.string.last_send_summary),
+            ) { startActivity(SendReportActivity.intent(ctx, zip)) }
             Cards.row(logs, OuiIcons.drawable.ic_oui_share, getString(R.string.last_view_title), getString(R.string.last_view_summary)) {
                 startActivity(Intent(ctx, FindingsActivity::class.java).putExtra(FindingsActivity.EXTRA_ZIP, zip.path))
             }

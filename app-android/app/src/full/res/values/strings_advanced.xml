@@ -470,4 +470,9 @@
     <string name="lock_risk_message">Recent Samsung firmware blocks Download Mode while a PIN, pattern, password, fingerprint or face lock is set. If a switch goes wrong with your lock on, your phone may not start and may not reach Download Mode either: then the only way back is a factory reset, which erases everything on it. This has happened to a tester.\n\nA Download Mode module (such as backdownload) lowers this risk but does not remove it. Back up first. You alone are responsible for what happens to your phone and its data.</string>
     <string name="lock_risk_accept_wait">I understand the risk (%1$d)</string>
     <string name="lock_risk_accept">I understand the risk</string>
+    <string name="guest_patch_auto_title">Download signed guest patches automatically</string>
+    <string name="guest_patch_auto_summary">Checks when the OneOS guest opens. Apply patches by choosing Restart guest.</string>
+    <string name="fork_patch_warning_title">Patches tested on two phone models</string>
+    <string name="fork_patch_warning_message">This fork’s patches have been tested only on the base Galaxy S23 and Galaxy S25 Ultra. They are likely to fail on other Galaxy S and A models and may also fail on other phones. Proceed with caution.</string>
+    <string name="fork_patch_warning_ack">I understand that these patches may fail on this phone.</string>
 </resources>

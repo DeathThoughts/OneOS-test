@@ -94,7 +94,7 @@ def prepare(sid, revision, overrides, output, source_id='that-josh-guy', profile
             size = int(sizes[sha])
             source = next(s for s in remote[sha].split(',') if s.startswith('gh:'))
             if source.count(':') == 1:
-                source = source.replace('gh:', 'gh:fahadalijaved/OneOS-files:')
+                source = source.replace('gh:', 'gh:DeathThoughts/OneOS-test:')
         files.append(dict(name=name, sha256=sha, bytes=size, source=source))
     expected = {f['name']: f['sha256'] for f in files}
     guards = sums(packages / f'{sid}.guards.txt')
