@@ -433,7 +433,7 @@ object StageAudit {
     )
 
     /** Path expressions that are the stage or under it (variables the audit checks the assignments of). */
-    private val STAGE_VARS = setOf("STAGE", "ATTIC", "PLAN", "RECEIVED", "part", "dst", "S", "F", "upd", "upapk", "LOCK", "NEW")
+    private val STAGE_VARS = setOf("STAGE", "ATTIC", "PLAN", "RECEIVED", "part", "dst", "S", "F", "upd", "upapk", "LOCK", "NEW", "BV")
 
     /** Helpers that write their first argument; their call sites must pass a stage path. */
     private val WRITE_HELPERS = setOf("own", "mkdir_mine", "bring_drop", "bring_aside", "bring_clearout")
@@ -516,6 +516,16 @@ object StageAudit {
     private val BRING_DU = listOf("-sk", "\"\$apkdir\"", "\"\$BCE\"", "\"\$BDE\"")
     private val BRING_FIND = listOf("\"\$BCE\"", "\"\$BDE\"", "-newer", "\"\$ref\"", "-type", "f")
     private const val BRING_REF_VALUE = "\"\$dst/since\""
+    private const val BRING_HOST_VIEW_FUNCTION = "bring_host_view"
+    private val BRING_HOST_BCE_VALUE = "\"\$BRING_HOST/data/\$pkg\""
+    private val BRING_HOST_BDE_VALUE = "\"\$BRING_HOST/user_de/0/\$pkg\""
+    private val EXEC_BRING_HOST = listOf("\"\$BB\"", "unshare", "-m", "--", "/system/bin/sh", "\"\$0\"", "bring-add", "\"\$1\"")
+    private val BB_BRING_MOUNTS = setOf(
+        listOf("--make-rprivate", "/"),
+        listOf("--bind", "\"\$DATA\"", "\"\$BV\""),
+        listOf("-o", "remount,bind,ro,nosuid,nodev,noexec", "\"\$DATA\"", "\"\$BV\""),
+    )
+    private val BB_BRING_UMOUNTS = setOf(listOf("\"\$BV\""), listOf("-l", "\"\$BV\""))
 
     /**
      * One UI photos in ColorOS (do_oneui_media only, build 156), a documented write outside the
@@ -632,7 +642,11 @@ object StageAudit {
         // argument are checked on the command below); any other rm -r still fails.
         val purgeRms = Regex("(?m)^\\s*" + Regex.escape(PURGE_RM) + " \\|\\| true$").findAll(code).count()
         if (purgeRms > 1) p += "rm -rf \"\$TRASH\" appears $purgeRms times"
-        val textCode = code.replace(Regex("(?m)^\\s*" + Regex.escape(PURGE_RM) + " \\|\\| true$"), "")
+        val textCode = code
+            .replace(Regex("(?m)^\\s*" + Regex.escape(PURGE_RM) + " \\|\\| true$"), "")
+            // bring_host_view's private namespace is the one documented mount/umount use; the
+            // same lines are checked command by command below.
+            .replace(Regex("(?m)^\\s*\"\\\$BB\" (?:mount|umount) .*$"), "")
         for (bad in FORBIDDEN_TEXT) {
             if (Regex("(?<![A-Za-z0-9_])" + Regex.escape(bad)).containsMatchIn(textCode)) p += "mentions '$bad'"
         }
@@ -672,8 +686,8 @@ object StageAudit {
                 "L" -> if (a.value != RootScript.LEGACY_STAGE && !a.value.matches(Regex("^/[A-Za-z0-9._/-]+$"))) p += "line ${a.line}: L=${a.value}"
                 "OLD" -> if (!v.startsWith("\$STAGE.old-") && !self) p += "line ${a.line}: OLD=${a.value}"
                 "upsrc" -> if (a.value != UPSRC_VALUE || a.function != SELFUPDATE_FUNCTION) p += "line ${a.line}: upsrc=${a.value}"
-                "BCE" -> if (a.value != BCE_VALUE || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BCE=${a.value}"
-                "BDE" -> if (a.value != BDE_VALUE || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BDE=${a.value}"
+                "BCE" -> if ((a.value != BCE_VALUE && a.value != BRING_HOST_BCE_VALUE) || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BCE=${a.value}"
+                "BDE" -> if ((a.value != BDE_VALUE && a.value != BRING_HOST_BDE_VALUE) || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BDE=${a.value}"
                 "BFROM" -> p += "line ${a.line}: BFROM=${a.value} (only the loops set it)"
                 "OMEDIA" -> if (a.value != OMEDIA_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA=${a.value}"
                 "OMEDIA_OLD" -> if (a.value != OMEDIA_OLD_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_OLD=${a.value}"
@@ -707,12 +721,16 @@ object StageAudit {
                 continue
             }
             val args = c.args
+            val bringHost = c.function == BRING_HOST_VIEW_FUNCTION
+            val bbOk = when (args.firstOrNull()) {
+                "--list" -> true
+                "nsenter" -> args.subList(1, minOf(4, args.size)) == listOf("-t", "1", "-m")
+                "mount" -> bringHost && args.drop(1) in BB_BRING_MOUNTS
+                "umount" -> bringHost && args.drop(1) in BB_BRING_UMOUNTS
+                else -> false
+            }
             when (n) {
-                "\"\$BB\"" -> {
-                    val first = args.firstOrNull()
-                    if (first != "--list" && first != "nsenter") p += "line ${c.line}: busybox $first"
-                    if (first == "nsenter" && args.subList(1, minOf(4, args.size)) != listOf("-t", "1", "-m")) p += "line ${c.line}: nsenter ${args.joinToString(" ")}"
-                }
+                "\"\$BB\"" -> if (!bbOk) p += "line ${c.line}: busybox ${args.joinToString(" ")}"
                 "rm" -> {
                     val purge = c.function == PURGE_FUNCTION && args == listOf("-rf", "\"\$TRASH\"")
                     if (!purge) args.filter { it.startsWith("-") }.forEach { if (it != "-f") p += "line ${c.line}: rm $it" }
@@ -727,7 +745,9 @@ object StageAudit {
                 }
                 "getevent" -> if (args != listOf("-pl")) p += "line ${c.line}: getevent ${args.joinToString(" ")}"
                 "sleep" -> if (args != listOf("1") || c.function != LAUNCH_WAIT_FUNCTION) p += "line ${c.line}: sleep ${args.joinToString(" ")}"
-                "exec" -> if (args.firstOrNull()?.endsWith("/system/bin/sh") != true && args.firstOrNull() != "@SH@") p += "line ${c.line}: exec ${args.firstOrNull()}"
+                "exec" -> if (!(bringHost && args == EXEC_BRING_HOST) &&
+                    args.firstOrNull()?.endsWith("/system/bin/sh") != true && args.firstOrNull() != "@SH@"
+                ) p += "line ${c.line}: exec ${args.firstOrNull()}"
                 "sed" -> if (args.any { it == "-i" || it.startsWith("-i") }) p += "line ${c.line}: sed -i"
                 "find" -> if (args != BRING_FIND && !(args == ONEUI_FIND && c.function == ONEUI_LIST_FUNCTION)) p += "line ${c.line}: find ${args.joinToString(" ")}"
                 "mktemp" -> if (args != ONEUI_X_MKTEMP) p += "line ${c.line}: mktemp ${args.joinToString(" ")}"
