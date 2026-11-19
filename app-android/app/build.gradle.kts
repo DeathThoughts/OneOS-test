@@ -89,7 +89,7 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     // cellbroadcast module is left out like Infinity-X's.
     "lineage" to (File(repoRoot, "out/overlays_lineage_r8") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
     // One UI 9.5 (0.5.22, untested): the Galaxy S26 Ultra build, on the phones on One UI 9. Tethering never mounts.
-    "oneui95" to (File(repoRoot, "out/overlays_oneui95_r4") to listOf("tethering_payload.img")),
+    "oneui95" to (File(repoRoot, "out/overlays_oneui95_r5") to listOf("tethering_payload.img")),
     // ColorOS 17 China Twinity4c (0.5.19 trial), the base Galaxy S23: the set
     // published with the twinity4c image release.
     "twinity-s23" to (File(repoRoot, "out/overlays_twinity4c_r1") to listOf()),
@@ -529,9 +529,9 @@ android {
         // the vendor's Bluetooth module with offload off, as One UI does; 0.4.99's bridge got the session but the
         // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
         // Refresh stages created before the storage, diagnostics and bring-apps changes.
-        // 0.5.25 fork: advance past previously distributed debug builds.
-        versionCode = 173
-        versionName = "0.5.25"
+        // 0.5.26 fork: refresh the stage for the updated One UI 9.5 overlays.
+        versionCode = 174
+        versionName = "0.5.26"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
 

@@ -5,15 +5,13 @@ c2d30e95cde9775b: 9 s of a 15 s preflight on ~1500 processes). Runs the real
 snippet against a fake proc tree in every shell present, with the system and
 busybox ls/awk, and on the live /proc."""
 from pathlib import Path
-import os, shutil, subprocess, tempfile, textwrap, time, unittest
+import os, shlex, shutil, subprocess, tempfile, time, unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / 'switcher/assets/oneos_switch.sh').read_text()
 START = SCRIPT.index('libtimer_exe() {')
-END = SCRIPT.index('\nfi\n', SCRIPT.index('lt=$(libtimer_exe /proc)')) + 4
+END = SCRIPT.index('\nfi\n', SCRIPT.index('lt=$(libtimer_exe "$libtimer_proc")')) + 4
 SNIPPET = SCRIPT[START:END]
-NEW = (SNIPPET.replace('lt=$(libtimer_exe /proc)', 'lt=$(libtimer_exe "$P")')
-       .replace('for ex in /proc/[0-9]*/exe', 'for ex in "$P"/[0-9]*/exe'))
-assert NEW.count('"$P"') == 2
+NEW = SNIPPET.replace('libtimer_proc=/proc', 'libtimer_proc="$P"')
 FALLBACK = 'preflight: process scan fell back to readlink (ls gave no link targets)'
 REFUSE = 'refuse() { echo "PREFLIGHT REFUSED: $*"; exit 2; }\n'
 # The loop as it was before the change, with only the proc root made a variable.
@@ -33,11 +31,11 @@ OTHERS = {
     '345': '/data/app/~~q==/com.other.app-z==/lib/arm64/libfoo.so',
     '346': '/data/app/~~q==/com.other.app-z==/libtimer.so',          # no lib/ folder
     '347': '/data/local/tmp/lib/arm64/libtimer.so',
-    '348': LIBTIMER + ' (deleted)',
     '349': '/data/app/~~q==/com.other.app-z==/lib/arm64/libtimer.so.bak',
     '350': '/system/bin/sh -> x',                                    # an arrow in the target
 }
 SHELLS = [s for s in ('mksh', 'busybox', 'bash', 'dash', 'sh') if shutil.which(s)]
+REFERENCE_SHELL = SHELLS[0]
 
 
 def tools(d):
@@ -60,9 +58,16 @@ def run(shell, code, proc, path=None):
     proc = Path(proc)
     cwd, rel = (None, str(proc)) if str(proc) == '/proc' else (proc.parent, './' + proc.name)
     env = {**os.environ, 'P': rel}
+    wrappers = ''
     if path:
         env['PATH'] = path + os.pathsep + env['PATH']
-    r = subprocess.run(argv + ['-uc', REFUSE + code + 'echo no refusal\n'], capture_output=True, text=True, env=env, cwd=cwd)
+        # Standalone BusyBox shells can prefer their applets over PATH.
+        # Bind the test stubs explicitly so they exercise the selected path.
+        for name in ('ls', 'awk', 'readlink', 'cut'):
+            stub = Path(path) / name
+            if stub.is_file():
+                wrappers += f'{name}() {{ {shlex.quote(str(stub))} "$@"; }}\n'
+    r = subprocess.run(argv + ['-uc', REFUSE + wrappers + code + 'echo no refusal\n'], capture_output=True, text=True, env=env, cwd=cwd)
     return r.returncode, r.stdout.strip()
 
 
@@ -81,7 +86,7 @@ class LibtimerScan(unittest.TestCase):
     def compare(self, hits, want):
         with tempfile.TemporaryDirectory() as d:
             root = fixture(d, hits)
-            old = run('mksh', OLD, root); found = tools(d)
+            old = run(REFERENCE_SHELL, OLD, root); found = tools(d)
             self.assertEqual(old, want)
             for shell in SHELLS:
                 for name, path in found:
@@ -100,7 +105,7 @@ class LibtimerScan(unittest.TestCase):
         hits = {'4321': LIBTIMER, '1234': '/data/app/~~a==/org.second-b==/lib/arm/libtimer.so'}
         with tempfile.TemporaryDirectory() as d:
             root = fixture(d, hits)
-            self.assertIn('the app org.second runs', run('mksh', NEW, root)[1])
+            self.assertIn('the app org.second runs', run(REFERENCE_SHELL, NEW, root)[1])
         self.compare(hits, run_old(hits))
 
     def test_spaces_in_target(self):
@@ -119,14 +124,36 @@ class LibtimerScan(unittest.TestCase):
             for n in ('readlink', 'cut'):
                 (b / n).write_text(f'#!/bin/sh\necho {n} >> "{b}/forked.log"\nexit 1\n')
                 (b / n).chmod(0o755)
-            rc, out = run('mksh', NEW, root, str(b))
+            rc, out = run(REFERENCE_SHELL, NEW, root, str(b))
             self.assertEqual(rc, 2)
             self.assertIn('pid 4321', out)
             self.assertFalse((b / 'forked.log').exists())
 
-    def test_fallback_loop_is_the_old_loop(self):
-        body = NEW[NEW.index('    for ex in "$P"'):NEW.index('\nelif [ "$lt" != none ]')+1]
-        self.assertEqual(textwrap.dedent(body), OLD)
+    def test_deleted_executable_is_caught_on_both_paths(self):
+        deleted = LIBTIMER.replace('/~~xyz==/', '/==deleted==/') + ' (deleted)'
+        with tempfile.TemporaryDirectory() as d:
+            root = fixture(d, {'4321': deleted})
+            (root / '4321' / 'cmdline').write_bytes(LIBTIMER.encode() + b'\0umhpipe\0')
+            stubs = Path(d) / 'fallback'
+            stubs.mkdir()
+            (stubs / 'ls').write_text('#!/bin/sh\nexit 1\n')
+            (stubs / 'ls').chmod(0o755)
+            variants = [*tools(d), ('fallback', str(stubs))]
+            for shell in SHELLS:
+                for name, path in variants:
+                    with self.subTest(shell=shell, tools=name):
+                        rc, out = run(shell, NEW, root, path)
+                        self.assertEqual(rc, 2)
+                        self.assertIn('the app com.foo.bar runs a kernel tool (libtimer.so, pid 4321)', out)
+                        self.assertEqual(name == 'fallback', FALLBACK in out)
+
+    def test_deleted_executable_without_cmdline_is_still_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = fixture(d, {'4321': LIBTIMER + ' (deleted)'})
+            rc, out = run(REFERENCE_SHELL, NEW, root)
+            self.assertEqual(rc, 2)
+            self.assertIn('an app updated since it started the tool', out)
+            self.assertIn('pid 4321', out)
 
     def test_ls_without_link_targets_falls_back(self):
         # A toybox ls that followed the links, showed them without " -> ", or
@@ -141,7 +168,7 @@ class LibtimerScan(unittest.TestCase):
                     b.mkdir()
                     (b / 'ls').write_text('#!/bin/sh\n' + body)
                     (b / 'ls').chmod(0o755)
-                    old = run('mksh', OLD, root)
+                    old = run(REFERENCE_SHELL, OLD, root)
                     for shell in SHELLS:
                         with self.subTest(shell=shell):
                             rc, out = run(shell, NEW, root, str(b))
@@ -154,11 +181,11 @@ class LibtimerScan(unittest.TestCase):
     def test_normal_path_does_not_fall_back(self):
         for hits in ({'4321': LIBTIMER}, {}):
             with tempfile.TemporaryDirectory() as d:
-                self.assertNotIn(FALLBACK, run('mksh', NEW, fixture(d, hits))[1])
-        self.assertNotIn(FALLBACK, run('mksh', NEW, '/proc')[1])
+                self.assertNotIn(FALLBACK, run(REFERENCE_SHELL, NEW, fixture(d, hits))[1])
+        self.assertNotIn(FALLBACK, run(REFERENCE_SHELL, NEW, '/proc')[1])
 
     def test_live_proc(self):
-        t0 = time.time(); old = run('mksh', OLD, '/proc'); t1 = time.time(); new = run('mksh', NEW, '/proc'); t2 = time.time()
+        t0 = time.time(); old = run(REFERENCE_SHELL, OLD, '/proc'); t1 = time.time(); new = run(REFERENCE_SHELL, NEW, '/proc'); t2 = time.time()
         self.assertEqual(old, (0, 'no refusal'))
         self.assertEqual(new, old)
         print(f'\nlive /proc ({len([p for p in os.listdir("/proc") if p.isdigit()])} pids): old {t1 - t0:.3f} s, new {t2 - t1:.3f} s')
@@ -173,7 +200,7 @@ class LibtimerScan(unittest.TestCase):
 
 def run_old(hits):
     with tempfile.TemporaryDirectory() as d:
-        return run('mksh', OLD, fixture(d, hits))
+        return run(REFERENCE_SHELL, OLD, fixture(d, hits))
 
 
 if __name__ == '__main__':
