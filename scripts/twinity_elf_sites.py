@@ -199,6 +199,12 @@ def _is_ldr_x8(word: int) -> bool:
     return word & 0xffc00000 == 0xf9400000 and word & 31 == 8
 
 
+def _sets_x8_from_result(word: int) -> bool:
+    # A compiler may move the AIBinder_getExtension result instead of loading it
+    # from the stack: "mov x8, x0" is the other reviewed way to reach the guard.
+    return _is_ldr_x8(word) or word == 0xaa0003e8
+
+
 def _is_conditional_branch(word: int) -> bool:
     """CBZ/CBNZ (32/64-bit) or TBZ/TBNZ."""
     return (word & 0x7e000000) in (0x34000000, 0x36000000)
@@ -224,8 +230,14 @@ def resolve_surfaceflinger_cbz_site(data: bytes) -> int:
             load = struct.unpack_from("<I", data, off - 4)[0]
             cbz = struct.unpack_from("<I", data, off)[0]
             after = struct.unpack_from("<I", data, off + 4)[0]
-            if (_is_bl(before) and _is_ldr_x8(load) and
-                    cbz == 0xb4000268 and _is_bl(after)):
+            pc = va + off - a
+            # The reviewed builds use cbz x8, +0x4c, but the compiler may
+            # choose another nearby forward target for the same skip. Keep the
+            # exact instruction class (cbz x8) and the guarded call shape: a
+            # forward branch, not a loop back to the getExtension call.
+            if (_is_bl(before) and _sets_x8_from_result(load) and
+                    cbz & 0xff00001f == 0xb4000008 and _is_bl(after) and
+                    0 < _branch_target(cbz, pc) - pc <= 0x100):
                 candidates.append(off)
     if len(candidates) != 1:
         raise ValueError(f"surfaceflinger: expected one composer guard, found {len(candidates)}")
@@ -256,6 +268,7 @@ def diagnose_surfaceflinger_sites(data: bytes) -> dict[str, object]:
 
     guards = []
     calls = []
+    composer = []
     for a, b, va, flags in segments:
         if not flags & 1:
             continue
@@ -266,6 +279,21 @@ def diagnose_surfaceflinger_sites(data: bytes) -> dict[str, object]:
             after = word(off + 4)
             if branch is None or after is None:
                 continue
+            if (before is not None and load is not None and
+                    _is_bl(before) and _sets_x8_from_result(load) and
+                    branch & 0xff00001f == 0xb4000008):
+                pc = va + off - a
+                composer.append({
+                    "branch_offset": f"0x{off:x}",
+                    "branch_word": f"0x{branch:08x}",
+                    "branch_target": f"0x{_branch_target(branch, pc):x}",
+                    "forward": _branch_target(branch, pc) > pc,
+                    "before_word": f"0x{before:08x}",
+                    "load_word": f"0x{load:08x}",
+                    "after_word": f"0x{after:08x}",
+                    "after_is_bl": _is_bl(after),
+                    "window": window(off),
+                })
             if _is_conditional_branch(branch) and _is_bl(after):
                 pc = va + off - a
                 guards.append({
@@ -295,7 +323,8 @@ def diagnose_surfaceflinger_sites(data: bytes) -> dict[str, object]:
         "aibinder_get_extension_symbol_present": b"AIBinder_getExtension" in data,
         "guard_windows": guards[:64],
         "call_windows": calls[:64],
-        "truncated": len(guards) > 64 or len(calls) > 64,
+        "composer_candidates": composer[:64],
+        "truncated": len(guards) > 64 or len(calls) > 64 or len(composer) > 64,
     }
 
 
@@ -445,7 +474,8 @@ def resolve_and_update_for_image(
             raise ValueError("incremental service string bytes changed")
         if vold[try_off:try_off + 4] != bytes.fromhex("b3060036"):
             raise ValueError("vold try_start patch bytes changed")
-        if sf[sf_off:sf_off + 4] != bytes.fromhex("680200b4"):
+        sf_word = struct.unpack_from("<I", sf, sf_off)[0]
+        if sf_word & 0xff00001f != 0xb4000008:
             raise ValueError("surfaceflinger patch bytes changed")
 
         sha = lambda blob: hashlib.sha256(blob).hexdigest()

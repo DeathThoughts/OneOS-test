@@ -1150,7 +1150,7 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
 # AIBinder_getExtension, before IQtiComposer3Client::fromBinder), same bytes.
 "$DEBUGFS" -R "dump /system/bin/surfaceflinger $WORK/surfaceflinger" "$IMG" 2>/dev/null
 python3 -I - "$WORK/surfaceflinger" "$OUT/surfaceflinger_patched" <<'PYEOF'
-import hashlib, os, sys
+import hashlib, os, struct, sys
 src, dst = sys.argv[1], sys.argv[2]
 data = bytearray(open(src, "rb").read())
 SITES = {"9896c0cba131": 0x470bc8, "a09087821954": 0x471178,
@@ -1211,10 +1211,14 @@ if off is None and b"IQtiComposer3Client" not in data:
     sys.exit(0)
 if off is None:
     sys.exit("surfaceflinger: unexpected build, not patching")
-old, new = bytes.fromhex("680200b4"), bytes.fromhex("13000014")
-if data[off:off + 4] != old:
-    sys.exit("surfaceflinger: unexpected bytes at %#x, not patching" % off)
-data[off:off + 4] = new
+old_word = struct.unpack_from("<I", data, off)[0]
+if old_word & 0xff00001f != 0xb4000008:
+    sys.exit("surfaceflinger: expected cbz x8 at %#x, not patching" % off)
+imm19 = (old_word >> 5) & 0x7ffff
+if imm19 & 0x40000:
+    imm19 -= 0x80000
+new_word = 0x14000000 | (imm19 & 0x03ffffff)
+data[off:off + 4] = struct.pack("<I", new_word)
 open(dst, "wb").write(data)
 print("built %s (QTI composer client skipped)" % dst)
 PYEOF

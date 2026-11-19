@@ -247,6 +247,22 @@ class TwinityElfSitesTest(unittest.TestCase):
         cbz_off = twinity_elf_sites.resolve_surfaceflinger_cbz_site(elf)
         self.assertEqual(0x2008, cbz_off)
 
+    def test_surfaceflinger_guard_accepts_another_forward_target(self):
+        # The same bl / ldr x8 / cbz x8 / bl shape, but the skip is +0x50
+        # (imm19=20 -> 0xb4000288) instead of the reviewed +0x4c.
+        code = bytearray(0x200)
+        struct.pack_into("<4I", code, 0, 0x94000040, 0xF94007E8, 0xB4000288, 0x94000041)
+        elf = self._build_minimal_elf64(
+            0x20000, b"rodata\x00", 0x10000, bytes(code),
+            dynsym_names=[
+                ("AIBinder_getExtension", 0x10100),
+                ("_ZN4aidl6vendor3qti8hardware7display8composer20IQtiComposer3Client10fromBinderERKNS_7android2os11SpAIBinderE", 0x10110),
+            ],
+        )
+        self.assertEqual(0x2008, twinity_elf_sites.resolve_surfaceflinger_cbz_site(elf))
+        report = twinity_elf_sites.diagnose_surfaceflinger_sites(elf)
+        self.assertEqual("0x2008", report["composer_candidates"][0]["branch_offset"])
+
     def test_surfaceflinger_guard_accepts_another_stack_slot(self):
         # Same "bl AIBinder_getExtension / ldr x8, [sp, #0x10] / cbz x8, +0x4c /
         # bl IQtiComposer3Client::fromBinder" guard; only the stack slot differs.
