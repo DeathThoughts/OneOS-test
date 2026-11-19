@@ -283,6 +283,90 @@ class TwinityElfSitesTest(unittest.TestCase):
         self.assertEqual("0x2008", report["guard_windows"][0]["branch_offset"])
         self.assertEqual("0xf9400be8", report["guard_windows"][0]["load_word"])
 
+    def test_surfaceflinger_guard_follows_imported_get_extension(self):
+        # The compiler picks x23 for the out-extension pointer and keeps the
+        # status in w22 before the null check. The guard must be found from the
+        # real AIBinder_getExtension PLT target, not a hard-coded cbz x8.
+        from unittest.mock import patch
+        code = bytearray(0x200)
+        struct.pack_into(
+            "<7I", code, 0,
+            0x94000040,  # bl 0x10100 (AIBinder_getExtension)
+            0xF94007F7,  # ldr x23, [sp, #8]
+            0x2A0003F6,  # mov w22, w0 (status)
+            0xB4000097,  # cbz x23, +0x10
+            0xAA1703E0,  # mov x0, x23
+            0x9400003C,  # bl 0x10104 (fromBinder)
+            0xD503201F,  # nop (skip target)
+        )
+        elf = self._build_minimal_elf64(
+            0x20000, b"rodata\x00", 0x10000, bytes(code),
+            dynsym_names=[
+                ("AIBinder_getExtension", 0x10100),
+                ("_ZN4aidl6vendor3qti8hardware7display8composer20IQtiComposer3Client10fromBinderERKNS_7android2os11SpAIBinderE", 0x10104),
+            ],
+        )
+        with patch.object(twinity_elf_sites, "_jump_slot_relocations",
+                          return_value=[(0x1234, "AIBinder_getExtension")]), \
+                patch.object(twinity_elf_sites, "_plt_stubs",
+                             return_value={0x1234: [0x10100]}):
+            sites = twinity_elf_sites.resolve_surfaceflinger_cbz_sites(elf)
+            report = twinity_elf_sites.diagnose_surfaceflinger_sites(elf)
+        self.assertEqual([(0x200C, "cbz")], sites)
+        self.assertEqual("0x200c", report["aibinder_extension_guards"][0]["branch_offset"])
+        self.assertEqual(23, report["aibinder_extension_guards"][0]["register"])
+
+    def test_surfaceflinger_returns_every_extension_guard(self):
+        from unittest.mock import patch
+        code = bytearray(0x200)
+        struct.pack_into(
+            "<7I", code, 0,
+            0x94000040, 0xF94007F7, 0x2A0003F6, 0xB4000097,
+            0xAA1703E0, 0x9400003C, 0xD503201F,
+        )
+        struct.pack_into(
+            "<5I", code, 0x40,
+            0x94000030,  # bl 0x10100 from 0x10040
+            0xF9400BE9,  # ldr x9, [sp, #0x10]
+            0xB40000A9,  # cbz x9, +0x14
+            0x9400002E,  # bl 0x10108
+            0xD503201F,
+        )
+        elf = self._build_minimal_elf64(
+            0x20000, b"rodata\x00", 0x10000, bytes(code),
+            dynsym_names=[
+                ("AIBinder_getExtension", 0x10100),
+                ("_ZN4aidl6vendor3qti8hardware7display8composer20IQtiComposer3Client10fromBinderERKNS_7android2os11SpAIBinderE", 0x10108),
+            ],
+        )
+        with patch.object(twinity_elf_sites, "_jump_slot_relocations",
+                          return_value=[(0x1234, "AIBinder_getExtension")]), \
+                patch.object(twinity_elf_sites, "_plt_stubs",
+                             return_value={0x1234: [0x10100]}):
+            self.assertEqual(
+                [(0x200C, "cbz"), (0x2048, "cbz")],
+                twinity_elf_sites.resolve_surfaceflinger_cbz_sites(elf),
+            )
+            with self.assertRaisesRegex(ValueError, "found 2"):
+                twinity_elf_sites.resolve_surfaceflinger_cbz_site(elf)
+
+    def test_update_make_overlays_text_accepts_multiple_sf_sites(self):
+        sample = 'BUILDS = [\n]\nSITES = {}\n'
+        result = twinity_elf_sites.update_make_overlays_text(
+            sample,
+            build_label="Twinity Multi",
+            vold_sha="1" * 64,
+            inc_sha="2" * 64,
+            crash_apex_name="crashrecovery.apex",
+            crash_sha="3" * 64,
+            vold_name_off=0x104E2,
+            vold_try_off=0x7AB64,
+            inc_name_off=0x6536B,
+            sf_sha12="abcdef012345",
+            sf_cbz_off=[0x200C, 0x204C],
+        )
+        self.assertIn('"abcdef012345": (0x200c, 0x204c)', result)
+
     def test_update_make_overlays_text_is_idempotent(self):
         sample = (
             'BUILDS = [\n'
