@@ -91,10 +91,14 @@ class StageScriptTest {
         fun launch(
             mode: String = "session", hideGms: String = "0", code: String = this.code,
             heatCap: String = "1", secIms: String = "0", edmStub: String = "0", verboseBoot: String = "0",
-            fullLogs: String? = null,
+            fullLogs: String? = null, batMin: String? = null, batMaxT: String? = null, shareFiles: String? = null,
         ) = fr.run(
             RootScript.Verb.LAUNCH, mode, code, "0123456789abcdef", hideGms, heatCap, secIms, edmStub, verboseBoot,
-            *listOfNotNull(fullLogs).toTypedArray(),
+            // Owner's decision, 2026-11-17: the battery limits are args 10 and 11 (after fullLogs, whose default is 1);
+            // 0.5.20: Share my files is arg 12, after them, and a launch that names it names the limits too.
+            *(if (batMin != null || batMaxT != null || shareFiles != null)
+                listOfNotNull(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420", shareFiles)
+            else listOfNotNull(fullLogs)).toTypedArray(),
         )
 
         fun prepare(mode: String = "new") {
@@ -188,23 +192,60 @@ class StageScriptTest {
         refused(s.launch(), "codename pa3q")
         fr.props["ro.product.device"] = "m3q"
         fr.writeProps()
-        fr.battery("12", "Discharging", "300")
-        refused(s.launch(), "battery")
-        fr.battery("12", "Charging", "300")
+        // Owner's decision, 2026-11-17: this test runs with a debug build's limits (5 %, 50.0 °C).
+        fr.battery("4", "Discharging", "499")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "battery")
+        fr.battery("5", "Charging", "500")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "battery too warm")
+        fr.battery("5", "Discharging", "499")
         File(fr.root, "old_switcher").writeText("")
-        refused(s.launch(), "old switcher")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "old switcher")
         File(fr.root, "old_switcher").delete()
         File(fr.root, "no_keys").writeText("")
-        refused(s.launch(), "Volume Up")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "Volume Up")
         File(fr.root, "no_keys").delete()
         // An unfinished session must be restored first.
         File(fr.stage, "persist_session.active").writeText("format=2\nboot_id=old\n")
-        refused(s.launch(), "restore One UI's settings")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "restore One UI's settings")
         File(fr.stage, "persist_session.active").delete()
         // A One UI update: another fingerprint than the table's.
         fr.props["ro.build.fingerprint"] = "samsung/m3qxxx/m3q:17/NEWER:user/release-keys"
         fr.writeProps()
-        refused(s.launch(), "not for this One UI build")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "not for this One UI build")
+    }
+
+    @Test
+    fun launchBatteryLimitsComeFromTheArguments() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        // Owner's decision, 2026-11-17: without the arguments root is as strict as a release build (30 %, 42.0 °C).
+        fr.battery("12", "Discharging", "300")
+        refused(s.launch(), "battery at 12% and not charging")
+        fr.battery("12", "Charging", "300")
+        refused(s.launch(), "test root: every launch check passed")
+        fr.battery("80", "Discharging", "420")
+        refused(s.launch(), "battery too warm")
+        fr.battery("80", "Discharging", "419")
+        refused(s.launch(), "test root: every launch check passed")
+        // A debug build passes 5 and 500: 12 % passes, 50.0 °C does not.
+        fr.battery("12", "Discharging", "300")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "test root: every launch check passed")
+        fr.battery("4", "Discharging", "300")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "battery at 4% and not charging")
+        fr.battery("80", "Discharging", "500")
+        refused(s.launch(batMin = "5", batMaxT = "500"), "battery too warm")
+        // Outside 5..100 and 300..500 the script says usage; the launcher never builds such a line (problems).
+        val good = listOf("session", s.code, "0123456789abcdef", "0", "1", "0", "0", "0", "1", "5", "500")
+        for ((min, max) in listOf("4" to "500", "101" to "500", "5" to "501", "5" to "299", "x" to "500", "5" to "5;0")) {
+            val r = fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good.take(9) + listOf(min, max))
+            assertEquals("$min $max: $r", RootScript.EXIT_USAGE, r.exit)
+            assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf(min, max)).isNotEmpty())
+        }
+        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + "0").exit)
+        assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good))
+        assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(10)))
+        assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf("100", "300")))
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + "0").isNotEmpty())
     }
 
     @Test
@@ -1714,6 +1755,24 @@ class StageScriptTest {
         assertEquals(before, env.readText())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "2")).isNotEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0")).isEmpty())
+    }
+
+    @Test
+    fun shareFilesChoiceIsWrittenOnlyAfterLaunchChecks() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val env = File(fr.stage, "session.env")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=0"))
+        refused(s.launch(shareFiles = "1"), "test root: every launch check passed")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=1"))
+        // The shorter launches (no shareFiles) still mean off.
+        refused(s.launch(), "test root: every launch check passed")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=0"))
+        val before = env.readText()
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(shareFiles = "2") }
+        assertEquals(before, env.readText())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "1", "2")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "1", "1")).isEmpty())
     }
 
     @Test

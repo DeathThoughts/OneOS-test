@@ -1,5 +1,6 @@
 package com.fahadali.oneos.core.model
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -376,15 +377,72 @@ class GatesTest {
     }
 
     @Test
-    fun battery() {
+    fun switchToAStagedSystemNeedsOnlyLogsAndMargin() {
+        val i = input(Bundles.S26U)
+        val staged = i.copy(stage = i.stage!!.copy(dataStaged = true))
+        val need = SpaceRule.LAUNCH_STAGED_BYTES
+        assertEquals(2L * SpaceRule.GIB, need)
+        // Issue 265: 8 GiB free is enough for a system that already has its data.
+        assertEquals(Level.OK, eval(GatePhase.SWITCH, staged.copy(freeBytes = 8L * SpaceRule.GIB)).level(SwitchGates.ID_SPACE))
+        assertEquals(Level.OK, eval(GatePhase.SWITCH, staged.copy(freeBytes = need)).level(SwitchGates.ID_SPACE))
+        val short = eval(GatePhase.SWITCH, staged.copy(freeBytes = need - 1))
+        assertEquals(Level.BLOCK, short.level(SwitchGates.ID_SPACE))
+        assertEquals(need, short.launchBytes)
+        assertTrue(short.find(SwitchGates.ID_SPACE)!!.finding.detail.contains("short"))
+        // Without its data in the stage the full 11 GiB stays.
+        assertEquals(Level.BLOCK, eval(GatePhase.SWITCH, i.copy(freeBytes = 8L * SpaceRule.GIB)).level(SwitchGates.ID_SPACE))
+        assertEquals(SpaceRule.LAUNCH_BYTES, eval(GatePhase.SWITCH, i).launchBytes)
+        // Setting up (PREPARE) is unchanged.
+        assertEquals(Level.BLOCK, eval(GatePhase.PREPARE, staged.copy(freeBytes = 8L * SpaceRule.GIB)).level(SwitchGates.ID_SPACE))
+    }
+
+    @After
+    fun strictAgain() = SwitchGates.setBatteryLimits(SwitchGates.STRICT_BATTERY_MIN_PERCENT, SwitchGates.STRICT_BATTERY_MAX_TENTHS_C)
+
+    private fun batteryLevel(b: BatteryInfo?): Level? {
         val i = input(Bundles.F8U)
-        fun level(b: BatteryInfo?) = eval(GatePhase.SWITCH, i.copy(facts = i.facts.copy(battery = b))).level(SwitchGates.ID_BATTERY)
-        assertEquals(Level.OK, level(BatteryInfo(30, false, 41.9f)))
-        assertEquals(Level.OK, level(BatteryInfo(5, true, 30f)))
-        assertEquals(Level.BLOCK, level(BatteryInfo(29, false, 30f)))
-        assertEquals(Level.BLOCK, level(BatteryInfo(90, true, 42f)))
-        assertEquals(Level.BLOCK, level(BatteryInfo(90, true, null)))
-        assertEquals(Level.BLOCK, level(null))
+        return eval(GatePhase.SWITCH, i.copy(facts = i.facts.copy(battery = b))).level(SwitchGates.ID_BATTERY)
+    }
+
+    /** Owner's decision, 2026-11-17: with nothing set the gate is as strict as a release build (30 %, below 42 °C). */
+    @Test
+    fun batteryStrictByDefault() {
+        assertEquals(30, SwitchGates.BATTERY_MIN_PERCENT)
+        assertEquals(42f, SwitchGates.BATTERY_MAX_C, 0f)
+        assertEquals(Level.OK, batteryLevel(BatteryInfo(30, false, 41.9f)))
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(29, false, 30f)))
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(90, false, 42f)))
+        assertEquals(Level.OK, batteryLevel(BatteryInfo(5, true, 30f)))
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(90, true, null)))
+        assertEquals(Level.BLOCK, batteryLevel(null))
+    }
+
+    /** A debug build's limits (5 %, below 50 °C), set from BuildConfig. */
+    @Test
+    fun batteryDebugLimits() {
+        SwitchGates.setBatteryLimits(5, 500)
+        assertEquals(500, SwitchGates.BATTERY_MAX_TENTHS_C)
+        assertEquals(Level.OK, batteryLevel(BatteryInfo(5, false, 49.9f)))
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(4, false, 30f)))
+        assertEquals(Level.OK, batteryLevel(BatteryInfo(4, true, 30f)))
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(90, true, 50f)))
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(90, true, null)))
+        assertEquals(Level.BLOCK, batteryLevel(null))
+    }
+
+    /** A wrong build value is not trusted: both limits stay strict. */
+    @Test
+    fun batteryLimitsOutsideTheRangesStayStrict() {
+        for ((min, max) in listOf(1 to 600, 4 to 500, 101 to 500, 5 to 299, 5 to 501, 0 to 0)) {
+            SwitchGates.setBatteryLimits(min, max)
+            assertEquals("$min $max", 30, SwitchGates.BATTERY_MIN_PERCENT)
+            assertEquals("$min $max", 420, SwitchGates.BATTERY_MAX_TENTHS_C)
+        }
+        SwitchGates.setBatteryLimits(5, 500)
+        SwitchGates.setBatteryLimits(1, 600)
+        assertEquals(30, SwitchGates.BATTERY_MIN_PERCENT)
+        assertEquals(42f, SwitchGates.BATTERY_MAX_C, 0f)
+        assertEquals(Level.BLOCK, batteryLevel(BatteryInfo(29, false, 30f)))
     }
 
     @Test

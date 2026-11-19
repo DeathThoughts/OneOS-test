@@ -11,8 +11,9 @@ ends in FingerprintRemovalClient.startHalOperation() -> ISession.removeEnrollmen
 which needs no auth token: One UI's template is gone from the TEE.
 FaceRemovalClient is the same for the face, and
 FingerprintEnrollClient / FaceEnrollClient.startHalOperation() hand the HAL
-whatever token they were given (guest_local_lock.py gives none today; this is
-the second lock on that door).
+whatever token they were given (guest_local_lock.py hands guest Settings a
+placeholder token of its own, which the phone's HAL refuses; this is the
+second lock on that door, and it holds with or without that token).
 
 These four are the only callers of ISession.removeEnrollments / enroll* in
 services.jar, for both transports: on a HIDL HAL the session is

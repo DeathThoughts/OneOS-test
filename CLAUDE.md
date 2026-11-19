@@ -30,6 +30,12 @@ subagent does the hands-on work.
   carries One UI's enrollment metadata across on every switch, the templates
   stay in the phone's TEE, and the guest unlocks with them through the phone's
   own HAL.
+- The guest lock (guest_local_lock.py, upstream's) answers a matched guest
+  credential with its own gatekeeper-password handle and hands guest Settings a
+  placeholder token for it, so Settings' biometric pages open. The phone's HAL
+  checks the token's MAC and refuses the placeholder, and
+  guest_no_biometric_writes.py still fails every guest enroll and removal
+  before the HAL, token or not. Enrollment still happens in One UI only.
 - Safety comes first. Nothing of One UI's credentials (PIN, gatekeeper handle,
   synthetic-password blobs) is read or written. Host-side writes into the
   guest's data go through the no_symlink guard. A biometric path that fails
