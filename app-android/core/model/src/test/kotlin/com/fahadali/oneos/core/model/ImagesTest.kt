@@ -21,6 +21,21 @@ class ImagesTest {
     )
 
     @Test
+    fun twinityImportVerifiesOnGalaxyS23() {
+        val twinity = Images.COLOROS_TWINITY_4C
+        val archive = ImageFileCheck(twinity.gzName, twinity.gzBytes, twinity.gzSha256, twinity.gzBytes)
+        val s23 = Profiles.S_8550
+        assertNull(twinity.zipEntryName)
+        assertEquals(twinity.downloadUrl, twinity.mirrorUrl)
+        assertEquals(ImageState.VERIFIED, ImageIdentifier.identify(archive, s23).state)
+        assertEquals(ImageState.WRONG_FOR_PHONE, ImageIdentifier.identify(archive, Profiles.S_PLUS_8550).state)
+        val raw = ImageIdentifier.identify(ImageFileCheck("system.img", twinity.rawBytes), s23)
+        assertEquals(ImageState.UNCOMPRESSED, raw.state)
+        assertTrue(raw.finding.detail.contains(twinity.gzName))
+        assertNull(twinity.testedOn)
+    }
+
+    @Test
     fun builtInTable() {
 
         assertEquals("coloros17-findn6", n6.id)
@@ -55,7 +70,7 @@ class ImagesTest {
         // (Nothing's are product/priv-app GmsCore, Phonesky, GooglePartnerSetup, GoogleRestore, ConfigUpdater
         // and system_ext/priv-app GoogleServicesFramework: six folders guest_prepare.sh's patterns cover).
         assertEquals(
-            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16, Images.ORIGINOS7, Images.LINEAGE24),
+            listOf(n6, xin, Images.COLOROS_TWINITY_4C, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16, Images.ORIGINOS7, Images.LINEAGE24),
             Images.ALL.filter { it.googleServices },
         )
         // 0.5.06: LineageOS 24 has none of its own: its Google apps are One UI's, laid over the guest at session time
@@ -71,10 +86,10 @@ class ImagesTest {
         assertEquals("OnePlus 15", Images.LINEAGE24.shortName)
         // 0.4.73: OriginOS 7 presents the Play services of its own gmssystem payload, as the Pixel images.
         assertEquals(listOf(pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.NOTHING_ASTEROIDS, Images.ORIGINOS7), Images.ALL.filter { it.presentsGms })
-        assertEquals(listOf(n6, xin, Images.NOTHING_METROID, Images.OXYGEN16, Images.LINEAGE24), Images.ALL.filter { it.gmsHideable })
+        assertEquals(listOf(n6, xin, Images.COLOROS_TWINITY_4C, Images.NOTHING_METROID, Images.OXYGEN16, Images.LINEAGE24), Images.ALL.filter { it.gmsHideable })
         assertTrue(pixel.copy(presentsGms = false).gmsHideable)
         assertEquals(
-            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
+            listOf(n6, xin, Images.COLOROS_TWINITY_4C, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
                 Images.ORIGINOS7, Images.LINEAGE24),
             Images.ALL,
         )
@@ -139,7 +154,7 @@ class ImagesTest {
         // Guest data stays with its own system (0.3.7): the ColorOS builds and the Pixel images.
         assertEquals(
             listOf(
-                SystemFamily.COLOROS, SystemFamily.COLOROS,
+                SystemFamily.COLOROS, SystemFamily.COLOROS, SystemFamily.COLOROS,
                 SystemFamily.PIXEL, SystemFamily.PIXEL, SystemFamily.PIXEL,
                 SystemFamily.INFINITYX, SystemFamily.HYPEROS, SystemFamily.NOTHING, SystemFamily.NOTHING, SystemFamily.OXYGENOS, SystemFamily.ORIGINOS, SystemFamily.LINEAGE,
             ),
@@ -279,7 +294,7 @@ class ImagesTest {
             Profiles.FOLD8 to listOf(n6, pixel, ifx, lineage, hyper, nothing, origin),
             Profiles.S_8850 to listOf(xin, Images.PIXEL_KODIAK, ifx, lineage, hyper, nothing, origin),
             Profiles.S_ULTRA_8650 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.82
-            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin), // 0.4.82; 0.4.91 OxygenOS 16; 0.5.19 Nothing OS
+            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin, Images.COLOROS_TWINITY_4C), // 0.4.82; 0.4.91 OxygenOS 16; 0.5.19 Nothing OS
             Profiles.S_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.83
             Profiles.S_PLUS_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.83
             Profiles.S_FE_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper),

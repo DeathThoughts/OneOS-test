@@ -140,7 +140,7 @@ jobs:
           python3 scripts/test-guest-manager-update.py
           python3 scripts/test-guest-media-share.py
           cd app-android
-          ./gradlew --console=plain :guest:stageGuestManagerRelease
+          ./gradlew --console=plain :guest:assembleDebug
           ./gradlew --console=plain :core:model:test :core:root:testDebugUnitTest
 
       - name: Assemble signed test APK (app-full-debug.apk)

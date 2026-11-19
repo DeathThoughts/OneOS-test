@@ -195,6 +195,7 @@
     <string name="image_no_profile_summary">This version of OneOS has none for this phone. Phone details, in Settings › For the OneOS team, shows why.</string>
     <string name="image_cat_file">Your file</string>
     <string name="image_pick_summary">Opens your files. OneOS reads only the file you pick.</string>
+    <string name="image_split_archive_instructions">Download all .img.gz.001+ parts from the release and join them once (cat %1$s.00* &gt; %1$s). Then pick %1$s here.</string>
     <string name="image_not_used">%1$s · not used: setup reuses the system already on this phone</string>
     <string name="image_file_ok">It\'s %1$s for this phone</string>
     <string name="image_check_title">Check the file</string>
@@ -470,4 +471,7 @@
     <string name="lock_risk_message">Recent Samsung firmware blocks Download Mode while a PIN, pattern, password, fingerprint or face lock is set. If a switch goes wrong with your lock on, your phone may not start and may not reach Download Mode either: then the only way back is a factory reset, which erases everything on it. This has happened to a tester.\n\nA Download Mode module (such as backdownload) lowers this risk but does not remove it. Back up first. You alone are responsible for what happens to your phone and its data.</string>
     <string name="lock_risk_accept_wait">I understand the risk (%1$d)</string>
     <string name="lock_risk_accept">I understand the risk</string>
+    <string name="fork_patch_warning_title">Patches tested on two phone models</string>
+    <string name="fork_patch_warning_message">This fork’s patches have been tested only on the base Galaxy S23 and Galaxy S25 Ultra. They are likely to fail on other Galaxy S and A models and may also fail on other phones. Proceed with caution.</string>
+    <string name="fork_patch_warning_ack">I understand that these patches may fail on this phone.</string>
 </resources>

@@ -176,6 +176,7 @@ INSTALLD_SHA_36=a7c17883707d9b0b85e3f75f6d83cb4522ba1d120026d29308b69da968945977
 INSTALLD_OK_36="a7c17883707d9b0b85e3f75f6d83cb4522ba1d120026d29308b69da968945977 9cd356141db2861d0e3858b923cbd1baf9dc1473e62c9dac4e655379abd09b21"
 # Session scripts from switcher/assets plus the expected installd table.
 SCRIPTS="guest_runtime.sh guest_root guest_zygiskd guest_zygisk_ptrace guest_zygisk.so guest_vector.bundle guest_manager.apk oneos_switch.sh boot_status.sh OneOSBootStatus.dex oneos_boot_icon.png guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh check_host_apex.sh bridges.sh fold8_coloros.sh OneOSFold8Geometry.dex fold8_pixel.sh guest_google.sh zygote_exec OneOSEdmStub.dex oneos_btaudio oneos_essential_key OneOSOverlayDimen.dex host_installd.txt"
+SET_TWINITY="ColorPanoramicSystemUI.apk KeKeThemeSpace_patched.apk OneOSFoldCutout.apk OneOSGuest.apk OneOSTabletQs.apk OneOSWaveRepack.dex SystemUI_wave.dex adservices_payload.img appsearch_payload.img art_payload.img build-info.txt configinfrastructure_payload.img crashrecovery_payload.img extservices_payload.img framework_patched.jar guards.txt healthfitness_payload.img i18n_payload.img ims-ext-common_patched.jar libcamera_client_patched.so mediaprovider_payload.img ondevicepersonalization_payload.img oplus-framework_patched.jar oplus-services_patched.jar oplus-telephony-common_patched.jar oplus_odm_ai.tar permission_payload.img rkpd_payload.img runtime_payload.img samcam.tar sdkext_payload.img service.incremental_patched.so services_patched.jar surfaceflinger_patched telephony-common_patched.jar vold_patched wifi_payload.img"
 SET_COMMON="services_patched.jar oplus-services_patched.jar vold_patched service.incremental_patched.so OneOSGuest.apk ims-ext-common_patched.jar oplus-telephony-common_patched.jar surfaceflinger_patched guards.txt art_payload.img i18n_payload.img runtime_payload.img sdkext_payload.img crashrecovery_payload.img extservices_payload.img permission_payload.img wifi_payload.img appsearch_payload.img mediaprovider_payload.img adservices_payload.img rkpd_payload.img healthfitness_payload.img ondevicepersonalization_payload.img configinfrastructure_payload.img"
 # The Pixel sets (the Fold's 0.3.7, the S26 Ultra's 0.4.10, the Pixel 9 Pro XL's 0.4.22): services.jar with the guest vold as gvld, the signal
 # poll, Pixel's status bar RRO, the in-guest OneOS app and its own payloads.
@@ -206,7 +207,7 @@ ENV_KEYS="ONEOS_APP ONEOS_PROFILE ONEOS_SPLASH_COMPONENT ONEOS_WALLPAPER_PROBE O
 # ImageRef.gmsHideable): the Find X9 Ultra IN build (again from 0.4.11) and
 # the Find N6 global build (0.4.38). The Pixel images have them too, but their
 # sessions present their own GmsCore, and oneos_switch.sh refuses to hide that.
-IMAGES_GMS="coloros17-findn6 coloros17-findx9u-in-1105 nothingos5-metroid oxygenos16-cph2745 lineage24-infiniti"
+IMAGES_GMS="coloros17-findn6 coloros17-findx9u-in-1105 coloros17-twinity-4c nothingos5-metroid oxygenos16-cph2745 lineage24-infiniti"
 
 # <id>: <model prefix> <codename> <SoC> <form>. Enabled profiles only (the
 # S25 Ultra from 0.3.1, the Galaxy S25 from 0.3.4, the Z Fold7 from 0.4.8,
@@ -419,6 +420,7 @@ profile_set() {
         "s-8550 infinityx41-findx9u") echo infinityx ;;
         "s-8550 lineage24-infiniti") echo lineage ;;
         "s-8550 hyperos-lhasa") echo hyper-f8u ;;
+        "s-8550 coloros17-twinity-4c") echo twinity-4c-s23 ;;
         "s-plus-8550 infinityx41-findx9u") echo infinityx ;;
         "s-plus-8550 lineage24-infiniti") echo lineage ;;
         "s-plus-8550 hyperos-lhasa") echo hyper-f8u ;;
@@ -632,6 +634,7 @@ image_raw() {
     case "$1" in
         coloros17-findn6) echo "14829686784 eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c" ;;
         coloros17-findx9u-in) echo "14669168640 92c7cd8485dd6ef80d1f5c734ea13a8744510c15b77a18471eb11078df84ddb6" ;;
+        coloros17-twinity-4c) echo "10238472192 660247e551ff8649c9d5cc57055ca0129004bb7da3b324e4f2f93b7203ffcd21" ;;
         coloros17-findx9u-in-1105) echo "14782214144 6c089f2d043d60f34b40dd58ad44f88621163163c1664121753311a115da8d7c" ;;
         pixel11fold-yogi) echo "6559223808 8b303c37916288545b3b4a317c368d89680b5c3ce09873dc764381ddd0e32830" ;;
         pixel11pro-kodiak) echo "6529871872 ac661a520263fa73a2b9996f19763350457b1558863d1dc15326a365ce1784c6" ;;
@@ -651,6 +654,7 @@ set_files() {
     case "$1" in
         n6-global-f8) echo "$SET_COMMON oplus-framework_patched.jar OneOSWallpapersFoldGrid.apk cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar Fold8SystemUI.apk Fold8AngleRelay.dex KeKeThemeSpace_patched.apk oplus_odm_ai.tar GlobalVerifiedAddons.tar ColorPanoramicSystemUI.apk" ;;
         n6-f8u) echo "$SET_COMMON oplus-framework_patched.jar OneOSWallpapersFoldGrid.apk cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar Fold8SystemUI.apk Fold8AngleRelay.dex KeKeThemeSpace_patched.apk oplus_odm_ai.tar ColorPanoramicSystemUI.apk" ;;
+        twinity-4c-s23) echo "$SET_TWINITY" ;;
         x9u-in-1105-sultra) echo "$SET_COMMON oplus-framework_patched.jar cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar KeKeThemeSpace_patched.apk oplus_odm_ai.tar ColorPanoramicSystemUI.apk SystemUI_wave.dex OneOSWaveRepack.dex samcam_a.tar" ;;
         pixel-f8u) echo "$SET_PIXEL Fold8PixelSystemUI.apk Fold8AngleRelay.dex OneOSPixelUnfold.apk yogi-services_patched.jar libbootanimation_preapex_patched.so OneOSPixelLauncher.apk OneOSFoldCutout.apk" ;;
         pixel-f8) echo "$SET_PIXEL Fold8PixelSystemUI.apk Fold8AngleRelay.dex Fold8PixelUnfold.apk yogi-services_patched.jar libbootanimation_preapex_patched.so OneOSPixelLauncher.apk" ;;
@@ -673,6 +677,7 @@ set_image() {
         n6-global-f8) echo coloros17-findn6 ;;
         n6-f8u) echo coloros17-findn6 ;;
         x9u-in-1105-sultra) echo coloros17-findx9u-in-1105 ;;
+        twinity-4c-s23) echo coloros17-twinity-4c ;;
         pixel-f8u|pixel-f8) echo pixel11fold-yogi ;;
         pixel-sultra) echo pixel11pro-kodiak ;;
         hyper-f8u) echo hyperos-lhasa ;;
@@ -695,7 +700,7 @@ set_image() {
 # (com.miui.) (data_family).
 image_family() {
     case "$1" in
-        coloros17-findn6|coloros17-findx9u|coloros17-findx9u-in|coloros17-findx9u-in-1105) echo coloros ;;
+        coloros17-findn6|coloros17-findx9u|coloros17-findx9u-in|coloros17-findx9u-in-1105|coloros17-twinity-4c) echo coloros ;;
         pixel11fold-yogi|pixel11pro-kodiak|pixel9proxl-komodo) echo pixel ;;
         infinityx41-findx9u) echo infinityx ;;
         lineage24-infiniti) echo lineage ;;

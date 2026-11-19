@@ -3,11 +3,13 @@ package com.fahadali.oneos.session
 import android.content.Context
 import android.os.SystemClock
 import com.fahadali.oneos.BuildConfig
+import com.fahadali.oneos.R
 import com.fahadali.oneos.core.device.FactProbe
 import com.fahadali.oneos.core.model.ApkSeries
 import com.fahadali.oneos.core.model.ClassPath
 import com.fahadali.oneos.core.model.DeviceFacts
 import com.fahadali.oneos.core.model.Finding
+import com.fahadali.oneos.core.model.Gate
 import com.fahadali.oneos.core.model.GateInput
 import com.fahadali.oneos.core.model.GatePhase
 import com.fahadali.oneos.core.model.GateReport
@@ -222,7 +224,15 @@ object StageCheck : BackgroundJob<StageCheck.State>(State(), "oneos-check") {
             zygiskNextVersionCode = st.props["zygisksu.versionCode"]?.trim()?.toIntOrNull(),
             series = ApkSeries.byId(BuildConfig.SERIES),
         )
-        val report = SwitchGates.evaluate(phase, input)
+        val report = SwitchGates.evaluate(phase, input).let { evaluated ->
+            if (Profiles.forkPatchesTested(facts.model)) evaluated else evaluated.copy(
+                gates = evaluated.gates + Gate(
+                    Finding("fork-patch-compatibility", Level.WARN,
+                        app.getString(R.string.fork_patch_warning_title), app.getString(R.string.fork_patch_warning_message)),
+                    app.getString(R.string.fork_patch_warning_ack),
+                ),
+            )
+        }
         // Only a contributor channel's snapshot can stop being valid (another app version); Stable keeps the old check.
         val onChannel = runCatching {
             st.staged(profile)?.second?.let { !PatchChannels.selected(app, profile!!.id, it.imageId).stable }

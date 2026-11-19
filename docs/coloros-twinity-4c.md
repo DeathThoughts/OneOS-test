@@ -56,7 +56,7 @@ python3 scripts/test-twinity-port.py -v
 MYSTIC_PYTHON="$PWD/mysticgsi/.venv/bin/python" python3 scripts/build-twinity-port.py
 python3 scripts/wire-twinity-port.py --manifest out/twinity-metadata/twinity-4c-manifest.json
 cd app-android
-./gradlew :guest:stageGuestManagerDebug :core:model:test :core:root:testDebugUnitTest :app:assembleFullDebug
+./gradlew :guest:assembleDebug :core:model:test :core:root:testDebugUnitTest :app:assembleFullDebug
 ```
 
 ## 4. Phone-Only Installation & First-Boot Checklist (`SM-S911B`)

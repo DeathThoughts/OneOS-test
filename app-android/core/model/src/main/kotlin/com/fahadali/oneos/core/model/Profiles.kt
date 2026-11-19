@@ -528,6 +528,11 @@ object Profiles {
      * Flip5: Infinity-X started on an S23 once the HIDL-only phones got the
      * hwservicemanager marker (guest_prepare.sh), which Pixel lacks as well.
      */
+    private val S23_CHOICES = listOf(
+        X9U_IN_1105_CHOICE, PIXEL9_CHOICE, INFINITYX_CHOICE, LINEAGE_CHOICE,
+        HYPEROS_CHOICE, OXYGEN16_CHOICE, NOTHING_CHOICE, ORIGINOS_CHOICE,
+    )
+
     val S_8550 = PhoneProfile(
         id = ID_S_8550,
         label = "Galaxy S23",
@@ -535,7 +540,7 @@ object Profiles {
         codename = "dm1q",
         socModel = "SM8550",
         form = FormFactor.BAR,
-        choices = listOf(X9U_IN_1105_CHOICE, PIXEL9_CHOICE, INFINITYX_CHOICE, LINEAGE_CHOICE, HYPEROS_CHOICE, OXYGEN16_CHOICE, NOTHING_CHOICE, ORIGINOS_CHOICE), // 0.5.19: Nothing OS (Metroid) at the owner's request, untested
+        choices = S23_CHOICES + ImageChoice(Images.ID_COLOROS_TWINITY_4C, PackageSets.ID_TWINITY_4C_S23, tested = false),
         notes = listOf(EXPECT_NO_START),
     )
 
@@ -546,7 +551,7 @@ object Profiles {
         codename = "dm2q",
         socModel = "SM8550",
         form = FormFactor.BAR,
-        choices = listOf(X9U_IN_1105_CHOICE, PIXEL9_CHOICE, INFINITYX_CHOICE, LINEAGE_CHOICE, HYPEROS_CHOICE, OXYGEN16_CHOICE, NOTHING_CHOICE, ORIGINOS_CHOICE), // 0.5.19: Nothing OS (Metroid) at the owner's request, untested
+        choices = S23_CHOICES,
         notes = listOf(EXPECT_NO_START),
     )
 
@@ -1274,7 +1279,10 @@ object Profiles {
      * KernelSU; its installd table is the 85 methods of host_installd.txt). The [S_8550]'s systems and
      * note, untested.
      */
-    val S_8550_JP = S_8550.copy(id = ID_S_8550_JP, label = "Galaxy S23 (au)", modelPrefix = "SCG19", codename = "SCG19")
+    val S_8550_JP = S_8550.copy(
+        id = ID_S_8550_JP, label = "Galaxy S23 (au)", modelPrefix = "SCG19", codename = "SCG19",
+        choices = S23_CHOICES,
+    )
 
     /**
      * Galaxy M35 5G, from 0.4.95: findings of 2026-11-11 (SM-M356B, m35x, s5e8835 Exynos 1380, One UI 9.0,
@@ -1315,6 +1323,8 @@ object Profiles {
     val ONE_UI_SEEN_A16: Set<Int> = setOf(80000, 80500)
 
     fun byId(id: String, profiles: List<PhoneProfile> = BUILT_IN): PhoneProfile? = profiles.firstOrNull { it.id == id }
+
+    fun forkPatchesTested(model: String): Boolean = Regex("^SM-(S911|S938)[A-Z0-9]*$").matches(model)
 
     fun resolve(f: DeviceFacts, profiles: List<PhoneProfile> = BUILT_IN): ProfileResolution =
         resolve(f.model, f.device, f.soc.model, profiles)
