@@ -67,13 +67,16 @@ data class ImageRef(
     val presentsGms: Boolean = false,
     /** Whose system it is: its guest data is kept only for an image of the same family. */
     val family: SystemFamily,
+    /** Exact image entry in a ZIP archive. A null name selects gzip. */
+    val zipEntryName: String? = null,
+    val mirrorUrlOverride: String? = null,
 ) {
     /**
      * The image's own download on the SourceForge mirror (0.4.59, project oneos-mirror, folder
      * images/): one file, resumable, from a mirror near the user. [downloadUrl] (the Drive
      * folder) stays the fallback.
      */
-    val mirrorUrl: String get() = "${Images.MIRROR_FILES_URL}$gzName/download"
+    val mirrorUrl: String get() = mirrorUrlOverride ?: "${Images.MIRROR_FILES_URL}$gzName/download"
 
     /**
      * A launch may hide Google services (`ONEOS_GUEST_HIDE_GMS=1`, [SessionEnv],
@@ -123,6 +126,7 @@ object Images {
     const val ID_FIND_N6 = "coloros17-findn6"
     const val ID_FIND_X9U_IN = "coloros17-findx9u-in"
     const val ID_FIND_X9U_IN_1105 = "coloros17-findx9u-in-1105"
+    const val ID_COLOROS_TWINITY_4C = "coloros17-twinity-4c"
     const val ID_PIXEL_YOGI = "pixel11fold-yogi"
     const val ID_PIXEL_KODIAK = "pixel11pro-kodiak"
     const val ID_HYPEROS_LHASA = "hyperos-lhasa"
@@ -570,9 +574,39 @@ object Images {
      * newer build of the same system (value), as an over-the-air update would: the first Find X9 Ultra IN
      * build is retired for the 1105 build (owner), and nothing else moves. Never the other way.
      */
+
+    /**
+     * ColorOS 17 China (2026-09-01 security patch, OnePlus 13T 17.0.0.104, Twinity 4.0c port),
+     * ported to a MysticGSI system image from `super.img.zst` with Poco F5 hardware partitions excluded.
+     * Experimental and untested on the base Galaxy S23.
+     */
+    val COLOROS_TWINITY_4C = ImageRef(
+        id = ID_COLOROS_TWINITY_4C,
+        label = "ColorOS 17, OnePlus 13T CN build (Twinity 4.0c)",
+        shortName = "OnePlus 13T CN",
+        name = "ColorOS 17",
+        variant = "Twinity 4.0c",
+        blurb = "OPPO's China system from the OnePlus 13T (17.0.0.104, Twinity 4.0c). Experimental and untested on the Galaxy S23.",
+        downloadUrl = "https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity-4c-v1",
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_ColorOS17_OnePlus13T_CN_Twinity4c.img.gz",
+        gzBytes = 5_186_001_085L,
+        gzSha256 = "65d135a6a75582e0c77b8c539ee77dca8bba9c49cd52c19afd3109501dad391a",
+        rawBytes = 10_238_472_192L,
+        rawSha256 = "660247e551ff8649c9d5cc57055ca0129004bb7da3b324e4f2f93b7203ffcd21",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = true,
+        presentsGms = false,
+        family = SystemFamily.COLOROS,
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity-4c-v1",
+    )
+
     val DATA_UPGRADES: Map<String, String> = mapOf(ID_FIND_X9U_IN to ID_FIND_X9U_IN_1105)
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24)
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS_TWINITY_4C, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 
@@ -724,10 +758,11 @@ object ImageIdentifier {
                     ),
                 )
             } else if (raw != null) {
+                val title = if (raw.zipEntryName == null) "Pick the .img.gz file" else "Pick the ZIP file"
                 val pick = if (profile == null || profile.choice(raw.id) != null) "pick ${raw.gzName}" else wantText
                 ImageIdentity(
                     ImageState.UNCOMPRESSED, raw,
-                    block("Pick the .img.gz file", "$name is the unpacked ${raw.shortName} image. OneOS unpacks the image itself: $pick.", R_UNCOMPRESSED),
+                    block(title, "$name is the unpacked ${raw.shortName} image. OneOS unpacks the image itself: $pick.", R_UNCOMPRESSED),
                 )
             } else {
                 ImageIdentity(

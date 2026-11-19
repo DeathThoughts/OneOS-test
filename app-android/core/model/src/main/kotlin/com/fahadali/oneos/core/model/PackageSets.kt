@@ -157,6 +157,7 @@ object PackageSets {
     const val ID_N6_F8U = "n6-f8u"
     const val ID_X9U_IN_SULTRA = "x9u-in-sultra"
     const val ID_X9U_IN_1105_SULTRA = "x9u-in-1105-sultra"
+    const val ID_TWINITY_4C_S23 = "twinity-4c-s23"
     const val ID_PIXEL_F8U = "pixel-f8u"
     const val ID_PIXEL_F8 = "pixel-f8"
     const val ID_PIXEL_SULTRA = "pixel-sultra"
@@ -854,7 +855,56 @@ object PackageSets {
         hasReturnApp = true,
     )
 
-    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE)
+    /** Experimental ColorOS 17 China Twinity 4.0c overlay set for base Galaxy S23. */
+    val TWINITY_4C_S23 = PackageSet(
+        id = ID_TWINITY_4C_S23,
+        imageId = Images.ID_COLOROS_TWINITY_4C,
+        sourceDir = "out/overlays_twinity_4c_r1",
+        files = listOf(
+            PackageFile("ColorPanoramicSystemUI.apk", FileRole.GUEST_FIX),
+            PackageFile("KeKeThemeSpace_patched.apk", FileRole.GUEST_FIX),
+            PackageFile("OneOSFoldCutout.apk", FileRole.RRO),
+            PackageFile("OneOSGuest.apk", FileRole.GUEST_APP),
+            PackageFile("OneOSTabletQs.apk", FileRole.RRO),
+            PackageFile("OneOSWaveRepack.dex", FileRole.GUEST_FIX),
+            PackageFile("SystemUI_wave.dex", FileRole.GUEST_FIX),
+            PackageFile("adservices_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("appsearch_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("art_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("build-info.txt", FileRole.GUEST_FIX),
+            PackageFile("configinfrastructure_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("crashrecovery_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("extservices_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("guards.txt", FileRole.GUARDS),
+            PackageFile("healthfitness_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("i18n_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("ims-ext-common_patched.jar", FileRole.FRAMEWORK_JAR),
+            PackageFile("libcamera_client_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("mediaprovider_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("ondevicepersonalization_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("oplus-framework_patched.jar", FileRole.FRAMEWORK_JAR),
+            PackageFile("oplus-services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("oplus-telephony-common_patched.jar", FileRole.FRAMEWORK_JAR),
+            PackageFile("oplus_odm_ai.tar", FileRole.GUEST_FIX),
+            PackageFile("permission_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("rkpd_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("runtime_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("samcam.tar", FileRole.GUEST_FIX),
+            PackageFile("sdkext_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("service.incremental_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("surfaceflinger_patched", FileRole.SURFACEFLINGER),
+            PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("vold_patched", FileRole.GUARD_EXECUTABLE),
+            PackageFile("wifi_payload.img", FileRole.APEX_PAYLOAD),
+        ),
+        omitted = listOf(TETHERING, WALLPAPER_GRID_RRO),
+        approxBytes = 724_037_528L,
+        hasReturnApp = true,
+    )
+
+    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, TWINITY_4C_S23, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE)
 
     fun byId(id: String, sets: List<PackageSet> = ALL): PackageSet? = sets.firstOrNull { it.id == id }
 }

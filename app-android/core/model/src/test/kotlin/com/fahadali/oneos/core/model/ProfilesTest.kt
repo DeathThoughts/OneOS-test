@@ -9,6 +9,14 @@ import org.junit.Test
 
 class ProfilesTest {
     @Test
+    fun twinityIsOfferedOnlyOnTheBaseGalaxyS23() {
+        val image = Images.ID_COLOROS_TWINITY_4C
+        assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
+        assertEquals(ImageChoice(image, PackageSets.ID_TWINITY_4C_S23, tested = false), Profiles.S_8550.choice(image))
+        assertEquals(PackageSets.ID_X9U_IN_1105_SULTRA, Profiles.S_8550.choice(Images.ID_FIND_X9U_IN_1105)?.packageSetId)
+    }
+
+    @Test
     fun theFourBundlesResolveToTheirProfiles() {
         assertEquals(Profiles.F8U, Profiles.resolve(Bundles.F8U.facts).profile)
         assertEquals(Profiles.S_ULTRA_8850, Profiles.resolve(Bundles.S26U.facts).profile)
@@ -255,12 +263,11 @@ class ProfilesTest {
         for (p in listOf(s23, s23Plus)) {
             assertEquals(FormFactor.BAR, p.form)
             // 0.4.91 (owner: "add oxygenos to s23 series on oneui8/8.5"): OxygenOS 16 for the ones still on One UI 8, before OriginOS.
-            assertEquals(
-                listOf(xin, ImageChoice(Images.ID_PIXEL_KOMODO, PackageSets.ID_PIXEL9_SULTRA, tested = false), ifx, lineage, hyper,
-                    ImageChoice(Images.ID_OXYGEN16, PackageSets.ID_OXYGEN16, tested = false), nothing, origin), // 0.5.19: Nothing OS (Metroid), owner
-                p.choices,
-            )
-            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices)
+            val original = listOf(xin, ImageChoice(Images.ID_PIXEL_KOMODO, PackageSets.ID_PIXEL9_SULTRA, tested = false), ifx, lineage, hyper,
+                ImageChoice(Images.ID_OXYGEN16, PackageSets.ID_OXYGEN16, tested = false), nothing, origin)
+            val twinity = ImageChoice(Images.ID_COLOROS_TWINITY_4C, PackageSets.ID_TWINITY_4C_S23, tested = false)
+            assertEquals(if (p == s23) original + twinity else original, p.choices)
+            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == twinity })
             assertEquals(listOf(Profiles.ID_NOTE_EXPECT_NO_START), p.notes.map { it.id })
             assertEquals(Level.WARN, p.notes.single().level)
         }
@@ -285,7 +292,10 @@ class ProfilesTest {
             offerOrigin.filter { p -> p.notes.any { it.id == Profiles.ID_NOTE_EXYNOS } }.map { it.id },
         )
         assertEquals(listOf(Profiles.ID_F8U), offerOrigin.filter { it.choice(Images.ID_ORIGINOS7)!!.tested }.map { it.id })
-        for (p in offerOrigin) assertEquals(p.id, Images.ID_ORIGINOS7, p.choices.last().imageId)
+        for (p in offerOrigin) {
+            val last = p.choices.last { it.imageId != Images.ID_COLOROS_TWINITY_4C }
+            assertEquals(p.id, Images.ID_ORIGINOS7, last.imageId)
+        }
         assertEquals(
             listOf(
                 Profiles.F8U, Profiles.S_ULTRA_8850, Profiles.S_ULTRA_8750, Profiles.S_8750, Profiles.FOLD7, Profiles.S_PLUS_8750, Profiles.FOLD8,
@@ -342,7 +352,7 @@ class ProfilesTest {
             listOf(Profiles.S_8550_JP.id, Profiles.S_8550_JP.label, Profiles.S_8550_JP.form),
         )
         assertEquals(
-            listOf(Profiles.S_8550.choices, Profiles.S_8550.notes),
+            listOf(Profiles.S_PLUS_8550.choices, Profiles.S_8550.notes),
             listOf(Profiles.S_8550_JP.choices, Profiles.S_8550_JP.notes),
         )
         assertNull(Profiles.resolve("SCG19", "dm1q", "SM8550").profile)
@@ -650,6 +660,16 @@ class ProfilesTest {
             } else {
                 assertNull(p.id, p.choice(Images.ID_LINEAGE))
             }
+        }
+    }
+
+    @Test
+    fun forkPatchWarningExemptsOnlyTheTestedModels() {
+        for (model in listOf("SM-S911B", "SM-S911U1", "SM-S938B", "SM-S938N")) {
+            org.junit.Assert.assertTrue(model, Profiles.forkPatchesTested(model))
+        }
+        for (model in listOf("SM-S916B", "SM-S918B", "SM-S931B", "SM-A556B", "SM-F956B", "", "SM-S911-invalid")) {
+            org.junit.Assert.assertFalse(model, Profiles.forkPatchesTested(model))
         }
     }
 }

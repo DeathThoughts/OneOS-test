@@ -1,0 +1,208 @@
+name: Build Twinity ColorOS 17 S23 Port
+
+on:
+  workflow_dispatch:
+    inputs:
+      rebuild_port:
+        description: "Force full source ROM port and overlay rebuild even if twinity-4c-s23.sha256 exists"
+        type: boolean
+        default: false
+  push:
+    branches: [experiment/gemini-twinity-4c]
+
+concurrency:
+  group: twinity-4c-port-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  twinity-port:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/experiment/gemini-twinity-4c'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Reclaim runner disk space for 9.1 GB super.img + MysticGSI workspace
+        run: |
+          set -eu
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/graalvm \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/powershell \
+            /usr/share/swift || true
+          docker system prune -af --volumes >/dev/null 2>&1 || true
+          df -h /
+
+      - uses: actions/checkout@v5
+        with:
+          ref: experiment/gemini-twinity-4c
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Check whether full ROM port is needed
+        id: mode
+        run: |
+          if [ "${{ inputs.rebuild_port }}" = "true" ] || [ ! -f app-android/packages/twinity-4c-s23.sha256 ]; then
+            echo "need_port=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "need_port=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.mode.outputs.need_port == 'true'
+        with:
+          repository: MysticGSI/mysticgsi
+          ref: 825b850dd8ddff11fdb8ed024034fc00e94b1451
+          path: mysticgsi
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Android SDK 37, build-tools 36.0.0, and filesystem utilities
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            e2fsprogs erofs-utils zstd pigz zip unzip bc cpio lz4 patch attr \
+            android-sdk-libsparse-utils python3-venv python3-pip p7zip-full brotli
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on runner}}
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+          fi
+          [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+
+      - name: Install debug keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          set -eu
+          if [ -z "$DEBUG_KEYSTORE_B64" ]; then
+            echo "::warning::DEBUG_KEYSTORE_B64 is not set; generating ephemeral debug keystore"
+            exit 0
+          fi
+          ks=$RUNNER_TEMP/oneos-debug.keystore
+          printf '%s' "$DEBUG_KEYSTORE_B64" | base64 -d > "$ks"
+          chmod 600 "$ks"
+          mkdir -p "$HOME/.android"
+          cp "$ks" "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          fp=$(keytool -list -v -keystore "$ks" -storepass android -alias androiddebugkey | grep 'SHA256:' | head -n 1 | sed 's/^[[:space:]]*SHA256:[[:space:]]*//')
+          [ -n "$fp" ] || { echo "no SHA256 fingerprint for androiddebugkey in $ks" >&2; exit 1; }
+          echo "ONEOS_DEBUG_KEYSTORE=$ks" >> "$GITHUB_ENV"
+          echo "ONEOS_DEBUG_KEYSTORE_SHA256=$(printf '%s' "$fp" | tr -d ':' | tr 'A-F' 'a-f')" >> "$GITHUB_ENV"
+
+      - name: Run Twinity port tooling unit tests
+        run: python3 scripts/test-twinity-port.py
+
+      - name: Port source ROM, build overlays, and publish release assets
+        if: steps.mode.outputs.need_port == 'true'
+        env:
+          APKTOOL: ${{ github.workspace }}/mysticgsi/tools/apktool/apktool.jar
+          EXTRACT_EROFS: ${{ github.workspace }}/mysticgsi/tools/bin/Linux/x86_64/extract.erofs
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          chmod -R a+rx mysticgsi/tools
+          python3 -m venv mysticgsi/.venv
+          if [ -f mysticgsi/requirements.txt ]; then mysticgsi/.venv/bin/pip install --quiet -r mysticgsi/requirements.txt; fi
+          export MYSTIC_PYTHON="$PWD/mysticgsi/.venv/bin/python"
+          mkdir -p out
+          python3 scripts/build-twinity-port.py --publish --target "$GITHUB_SHA"
+          rm -rf mysticgsi out/overlays_twinity_4c_r1
+          python3 scripts/wire-twinity-port.py --manifest out/twinity-metadata/twinity-4c-manifest.json
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Build guest manager and run verification suite
+        env:
+          ONEOS_PATCH_RELEASE_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_RELEASE_PUBLIC_KEY }}
+          GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
+          GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          sh -n switcher/assets/oneos_switch.sh
+          sh -n switcher/assets/guest_prepare.sh
+          sh -n app-android/app/src/full/assets/root/oneos_root.sh
+          python3 scripts/test-restart-home.py
+          python3 scripts/test-guest-manager-update.py
+          python3 scripts/test-guest-media-share.py
+          cd app-android
+          ./gradlew --console=plain :guest:assembleDebug
+          ./gradlew --console=plain :core:model:test :core:root:testDebugUnitTest
+
+      - name: Assemble signed test APK (app-full-debug.apk)
+        env:
+          ONEOS_PATCH_RELEASE_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_RELEASE_PUBLIC_KEY }}
+          GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
+          GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          cd app-android
+          ./gradlew --console=plain :app:assembleFullDebug
+          apk=app/build/outputs/apk/full/debug/app-full-debug.apk
+          [ -f "$apk" ] || { echo "Missing $apk" >&2; exit 1; }
+          signer=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk" 2>/dev/null | grep -m1 'certificate SHA-256 digest' | sed 's/.*: //' | tr 'A-F' 'a-f' || true)
+          if [ -n "${ONEOS_DEBUG_KEYSTORE_SHA256:-}" ] && [ "$signer" != "$ONEOS_DEBUG_KEYSTORE_SHA256" ]; then
+            echo "::error::APK signer $signer does not match DEBUG_KEYSTORE_B64 $ONEOS_DEBUG_KEYSTORE_SHA256"
+            exit 1
+          fi
+          mkdir -p ../dist
+          cp "$apk" ../dist/OneOS-twinity-4c-debug.apk
+          (cd ../dist && sha256sum OneOS-twinity-4c-debug.apk > OneOS-twinity-4c-debug.apk.sha256)
+          {
+            echo "### Experimental Twinity 4.0c Debug APK"
+            echo ""
+            echo "- File: \`OneOS-twinity-4c-debug.apk\` (\`$(stat -c '%s' ../dist/OneOS-twinity-4c-debug.apk)\` bytes)"
+            echo "- SHA-256: \`$(cut -d' ' -f1 ../dist/OneOS-twinity-4c-debug.apk.sha256)\`"
+            echo "- Signer SHA-256: \`${signer:-unknown}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit wired port metadata to experiment/gemini-twinity-4c (first port run only)
+        if: steps.mode.outputs.need_port == 'true'
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            scripts/make-overlays.sh \
+            scripts/test-restart-home.py \
+            switcher/assets/oneos_switch.sh \
+            app-android/
+          if ! git diff --cached --quiet; then
+            git commit -m "Wire experimental Twinity ColorOS 17 CN (TWNTY 4.0c) S23 image and overlays"
+            git push origin HEAD:refs/heads/experiment/gemini-twinity-4c
+          fi
+
+      - name: Upload signed test APK to twinity-4c-v1 prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if gh api repos/DeathThoughts/OneOS-test/releases/tags/twinity-4c-v1 >/dev/null 2>&1; then
+            gh release upload twinity-4c-v1 \
+              dist/OneOS-twinity-4c-debug.apk \
+              dist/OneOS-twinity-4c-debug.apk.sha256 \
+              --clobber --repo DeathThoughts/OneOS-test
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: twinity-4c-build-artifacts
+          path: |
+            dist/
+            out/twinity-metadata/
+          if-no-files-found: warn

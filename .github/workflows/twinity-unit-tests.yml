@@ -1,0 +1,20 @@
+name: Twinity ELF Unit Tests
+
+on:
+  push:
+    branches: [fix/twinity-ci-preflight, fix/twinity-lpunpack, fix/twinity-mystic-python, fix/twinity-vold-diagnostics, fix/twinity-known-vold-pin]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Twinity scripts
+        run: python3 -m py_compile scripts/twinity_elf_sites.py scripts/build-twinity-port.py scripts/unpack-twinity-super.py scripts/wire-twinity-port.py
+      - name: Run hermetic Twinity tests
+        run: python3 scripts/test-twinity-port.py

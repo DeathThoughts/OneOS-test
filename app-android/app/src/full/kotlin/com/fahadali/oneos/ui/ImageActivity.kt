@@ -78,7 +78,7 @@ class ImageActivity : ToolbarActivity() {
             Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*")
-                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/octet-stream", "*/*"))
+                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/zip", "application/octet-stream", "*/*"))
 
         override fun parseResult(resultCode: Int, intent: Intent?): Uri? = if (resultCode == Activity.RESULT_OK) intent?.data else null
     }
@@ -238,6 +238,9 @@ class ImageFragment : CardsFragment() {
                 if (image.googleServices) add(getString(R.string.systems_chip_google))
             }
             Cards.row(systems, GLYPHS[i % GLYPHS.size], Images.systemName(image, p), notes.joinToString(" · "))
+            if (image.id == Images.ID_COLOROS_TWINITY_4C) {
+                CardRows.text(systems, getString(R.string.image_split_archive_instructions, image.gzName), R.style.OneOS_Text_Caption, inList = true)
+            }
         }
 
         // Details: the files' names and labels, the raw findings, what the checks said (the OneOS team's).

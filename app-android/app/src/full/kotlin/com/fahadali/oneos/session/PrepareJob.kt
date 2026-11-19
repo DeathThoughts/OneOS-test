@@ -17,6 +17,7 @@ import com.fahadali.oneos.core.model.Plain
 import com.fahadali.oneos.core.model.PlainMessage
 import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.model.SessionEnv
+import com.fahadali.oneos.core.model.SingleImageZipInputStream
 import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.core.root.RootProbe
 import com.fahadali.oneos.core.root.RootScript
@@ -578,35 +579,42 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                         return if (read(b, 0, 1) < 0) -1 else b[0].toInt() and 0xff
                     }
                 }
-                val gz = GZIPInputStream(counting, 1 shl 16)
+                val entryName = image.zipEntryName
+                val decoded = if (entryName == null) {
+                    GZIPInputStream(counting, 1 shl 16)
+                } else {
+                    SingleImageZipInputStream(counting, entryName, image.rawBytes)
+                }
                 val buf = ByteArray(1 shl 18)
                 val head = ByteArray(2)
-                while (true) {
-                    if (cancelled) throw IOException("stopped")
-                    val n = gz.read(buf)
-                    if (n < 0) break
-                    // ext4 superblock magic 0xEF53, little endian at byte 1080.
-                    for (k in 0 until n) {
-                        val at = rawBytes + k
-                        if (at == Images.EXT4_MAGIC_OFFSET) head[0] = buf[k]
-                        if (at == Images.EXT4_MAGIC_OFFSET + 1) {
-                            head[1] = buf[k]
-                            val magic = (head[0].toInt() and 0xff) or ((head[1].toInt() and 0xff) shl 8)
-                            if (magic != Images.EXT4_MAGIC) throw IOException("not an ext4 image")
+                decoded.use {
+                    while (true) {
+                        if (cancelled) throw IOException("stopped")
+                        val n = decoded.read(buf)
+                        if (n < 0) break
+                        // ext4 superblock magic 0xEF53, little endian at byte 1080.
+                        for (k in 0 until n) {
+                            val at = rawBytes + k
+                            if (at == Images.EXT4_MAGIC_OFFSET) head[0] = buf[k]
+                            if (at == Images.EXT4_MAGIC_OFFSET + 1) {
+                                head[1] = buf[k]
+                                val magic = (head[0].toInt() and 0xff) or ((head[1].toInt() and 0xff) shl 8)
+                                if (magic != Images.EXT4_MAGIC) throw IOException("not an ext4 image")
+                            }
+                            if (at > Images.EXT4_MAGIC_OFFSET + 1) break
                         }
-                        if (at > Images.EXT4_MAGIC_OFFSET + 1) break
+                        rawMd.update(buf, 0, n)
+                        rawBytes += n
+                        if (rawBytes > image.rawBytes) throw IOException("the image unpacks to more than ${image.rawBytes} bytes")
+                        out.write(buf, 0, n)
                     }
-                    rawMd.update(buf, 0, n)
-                    rawBytes += n
-                    if (rawBytes > image.rawBytes) throw IOException("the image unpacks to more than ${image.rawBytes} bytes")
-                    out.write(buf, 0, n)
+                    // The ZIP central directory and any unread trailing bytes count for the archive hash.
+                    do {
+                        val k = counting.read(buf, 0, buf.size)
+                    } while (k >= 0)
+                    out.flush()
+                    progress(gzBytes)
                 }
-                // Whatever follows the gzip stream counts for the file's hash too.
-                do {
-                    val k = counting.read(buf, 0, buf.size)
-                } while (k >= 0)
-                out.flush()
-                progress(gzBytes)
             }
         }
 

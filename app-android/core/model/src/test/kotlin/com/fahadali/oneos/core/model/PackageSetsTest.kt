@@ -17,6 +17,20 @@ class PackageSetsTest {
 
     private fun guards(set: PackageSet) = Bundles.text("packages/${set.id}.guards.txt")
 
+    @Test
+    fun twinityStagingSetMatchesItsPayloadAndGuardPins() {
+        val set = PackageSets.TWINITY_4C_S23
+        assertEquals(Images.ID_COLOROS_TWINITY_4C, set.imageId)
+        assertEquals(37, set.files.size)
+        val manifest = shas(set)
+        val guardsText = guards(set)
+        assertEquals(emptyList<String>(), set.check(manifest))
+        assertEquals(emptyList<String>(), set.checkGuards(guardsText, manifest))
+        assertEquals(ShaList.parse(manifest).entries.getValue("guards.txt"), Hashes.sha256(guardsText.toByteArray()))
+        assertEquals(listOf(PackageSets.TETHERING, PackageSets.WALLPAPER_GRID_RRO), set.omitted)
+        assertTrue(set.hasReturnApp)
+    }
+
     @Test fun fold8StableInheritsEverySharedPayloadAndGuard() {
         val custom = PackageSets.N6_GLOBAL_F8
         assertEquals(n6.files + PackageFile("GlobalVerifiedAddons.tar", FileRole.GUEST_FIX), custom.files)
@@ -47,7 +61,7 @@ class PackageSetsTest {
         assertEquals(Images.ID_FIND_X9U_IN, xin.imageId)
         assertEquals("out/overlays_pixel_f8u_r19", pixel.sourceDir)
         assertEquals(
-            listOf(PackageSets.N6_GLOBAL_F8, n6, PackageSets.X9U_IN_1105_SULTRA, pixel, PackageSets.PIXEL_SULTRA, PackageSets.PIXEL_F8, PackageSets.PIXEL9_SULTRA,
+            listOf(PackageSets.N6_GLOBAL_F8, n6, PackageSets.X9U_IN_1105_SULTRA, PackageSets.TWINITY_4C_S23, pixel, PackageSets.PIXEL_SULTRA, PackageSets.PIXEL_F8, PackageSets.PIXEL9_SULTRA,
                 PackageSets.INFINITYX, PackageSets.HYPER_F8U, PackageSets.NOTHING_F8U, PackageSets.NOTHING_A, PackageSets.OXYGEN16, PackageSets.ORIGINOS, PackageSets.LINEAGE),
             PackageSets.ALL,
         )

@@ -430,24 +430,63 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/qti_builtin_display_pub
 # A dex the added OneOS classes push past 65536 method references (the Pixel 9
 # Pro XL's classes2: 65568) gets them moved to a dex of their own after the
 # last one: one jar, one class loader, so they keep their package access.
-# Builds that fit are unchanged.
-if ! java -jar "$APKTOOL" b -q -o "$WORK/rebuilt.jar" "$WORK/services" 2> "$WORK/apktool.err"; then
+# A dex already at 65535 (ColorOS 17 Twinity's classes.dex) needs the call
+# sites moved too, not just the helper: the new invoke still occupies a method
+# ID in the source dex. If that is not enough, move the largest files from the
+# overflowing dex until it fits. Builds that fit are unchanged.
+SPLIT_DIRS=
+SPLIT_ATTEMPT=0
+while ! java -jar "$APKTOOL" b -q -o "$WORK/rebuilt.jar" "$WORK/services" 2> "$WORK/apktool.err"; do
+    SPLIT_ATTEMPT=$((SPLIT_ATTEMPT + 1))
     FULL=$(sed -n 's/.*Could not smali folder: \(smali[_a-z0-9]*\).*/\1/p' "$WORK/apktool.err" | head -1)
-    if [ -z "$FULL" ] || ! grep -q 'Unsigned short value out of range' "$WORK/apktool.err" ||
-       [ -z "$(cd "$WORK/services/$FULL" && find . -name 'OneOS*.smali')" ]; then
+    if [ "$SPLIT_ATTEMPT" -gt 8 ] || [ -z "$FULL" ] ||
+       ! grep -q 'Unsigned short value out of range' "$WORK/apktool.err"; then
         cat "$WORK/apktool.err" >&2
         exit 1
     fi
     LAST=$(ls -d "$WORK"/services/smali_classes* 2>/dev/null | sed 's/.*smali_classes//' | sort -n | tail -1)
     OWN="smali_classes$((${LAST:-1} + 1))"
-    (cd "$WORK/services/$FULL" && find . -name 'OneOS*.smali') | while read -r f; do
-        mkdir -p "$WORK/services/$OWN/$(dirname "$f")"
-        mv "$WORK/services/$FULL/$f" "$WORK/services/$OWN/$f"
-        echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
-    done
-    java -jar "$APKTOOL" b -q -o "$WORK/rebuilt.jar" "$WORK/services"
-    KEY_DIRS="$KEY_DIRS $OWN"
-fi
+    MOVED=0
+    case " $SPLIT_DIRS " in
+        *" $FULL "*) ;;
+        *)
+            for f in $(cd "$WORK/services/$FULL" &&
+                       { find . -name 'OneOS*.smali';
+                         grep -rl 'OneOS' --include='*.smali' .; } | sort -u); do
+                mkdir -p "$WORK/services/$OWN/$(dirname "$f")"
+                mv "$WORK/services/$FULL/$f" "$WORK/services/$OWN/$f"
+                echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
+                MOVED=$((MOVED + 1))
+            done
+            ;;
+    esac
+    if [ "$MOVED" -eq 0 ]; then
+        # No OneOS helper or call site left: this dex was already full before
+        # our patches. Move up to half of the largest files out of it, so both
+        # sides end up below the limit (moving all of them just moves the
+        # overflow to the new dex).
+        COUNT=$(cd "$WORK/services/$FULL" && find . -name '*.smali' | wc -l)
+        TAKE=$((COUNT / 2))
+        if [ "$TAKE" -lt 1 ]; then TAKE=1; fi
+        if [ "$TAKE" -gt 10 ]; then TAKE=10; fi
+        for f in $(cd "$WORK/services/$FULL" &&
+                   find . -name '*.smali' -printf '%s %p\n' |
+                   sort -nr | head -"$TAKE" | cut -d' ' -f2-); do
+            mkdir -p "$WORK/services/$OWN/$(dirname "$f")"
+            mv "$WORK/services/$FULL/$f" "$WORK/services/$OWN/$f"
+            echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
+            MOVED=$((MOVED + 1))
+        done
+    fi
+    if [ "$MOVED" -eq 0 ]; then
+        cat "$WORK/apktool.err" >&2
+        exit 1
+    fi
+    SPLIT_DIRS="$SPLIT_DIRS $OWN"
+done
+for d in $SPLIT_DIRS; do
+    KEY_DIRS="$KEY_DIRS $d"
+done
 cp "$WORK/services.jar" "$OUT/services_patched.jar"
 for d in $(printf '%s\n' "$DISPLAY_DIR" $KEY_DIRS | sort -u); do
     DEX="$(echo "$d" | sed 's/^smali_//; s/^smali$/classes/').dex"
@@ -1148,9 +1187,11 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
 # below: the Find N6 and Find X9 Ultra CN images share one binary; the Find X9
 # Ultra IN image (CPH2841IN) has the same code 0x5b0 later (0x471178, after
 # AIBinder_getExtension, before IQtiComposer3Client::fromBinder), same bytes.
+# Newer builds may instantiate the client more than once and keep the out
+# pointer in another register; a tuple value patches every hash-pinned guard.
 "$DEBUGFS" -R "dump /system/bin/surfaceflinger $WORK/surfaceflinger" "$IMG" 2>/dev/null
 python3 -I - "$WORK/surfaceflinger" "$OUT/surfaceflinger_patched" <<'PYEOF'
-import hashlib, os, sys
+import hashlib, os, struct, sys
 src, dst = sys.argv[1], sys.argv[2]
 data = bytearray(open(src, "rb").read())
 SITES = {"9896c0cba131": 0x470bc8, "a09087821954": 0x471178,
@@ -1166,7 +1207,11 @@ SITES = {"9896c0cba131": 0x470bc8, "a09087821954": 0x471178,
          # OnePlus OxygenOS 16 (CPH2745, Android 16): a status check (tbnz) comes between the
          # load and the cbz; cbz x8 -> +0x4c at 0x5d9bb8, the same bytes (code segment 0x2a0000,
          # file offset == vaddr).
-         "b8dc0a4def28": 0x5d9bb8}
+         "b8dc0a4def28": 0x5d9bb8,
+         # ColorOS 17 (OnePlus 13T, OneOS Twinity4c, SDK 37): the reviewed
+         # bl AIBinder_getExtension / ldr x8, [sp, #8] / cbz x8 -> +0x4c at
+         # 0x470a58; file offset == vaddr in the 0x1d0000 LOAD segment.
+         "16ab5b601004": 0x470a58}
 # vivo OriginOS 17 (MediaTek, X500 Pro Max CP2A.260605.016): after init, main()
 # registers MediaTek's MtkSF_ext as vendor.mediatek.framework.mtksf_ext.IMtkSF_ext/
 # default, a VINTF-stable binder only the guest's own manifest declares. One UI's
@@ -1202,21 +1247,35 @@ if mtk:
     sys.exit(0)
 if b"IMtkSF_ext" in data:
     sys.exit("surfaceflinger: a MediaTek build with MtkSF_ext this was not written against, not patching")
-off = SITES.get(hashlib.sha1(data).hexdigest()[:12])
-if off is None and b"IQtiComposer3Client" not in data:
+site = SITES.get(hashlib.sha1(data).hexdigest()[:12])
+if site is None and b"IQtiComposer3Client" not in data:
     # Google's own build (Pixel image): no QTI composer client to skip.
     if os.path.exists(dst):
         os.remove(dst)
     print("surfaceflinger: no QTI composer client in this build, not patched (the image's runs)")
     sys.exit(0)
-if off is None:
+if site is None:
     sys.exit("surfaceflinger: unexpected build, not patching")
-old, new = bytes.fromhex("680200b4"), bytes.fromhex("13000014")
-if data[off:off + 4] != old:
-    sys.exit("surfaceflinger: unexpected bytes at %#x, not patching" % off)
-data[off:off + 4] = new
+offsets = site if isinstance(site, (tuple, list)) else (site,)
+for off in offsets:
+    old_word = struct.unpack_from("<I", data, off)[0]
+    if old_word & 0x7e000000 != 0x34000000:
+        sys.exit("surfaceflinger: expected a CBZ/CBNZ guard at %#x, not patching" % off)
+    if old_word & 0x01000000:
+        # CBNZ enters the extension block; the next instruction is the
+        # unconditional branch over it. A NOP leaves through that branch.
+        if struct.unpack_from("<I", data, off + 4)[0] & 0x7c000000 != 0x14000000:
+            sys.exit("surfaceflinger: expected a skip branch after CBNZ at %#x, not patching" % off)
+        new_word = 0xd503201f
+    else:
+        imm19 = (old_word >> 5) & 0x7ffff
+        if imm19 & 0x40000:
+            imm19 -= 0x80000
+        new_word = 0x14000000 | (imm19 & 0x03ffffff)
+    data[off:off + 4] = struct.pack("<I", new_word)
 open(dst, "wb").write(data)
-print("built %s (QTI composer client skipped)" % dst)
+print("built %s (QTI composer client skipped at %s)" %
+      (dst, ", ".join("%#x" % off for off in offsets)))
 PYEOF
 [ ! -f "$OUT/surfaceflinger_patched" ] || chmod 755 "$OUT/surfaceflinger_patched"
 

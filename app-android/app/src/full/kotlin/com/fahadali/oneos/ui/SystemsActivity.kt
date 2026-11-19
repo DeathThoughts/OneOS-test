@@ -98,6 +98,18 @@ open class SystemsActivity : ToolbarActivity() {
 
     /** "I have the file" of [imageId] (null: whichever system it is). */
     fun choose(imageId: String?) {
+        if (imageId == Images.ID_COLOROS_TWINITY_4C) {
+            val image = Images.COLOROS_TWINITY_4C
+            AlertDialog.Builder(this).setTitle(image.nameWithVariant)
+                .setMessage(getString(R.string.image_split_archive_instructions, image.gzName))
+                .setPositiveButton(R.string.image_pick_title) { _, _ -> pickArchive(imageId) }
+                .setNegativeButton(android.R.string.cancel, null).show()
+        } else {
+            pickArchive(imageId)
+        }
+    }
+
+    private fun pickArchive(imageId: String?) {
         pickFor = imageId
         try {
             pick.launch(Unit)
@@ -158,7 +170,7 @@ internal object SystemsNav {
             Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*")
-                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/octet-stream", "*/*"))
+                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/zip", "application/octet-stream", "*/*"))
 
         override fun parseResult(resultCode: Int, intent: Intent?): Uri? = if (resultCode == Activity.RESULT_OK) intent?.data else null
     }
@@ -445,6 +457,7 @@ class SystemsFragment : Fragment() {
                 ?: rememberedImage?.takeIf { it.family == family && it.id == setUpId }
                 ?: available.firstOrNull { it.family == family } ?: fallback
         val color = image(com.fahadali.oneos.core.model.SystemFamily.COLOROS, Images.FIND_N6)
+        val twinity = available.firstOrNull { it.id == Images.ID_COLOROS_TWINITY_4C }
         val pixel = image(com.fahadali.oneos.core.model.SystemFamily.PIXEL, Images.PIXEL_YOGI)
         val infinity = image(com.fahadali.oneos.core.model.SystemFamily.INFINITYX, Images.INFINITYX)
         val hyper = image(com.fahadali.oneos.core.model.SystemFamily.HYPEROS, Images.HYPEROS_LHASA)
@@ -462,6 +475,7 @@ class SystemsFragment : Fragment() {
             CatalogEntry(infinity.name, infinity, R.drawable.os_infinity, available.any { it.id == infinity.id }),
             CatalogEntry(hyper.name, hyper, R.drawable.os_hyperos, available.any { it.id == hyper.id }),
             CatalogEntry(color.name, color, R.drawable.os_coloros, available.any { it.id == color.id }),
+            twinity?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
             CatalogEntry(nothing.name, nothing, R.drawable.os_nothing, available.any { it.id == nothing.id }),
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
         )
@@ -611,7 +625,7 @@ class SystemsFragment : Fragment() {
                     }
                     else -> {
                         menu.add(R.string.systems_download).setOnMenuItemClickListener { SystemsNav.open(host, image.mirrorUrl); true }
-                        image.downloadUrl?.let { drive ->
+                        image.downloadUrl?.takeUnless { it == image.mirrorUrl }?.let { drive ->
                             menu.add(R.string.systems_download_drive).setOnMenuItemClickListener { SystemsNav.open(host, drive); true }
                         }
                         menu.add(R.string.systems_have_file).setOnMenuItemClickListener { (host as? SystemsActivity)?.choose(image.id); true }
