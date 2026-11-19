@@ -3381,7 +3381,14 @@ fi
 #   docs/dead-ends.md). RESTRICT_PKGS is empty, so run_restrict only undoes what OneOS
 #   recorded in /data/oneos_oplus_restricted (appops default, bucket active) on the next
 #   switch; com.oplus.cosa and com.oplus.statistics.rom (135 callers) stay enabled and
-#   unrestricted. An owner's own disabled/restricted
+#   unrestricted.
+#   HeyTap (OPPO account services), owner's decision of 2026-11-19 after sessions
+#   22343aacdd4e1d6c, 161a843fbaddcd7a and f8c0108ef1bea94a: com.heytap.market (OPPO App
+#   Market; 2980/4305/5937 log lines a session, 487/1027/1391 E lines of rate-limited
+#   retries to com.heytap.htms, 89.6% and 92.8% CPU at 03:46:26 and 03:49:26; Play Store
+#   is there), com.heytap.cloud (needs a HeyTap account) and com.heytap.mcs (OPPO push;
+#   :appservice, :statistics and :biz.message died and respawned 8, 5 and 2 times in
+#   161a843fbaddcd7a) are disabled the same way. com.heytap.htms stays. An owner's own disabled/restricted
 #   state is never recorded or undone; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
 #   unrestricts only what OneOS recorded.
 #   A package the owner had disabled (or already restricted) is never listed or touched,
@@ -3394,7 +3401,7 @@ if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
 BLOAT_MODE=${BLOAT_MODE:-off}
 TELE_PKGS="com.oplus.onetrace com.oplus.olc"
 TELE_REC=/data/oneos_oplus_telemetry_off
-BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota com.oplus.games com.nearme.gamecenter com.heytap.quickgame"
+BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota com.oplus.games com.nearme.gamecenter com.heytap.quickgame com.heytap.market com.heytap.cloud com.heytap.mcs"
 BLOAT_REC=/data/oneos_oplus_bloat_off
 RESTRICT_PKGS=""
 RESTRICT_REC=/data/oneos_oplus_restricted
