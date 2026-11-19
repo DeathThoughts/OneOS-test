@@ -44,7 +44,7 @@ InstallService installs apps by itself (auto_install) into /data/app; with
 reached from onBootPhase, not from onStart, and it is what crashed the guest's
 system_server on the S25 Ultra and S25 -- see the PROINSTALLER table).
 
-Usage: miui_guards.py [--proinstaller | --variant popsicle] <apktool decoded jar directory>
+Usage: miui_guards.py [--proinstaller | --variant {popsicle,hongkong}] <apktool decoded jar directory>
 Prints the smali_* directories (dex files) it changed, one per line.
 """
 import argparse
@@ -87,7 +87,8 @@ POWERCTL_CLASS = "com/android/server/RescuePartyImpl"
 POWERCTL = '    const-string/jumbo v1, "sys.powerctl"'
 POWERCTL_NEW = '    const-string/jumbo v1, "oneos.guest.powerctl"'
 VOLD_CLASS = "com/android/server/MiuiGcImproveImpl"
-VOLD_CALL = re.compile(r"^\s*invoke-interface \{v\d+, p\d+\}, Landroid/os/IVold;->setDiscardIoAwareGran\(I\)V\n", re.M)
+# HyperOS OS4.0 lhasa (CN): setDiscardIoAwareGran(I)V with an argument; OS4.0.5 Global (hongkong, 11-19): ()V.
+VOLD_CALL = re.compile(r"^\s*invoke-interface \{v\d+(?:, [vp]\d+)?\}, Landroid/os/IVold;->setDiscardIoAwareGran\((?:I)?\)V\n", re.M)
 BOOTANIM_CLASS = "com/android/server/power/ShutdownThreadImpl"
 BOOTANIM = re.compile(r'^\s*const-string(?:/jumbo)? (v\d+), "service\.bootanim\.exit"\n\n?'
                       r'\s*const-string (v\d+), "0"\n\n?'
@@ -164,10 +165,9 @@ def return_at_entry(smali, header, kind, cls):
 # callers must handle it.
 OEMNETD_PROXY = "com/android/internal/net/IOemNetd$Stub$Proxy"
 OEMNETD_PROXY_KEEP = ("<init>(", "asBinder(", "getInterfaceDescriptor(", "isAlive(")
-OEMNETD_PROXY_METHODS = 54
+OEMNETD_PROXY_METHODS = {"lhasa": 54, "hongkong": 48, "popsicle": 48}
 # The Popsicle proxy exposes a different method set from the Xiaomi 18 Fold.
 # Check the sorted headers before blocking its transactions.
-POPSICLE_PROXY_METHODS = 48
 POPSICLE_PROXY_HEADERS_SHA256 = "de1e2b7280c6b7082ec02587c6671e9b2a092fc20334f64ffd54dca15541d12e"
 OEMNETD_CLASS = "com/android/server/net/MiuiNetworkManagementService"
 # The methods that use IOemNetd (25 calls on mNetd, 3 by reflection on
@@ -250,7 +250,7 @@ def main(root, proinstaller=False, variant="lhasa"):
     if not any("isAlive()Z" in h for h in headers):
         sys.exit(f"{OEMNETD_PROXY}: no isAlive()")
     headers = [h for h in headers if not any(k in h for k in OEMNETD_PROXY_KEEP)]
-    expected = POPSICLE_PROXY_METHODS if variant == "popsicle" else OEMNETD_PROXY_METHODS
+    expected = OEMNETD_PROXY_METHODS[variant]
     if len(headers) != expected:
         sys.exit(f"{OEMNETD_PROXY}: {len(headers)} methods to block, expected {expected}")
     if variant == "popsicle":
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--proinstaller", action="store_true")
-    mode.add_argument("--variant", choices=("popsicle",), default="lhasa")
+    mode.add_argument("--variant", choices=("popsicle", "hongkong"), default="lhasa")
     parser.add_argument("root", metavar="<decoded jar directory>")
     args = parser.parse_args()
     main(args.root, args.proinstaller, args.variant)
