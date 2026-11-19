@@ -86,6 +86,7 @@ for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetoot
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
          media/0/Android media/0/Android/data media/0/Android/media media/0/Android/obb \
+         oneos_miui_telemetry.sh \
          oneos_sysui_compile.sh oneos_oplus_telemetry.sh; do
     no_symlink "$s"
 done
@@ -3351,6 +3352,72 @@ PANO
         rm -f "$STAGE/data/oplus/os/config/sys_global_uni_render_list.xml" 2>/dev/null
         echo "ColorOS UniRender: off on this $(getprop ro.soc.manufacturer) phone (${UR:+bound over$UR}${UR:-no switch list in the image})"
     fi
+fi
+# Xiaomi's analytics app in HyperOS guests. Owner's decision of 2026-11-19: com.miui.analytics
+# is turned off for user 0 like the ColorOS telemetry apps below, and recorded in
+# /data/oneos_miui_telemetry_off. There is NO session log for it yet and it has NOT been tried
+# on a phone: the package is listed because it is Xiaomi's analytics uploader, not because a
+# log showed it misbehaving. Only com.miui.analytics is listed on purpose, the list is
+# deliberately conservative. Joyose (com.xiaomi.joyose, thermal/performance), MSA and
+# MiuiDaemon are NOT touched. ONEOS_GUEST_MIUI_TELEMETRY=1 turns back on only the recorded
+# packages. A package the owner had disabled is never listed or touched.
+rm -f "$STAGE/data/oneos_miui_telemetry.sh"
+if [ -f "$GUEST_SYSTEM_EXT/framework/miui-services.jar" ]; then
+    if [ "${ONEOS_GUEST_MIUI_TELEMETRY:-0}" = 1 ]; then TELE_MODE=keep; else TELE_MODE=off; fi
+    { echo "TELE_MODE=$TELE_MODE"; cat <<'MIUITELE'
+TELE_PKGS="com.miui.analytics"
+TELE_REC=/data/oneos_miui_telemetry_off
+log() { echo "$(date +%T) $*"; }
+is_pkg() { case "$1" in ''|*[!A-Za-z0-9._]*) return 1 ;; esac; }
+drop_link() { if [ -L "$1" ]; then rm -f "$1"; log "$1 was a symlink; removed, not used"; fi; }
+disable_pkg_list() {
+    _pkgs=$1; _rec=$2; _label=$3
+    _ok=0; _bad=0
+    _dis=$(timeout 30 pm list packages -d 2>/dev/null </dev/null)
+    for _p in $_pkgs; do
+        if [ -z "$(timeout 30 pm path "$_p" 2>/dev/null </dev/null)" ]; then
+            log "$_p: not installed"
+        elif echo "$_dis" | grep -qxF "package:$_p"; then
+            log "$_p: already off"
+        elif _out=$(timeout 30 pm disable-user --user 0 "$_p" 2>&1 </dev/null); then
+            drop_link "$_rec"
+            if ! [ -L "$_rec" ] && ! { [ -f "$_rec" ] && grep -qxF "$_p" "$_rec"; }; then echo "$_p" >> "$_rec"; fi
+            _ok=$((_ok + 1)); log "$_p: turned off"
+        else
+            _bad=$((_bad + 1)); log "$_p: pm disable-user failed: $_out"
+        fi
+    done
+    log "$_label: $_ok turned off, $_bad failed"
+}
+run_telemetry() {
+    drop_link "$TELE_REC"
+    drop_link "$TELE_REC.tmp"
+    ok=0; bad=0
+    if [ "$TELE_MODE" = off ]; then
+        disable_pkg_list "$TELE_PKGS" "$TELE_REC" "Xiaomi telemetry apps"
+    else
+        if [ -f "$TELE_REC" ]; then
+            while IFS= read -r p || [ -n "$p" ]; do
+                # Keep stdin on /dev/null so the record loop is never drained
+                case " $TELE_PKGS " in *" $p "*) ;; *) continue ;; esac
+                if out=$(timeout 30 pm enable "$p" 2>&1 </dev/null); then
+                    ok=$((ok + 1)); log "$p: turned back on"
+                else
+                    bad=$((bad + 1)); log "$p: pm enable failed: $out"
+                fi
+            done < "$TELE_REC"
+            [ "$bad" = 0 ] && rm -f "$TELE_REC"
+        fi
+        log "Xiaomi telemetry apps: kept, $ok turned back on, $bad failed"
+    fi
+}
+run_telemetry
+exit 0
+MIUITELE
+    } > "$STAGE/data/oneos_miui_telemetry.sh"
+    chmod 644 "$STAGE/data/oneos_miui_telemetry.sh"
+    $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_miui_telemetry.sh" 2>/dev/null || true
+    echo "HyperOS Xiaomi apps: telemetry=$TELE_MODE (ONEOS_GUEST_MIUI_TELEMETRY=${ONEOS_GUEST_MIUI_TELEMETRY:-0}; miui_telemetry.log)"
 fi
 # OPPO's trace/log uploaders and Phase 1 bloat/background-CPU apps in ColorOS guests.
 # - Telemetry (owner, 2026-11-17): S25 Ultra, coloros17-findx9u-in-1105, sessions

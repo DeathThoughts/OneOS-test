@@ -3896,6 +3896,12 @@ while true; do
                 echo '[UI Activator] OPPO telemetry apps: started (oplus_telemetry.log)'
             fi
 
+            # HyperOS: Xiaomi's analytics app off (or back on), 2026-11-19; guest_prepare.sh wrote the script.
+            if [ -f \"$STAGE/data/oneos_miui_telemetry.sh\" ]; then
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_miui_telemetry.sh >\"$STAGE/miui_telemetry.log\" 2>&1 </dev/null &
+                echo '[UI Activator] Xiaomi telemetry apps: started (miui_telemetry.log)'
+            fi
+
             # ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN, session 146de99d: it ran
             # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it runs
             # in the background, so Home is never held up, and saves its marker and log in the guest data
