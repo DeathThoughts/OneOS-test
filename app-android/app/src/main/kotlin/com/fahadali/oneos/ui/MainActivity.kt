@@ -4,9 +4,11 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import com.fahadali.oneos.BuildConfig
 import com.fahadali.oneos.R
 
 /**
@@ -32,6 +34,13 @@ class MainActivity : ToolbarActivity() {
         if (isFinishing) return
         setExpandedSubtitle(getString(R.string.home_subtitle))
         EditionHome.created(this)
+        if (BuildConfig.DEBUG && savedInstanceState == null) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.unofficial_debug_title)
+                .setMessage(R.string.unofficial_debug_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean = EditionHome.createMenu(this, menu) || super.onCreateOptionsMenu(menu)
