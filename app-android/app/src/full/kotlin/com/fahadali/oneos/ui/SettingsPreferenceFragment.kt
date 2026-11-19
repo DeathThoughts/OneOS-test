@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import com.fahadali.oneos.BuildConfig
 import com.fahadali.oneos.session.RemoveJob
 import com.fahadali.oneos.R
+import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.root.OneUiAlbum
 import com.fahadali.oneos.session.LogJob
 import com.fahadali.oneos.session.OneUiMedia
@@ -151,7 +152,7 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
         toggle(experimental, R.string.advanced_sec_ims_title, R.string.advanced_sec_ims_summary, SessionPrefs.secIms(ctx)) { SessionPrefs.setSecIms(ctx, it) }
         toggle(experimental, R.string.advanced_edm_stub_title, R.string.advanced_edm_stub_summary, SessionPrefs.edmStub(ctx)) { SessionPrefs.setEdmStub(ctx, it) }
         toggle(experimental, R.string.verbose_boot_title, R.string.verbose_boot_summary, SessionPrefs.verboseBoot(ctx)) { SessionPrefs.setVerboseBoot(ctx, it) }
-        if (BuildConfig.DEBUG && Build.MODEL.startsWith("SM-S911")) {
+        if (BuildConfig.DEBUG && listOf(Profiles.S_8550, Profiles.A55).any { Build.MODEL.startsWith(it.modelPrefix) }) {
             experimental.addDescribedPreference(SwitchPreferenceCompat(ctx).apply {
                 key = "setting_guest_vulkan"
                 setTitle(R.string.guest_vulkan_title)

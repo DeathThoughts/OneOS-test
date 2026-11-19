@@ -32,23 +32,32 @@ public final class PatchDownloadTest {
 
         var debug = PatchDownload.Channel.DEBUG;
         var release = PatchDownload.Channel.RELEASE;
+        var candidate = new GuestStartPatch.Compatibility("debug", 165, "coloros17-findx9u-in-1105",
+                "1".repeat(64), "2".repeat(64));
+        var otherImage = new GuestStartPatch.Compatibility("debug", 165, "other-image",
+                "1".repeat(64), "2".repeat(64));
+        if (!debug.url(candidate).getPath().endsWith("/oneos-patch-feed-debug/165/coloros17-findx9u-in-1105/guest-start.patch")
+                || debug.url(candidate).getPath().equals(debug.url(otherImage).getPath())
+                || !release.url(candidate).getPath().endsWith("/oneos-patch-feed-release/guest-start.patch")) {
+            throw new AssertionError("unexpected patch feed paths");
+        }
         var responses = new ArrayDeque<>(List.of(429, 500, 503, 500, 200));
         PatchDownload.Network network = url -> new Reply(url, responses.remove());
-        refuses(new PatchDownload(network), debug, throttle, "patch feed is rate limited");
+        refuses(new PatchDownload(network), debug, throttle, candidate, "patch feed is rate limited");
         if (throttle.blockedUntil(debug) <= System.currentTimeMillis() || responses.size() != 4) {
             throw new AssertionError("missing rate limit");
         }
-        refuses(new PatchDownload(network), debug, throttle, "patch feed is rate limited");
-        if (responses.size() != 4 || debug.url().toExternalForm().equals(release.url().toExternalForm())) {
-            throw new AssertionError("cooldown made a request or channels share a feed");
+        refuses(new PatchDownload(network), debug, throttle, candidate, "patch feed is rate limited");
+        if (responses.size() != 4) {
+            throw new AssertionError("cooldown made a request");
         }
-        refuses(new PatchDownload(network), release, throttle, "patch feed returned HTTP 500");
+        var binding = new GuestStartPatch.Compatibility("release", 159, "test", "1".repeat(64), "2".repeat(64));
+        refuses(new PatchDownload(network), release, throttle, binding, "patch feed returned HTTP 500");
         if (responses.size() != 1) throw new AssertionError("wrong transient retry count");
-        refuses(new PatchDownload(network), release, throttle, "patch transfer failed");
+        refuses(new PatchDownload(network), release, throttle, binding, "patch transfer failed");
         if (!responses.isEmpty()) throw new AssertionError("truncated response was not read");
 
         var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-        var binding = new GuestStartPatch.Compatibility("release", 159, "test", "1".repeat(64), "2".repeat(64));
         byte[] envelope = GuestStartPatch.sign(new byte[]{1, 2, 3}, keys.getPrivate(), binding, 1);
         PatchDownload good = new PatchDownload(url -> new Reply(url, 200, envelope, envelope.length));
         if (!Arrays.equals(good.download(release, throttle, keys.getPublic(), binding, 0), envelope)) {
@@ -65,9 +74,10 @@ public final class PatchDownloadTest {
     }
 
     private static void refuses(PatchDownload download, PatchDownload.Channel channel,
-                                PatchDownload.Throttle throttle, String expected) throws Exception {
+                                PatchDownload.Throttle throttle, GuestStartPatch.Compatibility binding,
+                                String expected) throws Exception {
         try {
-            download.download(channel, throttle, null, null, 0);
+            download.download(channel, throttle, null, binding, 0);
         } catch (IOException error) {
             if (expected.equals(error.getMessage())) return;
             throw error;

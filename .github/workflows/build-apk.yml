@@ -239,7 +239,8 @@ jobs:
           ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
-            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments'
+            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \
+            --tests '*StageScriptTest.a55VulkanUsesTheColorOsStage'
 
       - name: Verify signed guest startup patch lifecycle
         run: |
@@ -260,6 +261,12 @@ jobs:
 
       - name: Verify guest media mount safety
         run: python3 scripts/test-guest-media-share.py
+
+      - name: Verify guest audio, Bluetooth, and camera policy
+        run: |
+          python3 scripts/test-guest-audio-policy.py
+          python3 scripts/test-oplus-bt-origin.py
+          python3 scripts/test-samsung-camera-bind.py
 
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.

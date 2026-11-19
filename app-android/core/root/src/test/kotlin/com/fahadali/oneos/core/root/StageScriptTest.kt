@@ -1780,7 +1780,7 @@ class StageScriptTest {
             refused(s.launch(guestVulkan = guestVulkan), "test root: every launch check passed")
         }
         refused(s.launch(mode = "dry", guestVulkan = "1"),
-            "guest Vulkan requires a Galaxy S23 ColorOS 17 session")
+            "guest Vulkan requires a Galaxy S23 or A55 ColorOS 17 session")
         val before = File(fr.stage, "session.env").readText()
         org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(patchAuto = "2") }
         org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(guestVulkan = "2") }
@@ -1788,6 +1788,8 @@ class StageScriptTest {
         val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500")
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "2")).isNotEmpty())
+        // The full 14-argument launch is valid; one more argument is not.
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0")).isEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0", "0")).isNotEmpty())
     }
 
@@ -1808,6 +1810,22 @@ class StageScriptTest {
         val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500", "0", "0")
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "1").isEmpty())
+    }
+
+    @Test
+    fun a55VulkanUsesTheColorOsStage() = eachShell { fr ->
+        val profile = Profiles.A55
+        fr.props["ro.product.model"] = "SM-A556B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val colorOs = Stager(fr, profile, Images.ID_FIND_X9U_IN_1105)
+        colorOs.prepare()
+        val launch = arrayOf("session", colorOs.code, "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500", "1", "1")
+        refused(fr.run(RootScript.Verb.LAUNCH, *launch), "test root: every launch check passed")
+        val hyperOs = Stager(fr, profile, Images.ID_HYPEROS_LHASA)
+        hyperOs.prepare("keep")
+        refused(fr.run(RootScript.Verb.LAUNCH, *launch), "guest Vulkan requires a Galaxy S23 or A55 ColorOS 17 session")
     }
 
     @Test

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""MediaTek ColorOS Bluetooth disables incompatible quality reports without changing A2DP behaviour."""
+"""MediaTek ColorOS Bluetooth disables incompatible quality reports without changing A2DP behaviour; every
+other SoC, including the Galaxy A55's Exynos 1480, is left alone unless ONEOS_GUEST_BT_ORIGIN=1 asks for it."""
 from pathlib import Path
 import os
 import subprocess
@@ -11,6 +12,7 @@ SOURCE = (ROOT / 'switcher/assets/guest_props.sh').read_text()
 START = '    BTO=persist.sys.oplus.bt.use_origin\n'
 CODE = START + SOURCE.split(START, 1)[1].split('    # Power key stall (run 32:', 1)[0]
 KEY = 'persist.sys.oplus.bt.use_origin'
+OPT_IN = {'ONEOS_GUEST_BT_ORIGIN': '1'}
 BQR = 'persist.bluetooth.bqr.event_mask'
 G99 = 'MT6789: disable incompatible Bluetooth quality reports without changing A2DP'
 
@@ -71,6 +73,15 @@ class OplusBtOrigin(unittest.TestCase):
         self.assertEqual(f'guest_props: {KEY}=false for the session ({reason})\n'
                          f'guest_props: {BQR}=0 for the session ({reason})\n', out)
 
+    def test_the_galaxy_a55s_exynos_is_left_alone_without_opt_in(self):
+        # PR #26: the A55's Exynos 1480 has none of the MediaTek parser's BQR
+        # problem. Its Bluetooth stays exactly as the image ships it, and the
+        # explicit override still works when a diagnostic session asks for it.
+        self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(soc='s5e8845'))
+        self.assertEqual((f'guest_props: {KEY}=true for the session (ONEOS_GUEST_BT_ORIGIN=1)\n',
+                          f'ro.build.id=X\n{KEY}=true\n', '', {}),
+                         self.run_case(soc='s5e8845', env=OPT_IN))
+
     def test_other_phones_and_other_systems_are_left_alone(self):
         # Exynos and Qualcomm: OPPO's parser matches their BQR layout, no crash.
         # Samsung-style board names on platform/hardware (A25/A33) must not arm
@@ -128,10 +139,12 @@ class OplusBtOrigin(unittest.TestCase):
                          self.run_case(soc='SM8850', env={'ONEOS_GUEST_BT_ORIGIN': '0'}))
 
     def test_the_override_sets_it_on_any_phone_with_a_coloros_guest(self):
-        out, new, ovr, now = self.run_case(soc='SM8850', env={'ONEOS_GUEST_BT_ORIGIN': '1'})
-        self.assertEqual((f'guest_props: {KEY}=true for the session (ONEOS_GUEST_BT_ORIGIN=1)\n', f'ro.build.id=X\n{KEY}=true\n'),
-                         (out, new))
-        self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(soc='SM8850', oplus=0, env={'ONEOS_GUEST_BT_ORIGIN': '1'}))
+        for soc in ('SM8850', 's5e8845', 'MT6789'):
+            with self.subTest(soc):
+                out, new, ovr, now = self.run_case(soc=soc, env=OPT_IN)
+                self.assertEqual((f'guest_props: {KEY}=true for the session (ONEOS_GUEST_BT_ORIGIN=1)\n',
+                                  f'ro.build.id=X\n{KEY}=true\n', '', {}), (out, new, ovr, now))
+        self.assertEqual(('', 'ro.build.id=X\n', '', {}), self.run_case(soc='s5e8845', oplus=0, env=OPT_IN))
 
     def test_one_ui_values_are_overridden_and_restorable(self):
         # Left behind by a session that never returned: then it is One UI's to get back.

@@ -49,6 +49,9 @@ public final class GuestStartPatch {
             this.imageSha256 = imageSha256;
             this.baseSha256 = baseSha256;
         }
+
+        long hostBuild() { return hostBuild; }
+        String imageId() { return imageId; }
     }
 
     public static final class Verified {

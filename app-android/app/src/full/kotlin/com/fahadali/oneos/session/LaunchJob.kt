@@ -241,8 +241,8 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
             SessionPrefs.Launch(sid, dryRun, profile.id, image.id, System.currentTimeMillis(), SystemClock.elapsedRealtime(), logsCollected = false),
         )
         update(state.copy(detail = "Root is checking everything again and starting the switch…"))
-        val guestVulkan = BuildConfig.DEBUG && !dryRun && profile.id == Profiles.ID_S_8550 &&
-            image.id == Images.ID_FIND_X9U_IN_1105 && SessionPrefs.guestVulkan(app)
+        val guestVulkan = BuildConfig.DEBUG && !dryRun && image.id == Images.ID_FIND_X9U_IN_1105 &&
+            (profile.id == Profiles.ID_S_8550 || profile.id == Profiles.ID_A55) && SessionPrefs.guestVulkan(app)
         val reply = RootVerbs.run(
             app, RootScript.Verb.LAUNCH,
             listOf(

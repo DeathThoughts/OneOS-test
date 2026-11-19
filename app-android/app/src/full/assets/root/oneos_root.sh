@@ -1377,8 +1377,12 @@ do_launch() {
     [ ! -e "$STAGE/.oneos_update" ] || refuse "the installed system update did not finish: retry the update"
     read_marker || refuse "the stage has no OneOS marker: prepare first"
     [ "$M_CODE" = "$code" ] || refuse "prepared by app build $M_CODE, this is build $code: prepare again"
-    [ "$guestvulkan" = 0 ] || [ "$mode:$M_PROFILE:$M_IMAGE" = "session:s-8550:coloros17-findx9u-in-1105" ] ||
-        refuse "guest Vulkan requires a Galaxy S23 ColorOS 17 session"
+    if [ "$guestvulkan" = 1 ]; then
+        case "$mode:$M_PROFILE:$M_IMAGE" in
+            session:s-8550:coloros17-findx9u-in-1105|session:a55:coloros17-findx9u-in-1105) ;;
+            *) refuse "guest Vulkan requires a Galaxy S23 or A55 ColorOS 17 session" ;;
+        esac
+    fi
     pinfo=$(profile_info "$M_PROFILE") || refuse "the stage is prepared for $M_PROFILE, which this build does not switch"
     # The staged image decides the set: the marker's must be that image's on this phone.
     [ -n "$M_SET" ] && [ "$(pair_set "$M_PROFILE" "$M_IMAGE")" = "$M_SET" ] ||
