@@ -257,6 +257,8 @@ case "${ONEOS_HEAT_CAP_CPU:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP_CPU=$ONEOS_
 # oneos_root.sh unsets every other ONEOS_* variable.
 case "${ONEOS_GUEST_BOOST:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_BOOST=$ONEOS_GUEST_BOOST (0 or 1)" ;; esac
 case "${ONEOS_FULL_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_FULL_LOGS=$ONEOS_FULL_LOGS (0 or 1)" ;; esac
+# Silence the noise tags in the logcat capture (LOGCAT_FILTER, below): 0 or 1, unset meaning 1.
+case "${ONEOS_LOG_FILTER:-1}" in 0|1) ;; *) refuse "ONEOS_LOG_FILTER=$ONEOS_LOG_FILTER (0 or 1)" ;; esac
 # Quiet guest logs with Full session logs off (guest_props.sh, log.tag=W): 0
 # or 1, unset meaning 1. Only the adb loop sets it: the app's session.env has
 # no such key and oneos_root.sh unsets every other ONEOS_* variable.
@@ -905,6 +907,31 @@ echo "preflight: guest baseline done $(date +%T)"
 # guest's boot) after about 26 minutes. The watcher's 90 s round also keeps
 # the files of the boot in $LOGS/head (hard links, below).
 LOGS=/data/local/tmp/oneos_logs
+# Logcat filterspecs for the two captures below (the one this session starts and the
+# one the guest's OneOS app turns on mid-session), defined once so they cannot drift.
+# Galaxy S25 Ultra, ColorOS 17 guest, sessions 22343aacdd4e1d6c, 161a843fbaddcd7a and
+# f8c0108ef1bea94a (2026-11-18/19): the guest logs 210-420k lines/min at boot and
+# 20-150k/min later, so a 32 MB file lasted 30-60 s, the report (head/, the newest
+# files, crash files, the guest's last two) missed most of the middle of a session and
+# logd took about 19% of a core. A count of the captured guest windows showed these
+# tags are pure noise: silenced, they remove 17% / 18% / 37% of the lines (s1/s2/s3).
+# QuickStartRUSHelper (RUS list parse, 11-12k lines/session), SettingsState (E "invalid
+# flag name", 6-8k), OplusGcSupressionHelper (15-line stack per app start), minksocket
+# (Samsung host secure-world IPC), SurfaceControl (launcher setMatrix), DigitalClock,
+# the blur/render tags, SQLiteLog, Finsky, SG (pantanal UmsScanner), HYPER-HAL (Samsung
+# host perf HAL) and the other Oplus helpers. Nothing used for diagnosis is listed
+# (MediaProvider, StorageManager*, ActivityManager, WindowManager, Keyguard, Biometric,
+# camera, vold, init, OneOS*, audio...): '*:V' keeps every other tag. The specs go after
+# -f/-r/-n so return_to_oneui.sh's pkill '^logcat .*/oneos_logs/boot.log' still matches.
+# ONEOS_LOG_FILTER=0 (adb loop only, like ONEOS_GUEST_BOOST) captures everything again.
+# One line once assembled (the backslash-newlines vanish): the value is pasted into the
+# capture command's script text, where the quotes keep '*' from being a glob.
+LOGCAT_FILTER="QuickStartRUSHelper:S SettingsState:S OplusGcSupressionHelper:S minksocket:S \
+SurfaceControl:S DigitalClock:S UniRenderCanvasContext:S BackgroundBlurDrawable:S \
+Blur_WindowBlurSessionImpl:S Blur_ScreenCapture:S BlurApp:S SQLiteLog:S Finsky:S \
+SG:S OplusRequestedLayerState:S OplusStartingWindowManager:S OverlayManager:S \
+OplusAppDataMigrateManager:S ULELite:S Region:S HYPER-HAL:S '*:V'"
+if [ "${ONEOS_LOG_FILTER:-1}" = 0 ]; then LOGCAT_FILTER=""; fi
 # LOGCAT_HEAD=1 only for a capture this session starts: a capture already
 # running (by hand, or the last session's within the 120 s before
 # return_to_oneui.sh stops it) keeps its head/, which may hold the boot of an
@@ -941,7 +968,7 @@ elif [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
         # S24+/S24 FE sessions with full logs on had no capture at all, "0 files of the boot kept": the process had
         # gone and nothing said when or why); the watcher's rounds start it again if it ended early (see there).
         printf '%s\n' '#!/system/bin/sh' \
-            "logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24" \
+            "logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER" \
             "echo \"\$(date) logcat capture ended: exit \$? (\$(ls $LOGS 2>/dev/null | wc -l) files in $LOGS)\" >> $STAGE/auto_return.log" \
             > "$STAGE/logcat_capture.sh"
         $BB setsid sh "$STAGE/logcat_capture.sh" </dev/null >/dev/null 2>&1 &
@@ -4833,7 +4860,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     rm -f $GUEST_FULLLOGS_REQ
                     if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && ! pgrep -f '^logcat .*$LOGS/boot.log' >/dev/null 2>&1; then
                         mkdir -p $LOGS
-                        $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 </dev/null >/dev/null 2>&1 &
+                        $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER </dev/null >/dev/null 2>&1 &
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\" >> $STAGE/full_logs_mid.log
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\"
                     fi
