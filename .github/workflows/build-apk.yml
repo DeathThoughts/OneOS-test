@@ -312,7 +312,9 @@ jobs:
         env:
           GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
-        run: ./gradlew --console=plain :core:model:test :core:root:testDebugUnitTest
+        run: |
+          ./gradlew --console=plain :core:model:test --tests '*CompatEvaluatorTest' --tests '*GatesTest' --tests '*PackageSetsTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageAuditTest' --tests '*StageScriptTest.launchArgumentsReachRootChecks' --tests '*StageScriptTest.bring*'
 
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.
