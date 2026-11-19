@@ -5,7 +5,7 @@ c2d30e95cde9775b: 9 s of a 15 s preflight on ~1500 processes). Runs the real
 snippet against a fake proc tree in every shell present, with the system and
 busybox ls/awk, and on the live /proc."""
 from pathlib import Path
-import os, shutil, subprocess, tempfile, time, unittest
+import os, shlex, shutil, subprocess, tempfile, time, unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / 'switcher/assets/oneos_switch.sh').read_text()
 START = SCRIPT.index('libtimer_exe() {')
@@ -58,9 +58,16 @@ def run(shell, code, proc, path=None):
     proc = Path(proc)
     cwd, rel = (None, str(proc)) if str(proc) == '/proc' else (proc.parent, './' + proc.name)
     env = {**os.environ, 'P': rel}
+    wrappers = ''
     if path:
         env['PATH'] = path + os.pathsep + env['PATH']
-    r = subprocess.run(argv + ['-uc', REFUSE + code + 'echo no refusal\n'], capture_output=True, text=True, env=env, cwd=cwd)
+        # Standalone BusyBox shells can prefer their applets over PATH.
+        # Bind the test stubs explicitly so they exercise the selected path.
+        for name in ('ls', 'awk', 'readlink', 'cut'):
+            stub = Path(path) / name
+            if stub.is_file():
+                wrappers += f'{name}() {{ {shlex.quote(str(stub))} "$@"; }}\n'
+    r = subprocess.run(argv + ['-uc', REFUSE + wrappers + code + 'echo no refusal\n'], capture_output=True, text=True, env=env, cwd=cwd)
     return r.returncode, r.stdout.strip()
 
 
@@ -131,8 +138,9 @@ class LibtimerScan(unittest.TestCase):
             stubs.mkdir()
             (stubs / 'ls').write_text('#!/bin/sh\nexit 1\n')
             (stubs / 'ls').chmod(0o755)
+            variants = [*tools(d), ('fallback', str(stubs))]
             for shell in SHELLS:
-                for name, path in [*tools(d), ('fallback', str(stubs))]:
+                for name, path in variants:
                     with self.subTest(shell=shell, tools=name):
                         rc, out = run(shell, NEW, root, path)
                         self.assertEqual(rc, 2)
