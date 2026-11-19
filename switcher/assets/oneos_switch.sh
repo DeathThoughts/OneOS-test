@@ -3965,6 +3965,10 @@ while true; do
                 echo '[UI Activator] OPPO telemetry apps: started (oplus_telemetry.log)'
             fi
 
+            if [ -f \"$STAGE/data/oneos_guest_telemetry.sh\" ]; then
+                timeout 90 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_guest_telemetry.sh \$PID >\"$STAGE/guest_telemetry.log\" 2>&1 </dev/null &
+            fi
+
             # ColorOS SystemUI compiled once per SystemUI.apk (S Ultra, X9U IN, session 146de99d: it ran
             # from the APK in every session). guest_prepare.sh wrote the script for ColorOS guests; it runs
             # in the background, so Home is never held up, and saves its marker and log in the guest data

@@ -86,6 +86,7 @@ for s in data misc misc/adb misc/profiles misc/user misc/bluedroid misc/bluetoot
          oneos_bin oneos_bin/busybox zygote_exec oplus oplus/multimedia \
          preapps-lib media/0 anr app local/tmp resource-cache oneos_fold8 oneos_pixel_hinge oneos_hinge \
          media/0/Android media/0/Android/data media/0/Android/media media/0/Android/obb \
+         oneos_guest_telemetry.sh \
          oneos_sysui_compile.sh oneos_oplus_telemetry.sh; do
     no_symlink "$s"
 done
@@ -3658,6 +3659,151 @@ TELE
     chmod 644 "$STAGE/data/oneos_oplus_telemetry.sh"
     $BB chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_oplus_telemetry.sh" 2>/dev/null || true
     echo "ColorOS OPPO apps: telemetry=$TELE_MODE (ONEOS_GUEST_OPLUS_TELEMETRY=${ONEOS_GUEST_OPLUS_TELEMETRY:-0}), bloat/restrict=$BLOAT_MODE (ONEOS_GUEST_OPLUS_BLOAT=${ONEOS_GUEST_OPLUS_BLOAT:-0}; oplus_telemetry.log)"
+fi
+# The stage marker identifies the guest independently of the host's properties.
+# ColorOS already has a telemetry policy above. HyperOS has its own policy in PR #64.
+rm -f "$STAGE/data/oneos_guest_telemetry.sh"
+TELE_IMAGE=$(sed -n 's/^  "image": "\([a-z0-9-]*\)",$/\1/p' "$STAGE/.oneos_stage" 2>/dev/null)
+TELE_KIND=
+TELE_TARGETS=
+case "$TELE_IMAGE" in
+    pixel11fold-yogi|pixel11pro-kodiak|pixel9proxl-komodo)
+        # Market Feedback Agent handles app feedback/crash reports. Google
+        # Play services' Usage & diagnostics switch is independent.
+        TELE_KIND=package
+        TELE_TARGETS=com.google.android.feedback ;;
+    nothingos5-metroid|nothingos5-asteroids)
+        # Log Tool also handles manually requested Nothing logs.
+        TELE_KIND=package
+        TELE_TARGETS=com.nothing.logkit ;;
+    originos7-pd2609ma)
+        # Vivo's User Experience Improvement Program service.
+        TELE_KIND=package
+        TELE_TARGETS=com.bbk.iqoo.logsystem ;;
+    oxygenos16-cph2745)
+        # Use the existing OPPO policy when the image supplies its framework.
+        if [ ! -f "$STAGE/data/oneos_oplus_telemetry.sh" ]; then
+            TELE_KIND=package
+            TELE_TARGETS="com.oplus.onetrace com.oplus.olc"
+        fi ;;
+    lineage24-infiniti|infinityx41-findx9u)
+        # LineageParts has its own stats opt-out. Apply it only when the
+        # guest's LineageSettings provider answers with a known value.
+        TELE_KIND=lineage
+        TELE_TARGETS=stats_collection ;;
+    oneui95-s948b)
+        # Use Samsung's consent setting to avoid retries to a disabled agent.
+        TELE_KIND=samsung
+        TELE_TARGETS=samsung_errorlog_agree ;;
+esac
+if [ -n "$TELE_KIND" ]; then
+    TELE_KEEP=0
+    [ "${ONEOS_GUEST_TELEMETRY:-0}" != 1 ] || TELE_KEEP=1
+    if [ "$TELE_IMAGE" = oxygenos16-cph2745 ] && [ "${ONEOS_GUEST_OPLUS_TELEMETRY:-0}" = 1 ]; then
+        TELE_KEEP=1
+    fi
+    {
+        printf "kind=%s\ntargets='%s'\nkeep=%s\n" "$TELE_KIND" "$TELE_TARGETS" "$TELE_KEEP"
+        cat <<'GUEST_TELEMETRY'
+# The activator passes this guest boot's system_server PID. Refuse new Binder
+# calls after it leaves this mount namespace or the host starts returning.
+guest_pid=$1
+case "$guest_pid" in ''|*[!0-9]*|0|1) exit 1 ;; esac
+guest_ns=$(readlink /proc/self/ns/mnt) || exit 1
+host_ns=$(readlink /proc/1/ns/mnt) || exit 1
+[ -n "$guest_ns" ] && [ "$guest_ns" != "$host_ns" ] || exit 1
+guest_cmd() {
+    [ "$(readlink "/proc/$guest_pid/ns/mnt" 2>/dev/null)" = "$guest_ns" ] &&
+        [ "$(cat "/proc/$guest_pid/comm" 2>/dev/null)" = system_server ] || return 1
+    timeout 15 "$@" </dev/null
+}
+
+# Guest data persists across switches. Record the original state before a
+# write so a timeout or a soft reboot still leaves enough to undo our change.
+umask 077
+state=/data/oneos_guest_telemetry
+[ ! -L "$state" ] || exit 1
+mkdir -p "$state" || exit 1
+save_state() {
+    temp=$(mktemp "$state/.state.XXXXXX") || return 1
+    if ! printf '%s\n' "$1" > "$temp" || ! mv -f "$temp" "$rec"; then
+        rm -f "$temp"
+        return 1
+    fi
+}
+
+read_state() {
+    case "$kind" in
+        package)
+            guest_cmd dumpsys package "$target" |
+                awk '$1 == "User" && $2 == "0:" { for (i = 3; i <= NF; i++)
+                    if ($i ~ /^enabled=[0-9]+$/) { sub(/^enabled=/, "", $i); print $i } }' ;;
+        samsung) guest_cmd settings --user 0 get system "$target" ;;
+        lineage)
+            reply=$(guest_cmd content call --user 0 --uri content://lineagesettings/secure \
+                --method GET_secure --arg "$target" 2>/dev/null) || return 1
+            printf '%s\n' "$reply" | sed -n 's/^Result: Bundle\[{value=\([01]\)}\]$/\1/p' ;;
+    esac
+}
+
+write_state() {
+    case "$kind:$1" in
+        package:0) guest_cmd pm default-state --user 0 "$target" ;;
+        package:1) guest_cmd pm enable --user 0 "$target" ;;
+        package:3) guest_cmd pm disable-user --user 0 "$target" ;;
+        samsung:0|samsung:1) guest_cmd settings --user 0 put system "$target" "$1" ;;
+        lineage:0|lineage:1)
+            guest_cmd content call --user 0 --uri content://lineagesettings/secure \
+                --method PUT_secure --arg "$target" --extra "value:s:$1" ;;
+        *) return 1 ;;
+    esac
+}
+
+for target in $targets; do
+    rec="$state/$kind.$target"
+    [ ! -L "$rec" ] && { [ ! -e "$rec" ] || [ -f "$rec" ]; } || continue
+    off=0
+    if [ "$kind" = package ]; then
+        off=3
+        installed=$(guest_cmd pm list packages --user 0 -s "$target" 2>/dev/null) || continue
+        printf '%s\n' "$installed" | grep -qxF "package:$target" || continue
+    fi
+    current=$(read_state 2>/dev/null) || continue
+    previous=
+    [ ! -f "$rec" ] || IFS= read -r previous < "$rec"
+    case "$kind:$previous" in package:0|package:1|samsung:1|lineage:1) ;; *) previous= ;; esac
+
+    if [ "$keep" = 1 ]; then
+        [ -n "$previous" ] || continue
+        case "$current" in 0|1|2|3|4) ;; *) continue ;; esac
+        if [ "$current" = "$off" ]; then
+            if ! write_state "$previous" || [ "$(read_state 2>/dev/null)" != "$previous" ]; then
+                echo "$target: restore failed; will retry on next switch"
+                continue
+            fi
+            echo "$target: restored"
+        fi
+        rm -f "$rec"
+    else
+        case "$kind:$current" in
+            package:0|package:1)
+                enabled=$(guest_cmd pm list packages --user 0 -s -e "$target" 2>/dev/null) || continue
+                printf '%s\n' "$enabled" | grep -qxF "package:$target" || continue ;;
+            samsung:1|lineage:1) ;;
+            *) echo "$target: already off or unavailable"; continue ;;
+        esac
+        [ -n "$previous" ] || save_state "$current" || continue
+        if write_state "$off" && [ "$(read_state 2>/dev/null)" = "$off" ]; then
+            echo "$target: turned off"
+        else
+            echo "$target: could not verify the change"
+        fi
+    fi
+done
+GUEST_TELEMETRY
+    } > "$STAGE/data/oneos_guest_telemetry.sh"
+    chmod 644 "$STAGE/data/oneos_guest_telemetry.sh"
+    "$BB" chcon u:object_r:system_data_file:s0 "$STAGE/data/oneos_guest_telemetry.sh" 2>/dev/null || true
 fi
 # The guest's /oem, built in $STAGE/oem and bound over the image's. /oem is
 # empty in the images (ColorOS and Pixel) and scanned by the guest's

@@ -295,6 +295,11 @@ jobs:
       - name: Verify guest media mount safety
         run: python3 scripts/test-guest-media-share.py
 
+      - name: Verify guest telemetry policy
+        run: |
+          python3 scripts/test-oplus-telemetry.py
+          python3 scripts/test-guest-telemetry.py
+
       - name: Verify guest audio, Bluetooth, and camera policy
         run: |
           python3 scripts/test-guest-audio-policy.py

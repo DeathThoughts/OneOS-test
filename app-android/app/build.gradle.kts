@@ -530,7 +530,7 @@ android {
         // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
         // Refresh stages created before the storage, diagnostics and bring-apps changes.
         // 0.5.25 fork: advance past previously distributed debug builds.
-        versionCode = 171
+        versionCode = 172
         versionName = "0.5.25"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
