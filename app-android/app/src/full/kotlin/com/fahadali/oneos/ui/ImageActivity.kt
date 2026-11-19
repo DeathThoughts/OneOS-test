@@ -33,7 +33,7 @@ import dev.oneuiproject.oneui.R as OuiIcons
 /**
  * Use a downloaded file (Advanced; Choose a system's last row): Pick the
  * file (the system file picker; no storage permission), Check the file
- * (SHA-256 of the whole .gz, with progress), and reuse the system already on
+ * (SHA-256 of the whole archive, with progress), and reuse the system already on
  * this phone when the stage holds a system.raw of one this phone takes. Both
  * say which system it is (ImageIdentifier) in plain words (Plain); a file
  * this phone does not take is a BLOCK naming the ones it does. The systems
@@ -72,13 +72,13 @@ class ImageActivity : ToolbarActivity() {
         (supportFragmentManager.findFragmentById(R.id.fragment_container) as? ImageFragment)?.redraw()
     }
 
-    /** ACTION_OPEN_DOCUMENT for the .img.gz (any type: providers label .gz differently). */
+    /** ACTION_OPEN_DOCUMENT for the image archive (providers label these files differently). */
     private class OpenGz : ActivityResultContract<Unit, Uri?>() {
         override fun createIntent(context: Context, input: Unit): Intent =
             Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*")
-                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/octet-stream", "*/*"))
+                .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/gzip", "application/x-gzip", "application/zip", "application/octet-stream", "*/*"))
 
         override fun parseResult(resultCode: Int, intent: Intent?): Uri? = if (resultCode == Activity.RESULT_OK) intent?.data else null
     }
@@ -238,6 +238,9 @@ class ImageFragment : CardsFragment() {
                 if (image.googleServices) add(getString(R.string.systems_chip_google))
             }
             Cards.row(systems, GLYPHS[i % GLYPHS.size], Images.systemName(image, p), notes.joinToString(" · "))
+            if (image.id == Images.ID_HYPEROS_POPSICLE) {
+                CardRows.text(systems, getString(R.string.image_split_zip_instructions, image.gzName), R.style.OneOS_Text_Caption, inList = true)
+            }
         }
 
         // Details: the files' names and labels, the raw findings, what the checks said (the OneOS team's).

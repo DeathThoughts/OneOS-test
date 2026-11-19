@@ -21,6 +21,25 @@ class ImagesTest {
     )
 
     @Test
+    fun popsicleImportTakesTheInnerZipOnGalaxyS23() {
+        val popsicle = Images.HYPEROS_POPSICLE
+        val inner = ImageFileCheck(popsicle.gzName, popsicle.gzBytes, popsicle.gzSha256, popsicle.gzBytes)
+        val s23 = Profiles.S_8550
+        assertEquals("system.img", popsicle.zipEntryName)
+        assertEquals(popsicle.downloadUrl, popsicle.mirrorUrl)
+        assertEquals(ImageState.VERIFIED, ImageIdentifier.identify(inner, s23).state)
+        assertEquals(ImageState.WRONG_FOR_PHONE, ImageIdentifier.identify(inner, Profiles.S_PLUS_8550).state)
+        assertEquals(ImageState.UNKNOWN, ImageIdentifier.identify(ImageFileCheck("HyperOS.4.17.Pro.Max.zip", 3_999_449_347L), s23).state)
+        assertEquals(ImageState.UNKNOWN, ImageIdentifier.identify(ImageFileCheck("HyperOS.4.17.Pro.Max.zip.001", 1_999_724_809L), s23).state)
+        val raw = ImageIdentifier.identify(ImageFileCheck("system.img", popsicle.rawBytes), s23)
+        assertEquals(ImageState.UNCOMPRESSED, raw.state)
+        assertTrue(raw.finding.detail.contains(popsicle.gzName))
+        assertTrue(popsicle.presentsGms)
+        assertFalse(popsicle.gmsHideable)
+        assertNull(popsicle.testedOn)
+    }
+
+    @Test
     fun builtInTable() {
 
         assertEquals("coloros17-findn6", n6.id)
@@ -55,7 +74,7 @@ class ImagesTest {
         // (Nothing's are product/priv-app GmsCore, Phonesky, GooglePartnerSetup, GoogleRestore, ConfigUpdater
         // and system_ext/priv-app GoogleServicesFramework: six folders guest_prepare.sh's patterns cover).
         assertEquals(
-            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16, Images.ORIGINOS7, Images.LINEAGE24),
+            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_POPSICLE, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16, Images.ORIGINOS7, Images.LINEAGE24),
             Images.ALL.filter { it.googleServices },
         )
         // 0.5.06: LineageOS 24 has none of its own: its Google apps are One UI's, laid over the guest at session time
@@ -70,11 +89,11 @@ class ImagesTest {
         assertEquals("LineageOS 24", Images.LINEAGE24.name)
         assertEquals("OnePlus 15", Images.LINEAGE24.shortName)
         // 0.4.73: OriginOS 7 presents the Play services of its own gmssystem payload, as the Pixel images.
-        assertEquals(listOf(pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.NOTHING_ASTEROIDS, Images.ORIGINOS7), Images.ALL.filter { it.presentsGms })
+        assertEquals(listOf(pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_POPSICLE, Images.NOTHING_ASTEROIDS, Images.ORIGINOS7), Images.ALL.filter { it.presentsGms })
         assertEquals(listOf(n6, xin, Images.NOTHING_METROID, Images.OXYGEN16, Images.LINEAGE24), Images.ALL.filter { it.gmsHideable })
         assertTrue(pixel.copy(presentsGms = false).gmsHideable)
         assertEquals(
-            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
+            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.HYPEROS_POPSICLE, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
                 Images.ORIGINOS7, Images.LINEAGE24),
             Images.ALL,
         )
@@ -141,7 +160,7 @@ class ImagesTest {
             listOf(
                 SystemFamily.COLOROS, SystemFamily.COLOROS,
                 SystemFamily.PIXEL, SystemFamily.PIXEL, SystemFamily.PIXEL,
-                SystemFamily.INFINITYX, SystemFamily.HYPEROS, SystemFamily.NOTHING, SystemFamily.NOTHING, SystemFamily.OXYGENOS, SystemFamily.ORIGINOS, SystemFamily.LINEAGE,
+                SystemFamily.INFINITYX, SystemFamily.HYPEROS, SystemFamily.HYPEROS, SystemFamily.NOTHING, SystemFamily.NOTHING, SystemFamily.OXYGENOS, SystemFamily.ORIGINOS, SystemFamily.LINEAGE,
             ),
             Images.ALL.map { it.family },
         )
@@ -279,7 +298,7 @@ class ImagesTest {
             Profiles.FOLD8 to listOf(n6, pixel, ifx, lineage, hyper, nothing, origin),
             Profiles.S_8850 to listOf(xin, Images.PIXEL_KODIAK, ifx, lineage, hyper, nothing, origin),
             Profiles.S_ULTRA_8650 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.82
-            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin), // 0.4.82; 0.4.91 OxygenOS 16; 0.5.19 Nothing OS
+            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin, Images.HYPEROS_POPSICLE),
             Profiles.S_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.83
             Profiles.S_PLUS_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin), // 0.4.83
             Profiles.S_FE_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper),

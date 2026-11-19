@@ -22,6 +22,13 @@ class ApkSeriesTest {
         assertEquals(PackageSets.ALL.map { it.id }.toSet(), ApkSeries.entries.flatMap { it.setIds() }.toSet())
     }
 
+    @Test
+    fun popsicleShipsInTheSeriesThatIncludesGalaxyS23() {
+        assertEquals(listOf(ApkSeries.S25), ApkSeries.entries.filter {
+            PackageSets.ID_HYPER_POPSICLE in it.setIds()
+        })
+    }
+
     /** app-android/packages/series.txt (what app/build.gradle.kts packs) lists exactly [ApkSeries.setIds]. */
     @Test
     fun theListBuildsUseIsTheModels() {

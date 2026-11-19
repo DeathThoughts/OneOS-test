@@ -6,14 +6,23 @@
 # of the jar is the image's, byte for byte (as make-overlays.sh does for the
 # other jars). Nothing is written when the guest's tables already agree.
 #
-# Usage: scripts/patch-framework-camera.sh <framework.jar> <out dir>
+# Usage: scripts/patch-framework-camera.sh <framework.jar> <out dir> [--popsicle-dex-layout]
 #   writes <out dir>/framework_patched.jar (or removes it) and appends its
 #   sha256 line to <out dir>/guards.txt when that file exists and lacks it.
 # make-overlays.sh calls it for a Pixel image; for a set whose image is no
 # longer on the server, call it with the jar pulled from the phone's stage.
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-[ -f "$1" ] && [ -d "$2" ] || { echo "usage: $0 <framework.jar> <out dir>" >&2; exit 2; }
+usage() {
+    echo "usage: $0 <framework.jar> <out dir> [--popsicle-dex-layout]" >&2
+    exit 2
+}
+case "$#" in
+    2) ;;
+    3) [ "$3" = --popsicle-dex-layout ] || usage ;;
+    *) usage ;;
+esac
+[ -f "$1" ] && [ -d "$2" ] || usage
 # Absolute paths: the zip step runs inside a temp dir.
 JAR=$(cd "$(dirname "$1")" && pwd)/$(basename "$1"); OUT=$(cd "$2" && pwd)
 APKTOOL=${APKTOOL:-$(ls "$ROOT"/mysticgsi/tools/apktool/*.jar | head -1)}
@@ -75,6 +84,14 @@ HD=$(python3 -I "$ROOT/switcher/patches/samsung_highspeed_surfaces.py" "$WORK/fw
 for d in $HD; do
     case " $DIRS " in *" $d "*) ;; *) DIRS="$DIRS $d" ;; esac
 done
+# Popsicle's classes3.dex has 65,535 method references before the IMS additions.
+# Replace it and add the fresh dex containing its moved Binder interface family.
+if [ "$#" -eq 3 ]; then
+    PD=$(python3 -I "$ROOT/switcher/patches/popsicle_framework_dex.py" "$WORK/fw")
+    for d in $PD; do
+        case " $DIRS " in *" $d "*) ;; *) DIRS="$DIRS $d" ;; esac
+    done
+fi
 if [ -z "$DIRS" ]; then
     rm -f "$OUT/framework_patched.jar"
     sed -i '/ framework_patched\.jar$/d' "$OUT/guards.txt" 2>/dev/null || true

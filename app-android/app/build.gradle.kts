@@ -74,6 +74,7 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     // HyperOS image (docs/hyperos.md), made for the Z Fold8 Ultra and Z Fold8, on every phone from 0.4.31: Xiaomi's guarded jars,
     // the signal poll and the image's payloads.
     "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r29") to listOf("tethering_payload.img")),
+    "hyper-popsicle" to (File(repoRoot, "out/overlays_hyperos_popsicle_r1") to listOf("tethering_payload.img")),
     // Nothing OS 5.0 (0.4.33), the Z Fold8 Ultra only: its chips need SVE/SME.
     "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r38") to listOf("tethering_payload.img")),
     "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r5") to listOf("tethering_payload.img")),
@@ -523,8 +524,8 @@ android {
         // the vendor's Bluetooth module with offload off, as One UI does; 0.4.99's bridge got the session but the
         // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
         // Refresh stages created before the storage, diagnostics and bring-apps changes.
-        versionCode = 168
-        versionName = "0.5.19-fork-a55.1"
+        versionCode = 169
+        versionName = "0.5.19-fork-popsicle.1"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
 

@@ -27,6 +27,13 @@ decode() {
 }
 [ -f "$IMG" ] || { echo "usage: $0 <system.img> [outdir]" >&2; exit 2; }
 
+# Popsicle's guard sites and dex layout were checked on this exact image.
+IMAGE_SHA=$(sha256sum < "$IMG")
+POPSICLE=0
+if [ "${IMAGE_SHA%% *}" = a0d622cff955e907b89bf7691d6d12102587bf9333ad89e92aebee0fe57b12ba ]; then
+    POPSICLE=1
+fi
+
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT"
@@ -168,6 +175,17 @@ BUILDS = [
         "service.incremental.so": "e7da297ddedc625df330317c2321b5a2fd25f4dd2535f9c65a1490b5b8d6687d",
         "crashrecovery-aosp.capex": "d31bc1ccbb9bd60d2c78f0bd045cbb194838f936aafe2b551ab5d8344c9f2cd8",
     }, [("vold", 0xf3fc, NAME), ("vold", 0x6e2d4, TRY_START), ("service.incremental.so", 0x64745, NAME)]),
+    # HyperOS OS4.0 (Popsicle): start() takes "vold" at 0xf45d (adrp at
+    # 0x6d410 + add at 0x6d414), and try_start tests the isDeclared() result
+    # at 0x6ce00. Both incremental lookups use "vold" at 0x64786 (adr at
+    # 0xc005c, adrp + add at 0xc2710/0xc2714). Its crashrecovery CAPEX has
+    # AOSP's RescueParty.isDisabled, with persist.sys.enable_rescue taking
+    # precedence over persist.sys.disable_rescue as checked in guest_start.sh.
+    ("HyperOS OS4.0 Popsicle OS4.0.0.39.XPBCNXM", {
+        "vold": "f93d8d75894dacf39842fd349c7c271f18794dec0a3a450d56b39464b89273e4",
+        "service.incremental.so": "2a8a3ff60d47b438acef3338d2f28ea13cc54cce1cad5d8bd55aa68f4adb7caa",
+        "crashrecovery-aosp.capex": "c1babb552c0e161e7cbaa3b26c30e23a870f76f352a6e3c19a17f2e01a70131f",
+    }, [("vold", 0xf45c, NAME), ("vold", 0x6ce00, TRY_START), ("service.incremental.so", 0x64785, NAME)]),
     # Nothing OS 5.0 (Metroid, AQ3A.250924.001): start() takes "vold" at 0xe1e8
     # (adrp 0xe000 + add 0x1e8 at 0x64d38, then String16 and a new
     # VoldNativeService; the binary's only "\0vold\0", whose other 9 references
@@ -269,6 +287,10 @@ if [ -f "$OUT/vold_patched" ]; then
     chmod 755 "$OUT/vold_patched"
     chmod 644 "$OUT/service.incremental_patched.so"
     VOLD_GVLD=1
+fi
+if [ "$POPSICLE" = 1 ] && [ "$VOLD_GVLD" != 1 ]; then
+    echo "ERROR: the pinned Popsicle image needs the gvld overlays" >&2
+    exit 1
 fi
 
 # services.jar: LocalDisplayAdapter falls back to the active mode when
@@ -611,7 +633,11 @@ PRO_JAR=/system/system_ext/framework/apprecovery.proinstaller.jar
 if in_image $MIUI_JAR; then
     "$DEBUGFS" -R "dump $MIUI_JAR $WORK/miui-services.jar" "$IMG" 2>/dev/null
     decode "$WORK/miui" "$WORK/miui-services.jar"
-    DIRS=$(python3 -I "$ROOT/switcher/patches/miui_guards.py" "$WORK/miui")
+    if [ "$POPSICLE" = 1 ]; then
+        DIRS=$(python3 -I "$ROOT/switcher/patches/miui_guards.py" --variant popsicle "$WORK/miui")
+    else
+        DIRS=$(python3 -I "$ROOT/switcher/patches/miui_guards.py" "$WORK/miui")
+    fi
     NEW=$(python3 -I "$ROOT/switcher/patches/guest_storage_guards.py" "$WORK/miui")
     DIRS=$(printf '%s\n' $DIRS $NEW | sort -u)
     NEW=$(python3 -I "$ROOT/switcher/patches/guest_installd_abi.py" --callers "$WORK/miui")
@@ -654,7 +680,9 @@ if in_image $MIUI_JAR; then
     in_image $WIFI_JAR || { echo "ERROR: $MIUI_JAR without $WIFI_JAR" >&2; exit 1; }
     "$DEBUGFS" -R "dump $WIFI_JAR $WORK/miui-wifi-service.jar" "$IMG" 2>/dev/null
     decode "$WORK/mwifi" "$WORK/miui-wifi-service.jar"
-    DIRS=$(python3 -I "$ROOT/switcher/patches/hyperos_hal_ext.py" --expect 5 "$WORK/mwifi" HalExtWifi)
+    WIFI_CASTS=5
+    [ "$POPSICLE" != 1 ] || WIFI_CASTS=6
+    DIRS=$(python3 -I "$ROOT/switcher/patches/hyperos_hal_ext.py" --expect "$WIFI_CASTS" "$WORK/mwifi" HalExtWifi)
     java -jar "$APKTOOL" b -q -o "$WORK/mwifi-rebuilt.jar" "$WORK/mwifi"
     cp "$WORK/miui-wifi-service.jar" "$OUT/miui-wifi-service_patched.jar"
     for d in $DIRS; do
@@ -1052,7 +1080,11 @@ if [ "${ONEOS_NO_CAMERA_ABI:-0}" = 1 ]; then
     rm -f "$WORK/framework-cam.jar"
 elif in_image /system/framework/framework.jar; then
     [ -f "$WORK/framework-cam.jar" ] || "$DEBUGFS" -R "dump /system/framework/framework.jar $WORK/framework-cam.jar" "$IMG" 2>/dev/null
-    "$ROOT/scripts/patch-framework-camera.sh" "$WORK/framework-cam.jar" "$OUT"
+    if [ "$POPSICLE" = 1 ]; then
+        "$ROOT/scripts/patch-framework-camera.sh" "$WORK/framework-cam.jar" "$OUT" --popsicle-dex-layout
+    else
+        "$ROOT/scripts/patch-framework-camera.sh" "$WORK/framework-cam.jar" "$OUT"
+    fi
     rm -f "$WORK/framework-cam.jar"
 fi
 if [ "${ONEOS_NO_CAMERA_ABI:-0}" != 1 ] && in_image /system/lib64/libcamera_client.so && in_image /system/lib64/libcameracompatbilityinfo.so; then
@@ -1092,6 +1124,14 @@ for j in services_patched.jar oplus-services_patched.jar ims-ext-common_patched.
     [ -f "$OUT/$j" ] && JARS="$JARS $OUT/$j"
 done
 python3 -I "$ROOT/scripts/check-dex.py" $JARS
+
+# Popsicle's refresh-rate group comparisons truncate the group number that
+# One UI's composer returns on the S23. Keep both group loads at 32 bits.
+if [ "$POPSICLE" = 1 ]; then
+    rm -f "$OUT/libsurfaceflinger_patched.so"
+    "$DEBUGFS" -R "dump /system/system_ext/lib64/libsurfaceflinger.so $WORK/libsurfaceflinger.so" "$IMG" 2>/dev/null
+    python3 -I "$ROOT/switcher/patches/hyperos_sf_group.py" "$WORK/libsurfaceflinger.so" "$OUT/libsurfaceflinger_patched.so"
+fi
 
 # The phone refuses jars that were not built with the guards above
 # (guest_prepare.sh checks these hashes, and needs oplus-services_patched.jar
@@ -1135,6 +1175,9 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
             $([ -f telephony-common_patched.jar ] && echo telephony-common_patched.jar) \
             $([ -f libcamera_client_patched.so ] && echo libcamera_client_patched.so) \
             $([ -f libcameracompatbilityinfo_patched.so ] && echo libcameracompatbilityinfo_patched.so))
+    fi
+    if [ "$POPSICLE" = 1 ]; then
+        (cd "$OUT" && sha256sum libsurfaceflinger_patched.so)
     fi
 } > "$OUT/guards.txt"
 

@@ -44,9 +44,11 @@ InstallService installs apps by itself (auto_install) into /data/app; with
 reached from onBootPhase, not from onStart, and it is what crashed the guest's
 system_server on the S25 Ultra and S25 -- see the PROINSTALLER table).
 
-Usage: miui_guards.py [--proinstaller] <apktool decoded jar directory>
+Usage: miui_guards.py [--proinstaller | --variant popsicle] <apktool decoded jar directory>
 Prints the smali_* directories (dex files) it changed, one per line.
 """
+import argparse
+import hashlib
 import os
 import re
 import sys
@@ -163,6 +165,10 @@ def return_at_entry(smali, header, kind, cls):
 OEMNETD_PROXY = "com/android/internal/net/IOemNetd$Stub$Proxy"
 OEMNETD_PROXY_KEEP = ("<init>(", "asBinder(", "getInterfaceDescriptor(", "isAlive(")
 OEMNETD_PROXY_METHODS = 54
+# The Popsicle proxy exposes a different method set from the Xiaomi 18 Fold.
+# Check the sorted headers before blocking its transactions.
+POPSICLE_PROXY_METHODS = 48
+POPSICLE_PROXY_HEADERS_SHA256 = "de1e2b7280c6b7082ec02587c6671e9b2a092fc20334f64ffd54dca15541d12e"
 OEMNETD_CLASS = "com/android/server/net/MiuiNetworkManagementService"
 # The methods that use IOemNetd (25 calls on mNetd, 3 by reflection on
 # IOemNetd$Stub), Xiaomi 18 Fold OS4.0.26.0.XPNCNXM. Another count stops the
@@ -202,7 +208,7 @@ PROINSTALLER = [
 ]
 
 
-def main(root, proinstaller=False):
+def main(root, proinstaller=False, variant="lhasa"):
     pending = {}
     def load(cls):
         path = find(root, cls)
@@ -244,8 +250,13 @@ def main(root, proinstaller=False):
     if not any("isAlive()Z" in h for h in headers):
         sys.exit(f"{OEMNETD_PROXY}: no isAlive()")
     headers = [h for h in headers if not any(k in h for k in OEMNETD_PROXY_KEEP)]
-    if len(headers) != OEMNETD_PROXY_METHODS:
-        sys.exit(f"{OEMNETD_PROXY}: {len(headers)} methods to block, expected {OEMNETD_PROXY_METHODS}")
+    expected = POPSICLE_PROXY_METHODS if variant == "popsicle" else OEMNETD_PROXY_METHODS
+    if len(headers) != expected:
+        sys.exit(f"{OEMNETD_PROXY}: {len(headers)} methods to block, expected {expected}")
+    if variant == "popsicle":
+        header_text = "\n".join(sorted(headers)) + "\n"
+        if hashlib.sha256(header_text.encode("utf-8")).hexdigest() != POPSICLE_PROXY_HEADERS_SHA256:
+            sys.exit(f"{OEMNETD_PROXY}: Popsicle method header fingerprint mismatch")
     for h in headers:
         if " abstract " in h or " native " in h:
             sys.exit(f"{OEMNETD_PROXY}: {h} has no code")
@@ -267,9 +278,10 @@ def main(root, proinstaller=False):
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    pro = "--proinstaller" in args
-    args = [a for a in args if a != "--proinstaller"]
-    if len(args) != 1:
-        sys.exit("usage: miui_guards.py [--proinstaller] <decoded jar directory>")
-    main(args[0], pro)
+    parser = argparse.ArgumentParser()
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--proinstaller", action="store_true")
+    mode.add_argument("--variant", choices=("popsicle",), default="lhasa")
+    parser.add_argument("root", metavar="<decoded jar directory>")
+    args = parser.parse_args()
+    main(args.root, args.proinstaller, args.variant)

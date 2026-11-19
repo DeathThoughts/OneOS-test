@@ -12,9 +12,9 @@ import java.util.Locale
 enum class SystemFamily { COLOROS, PIXEL, INFINITYX, HYPEROS, NOTHING, OXYGENOS, ORIGINOS, LINEAGE }
 
 /**
- * One OneOS OS image as friends download it (a gzip of the ext4 system
+ * One OneOS OS image as friends download it (an archive of the ext4 system
  * image) and as root stages it (`$STAGE/system.raw`). Both hashes are pinned:
- * the app checks the .gz, root checks the unpacked bytes (AA4, XP2).
+ * the app checks the archive, root checks the unpacked bytes (AA4, XP2).
  */
 data class ImageRef(
     val id: String,
@@ -37,7 +37,7 @@ data class ImageRef(
     /** Guest SDK; must equal the host's (a guest shares One UI's system services). */
     val sdk: Int,
     val buildId: String,
-    /** File name of the upload. */
+    /** Archive name, size and hash. The gz names date to the original gzip uploads. */
     val gzName: String,
     val gzBytes: Long,
     val gzSha256: String,
@@ -67,13 +67,16 @@ data class ImageRef(
     val presentsGms: Boolean = false,
     /** Whose system it is: its guest data is kept only for an image of the same family. */
     val family: SystemFamily,
+    /** Exact image entry in a ZIP archive. A null name selects gzip. */
+    val zipEntryName: String? = null,
+    val mirrorUrlOverride: String? = null,
 ) {
     /**
      * The image's own download on the SourceForge mirror (0.4.59, project oneos-mirror, folder
      * images/): one file, resumable, from a mirror near the user. [downloadUrl] (the Drive
      * folder) stays the fallback.
      */
-    val mirrorUrl: String get() = "${Images.MIRROR_FILES_URL}$gzName/download"
+    val mirrorUrl: String get() = mirrorUrlOverride ?: "${Images.MIRROR_FILES_URL}$gzName/download"
 
     /**
      * A launch may hide Google services (`ONEOS_GUEST_HIDE_GMS=1`, [SessionEnv],
@@ -126,6 +129,7 @@ object Images {
     const val ID_PIXEL_YOGI = "pixel11fold-yogi"
     const val ID_PIXEL_KODIAK = "pixel11pro-kodiak"
     const val ID_HYPEROS_LHASA = "hyperos-lhasa"
+    const val ID_HYPEROS_POPSICLE = "hyperos-popsicle"
     const val ID_PIXEL_KOMODO = "pixel9proxl-komodo"
     const val ID_INFINITYX = "infinityx41-findx9u"
     const val ID_NOTHING_METROID = "nothingos5-metroid"
@@ -404,6 +408,31 @@ object Images {
         family = SystemFamily.HYPEROS,
     )
 
+    val HYPEROS_POPSICLE = ImageRef(
+        id = ID_HYPEROS_POPSICLE,
+        label = "HyperOS 4, Xiaomi 17 Pro Max build",
+        shortName = "Xiaomi 17 Pro Max",
+        name = "HyperOS 4",
+        variant = "Xiaomi 17 Pro Max build",
+        blurb = "Xiaomi's system from the Xiaomi 17 Pro Max. Untested on the Galaxy S23.",
+        downloadUrl = "https://github.com/DeathThoughts/OneOS-test/releases/tag/images",
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "Hyperos_popsicle_17_17OS4_0_260909_233731301_QCPECN_S_AB_20260920.zip",
+        gzBytes = 3_999_449_075L,
+        gzSha256 = "1603c41aceb505ae6c51349a51312e127433eb80cd5a297bbb49a6eb7e70caf9",
+        rawBytes = 7_203_971_072L,
+        rawSha256 = "a0d622cff955e907b89bf7691d6d12102587bf9333ad89e92aebee0fe57b12ba",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = true,
+        presentsGms = true,
+        family = SystemFamily.HYPEROS,
+        zipEntryName = "system.img",
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/tag/images",
+    )
+
     /**
      * Nothing OS 5.0 (0.4.33), from the Nothing Archive dump of the A024
      * "Metroid" (nothing_archive, Metroid_C5.0-260924-2115). Android 17 on a
@@ -572,7 +601,7 @@ object Images {
      */
     val DATA_UPGRADES: Map<String, String> = mapOf(ID_FIND_X9U_IN to ID_FIND_X9U_IN_1105)
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24)
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 
@@ -648,7 +677,7 @@ enum class ImageState {
     WRONG_FOR_PHONE,
     /** Size or SHA-256 differ: damaged or incomplete download. */
     DAMAGED,
-    /** The unpacked image; the app stages only the .img.gz. */
+    /** The unpacked image; pick the archive so OneOS can verify it first. */
     UNCOMPRESSED,
     /** Not a OneOS image, or the size is unknown. */
     UNKNOWN,
@@ -724,10 +753,11 @@ object ImageIdentifier {
                     ),
                 )
             } else if (raw != null) {
+                val title = if (raw.zipEntryName == null) "Pick the .img.gz file" else "Pick the ZIP file"
                 val pick = if (profile == null || profile.choice(raw.id) != null) "pick ${raw.gzName}" else wantText
                 ImageIdentity(
                     ImageState.UNCOMPRESSED, raw,
-                    block("Pick the .img.gz file", "$name is the unpacked ${raw.shortName} image. OneOS unpacks the image itself: $pick.", R_UNCOMPRESSED),
+                    block(title, "$name is the unpacked ${raw.shortName} image. OneOS unpacks the image itself: $pick.", R_UNCOMPRESSED),
                 )
             } else {
                 ImageIdentity(
@@ -851,7 +881,7 @@ object ImageIdentifier {
                 Finding(
                     ID, Level.OK, "${image.shortName} image already on this phone",
                     "system.raw has the size of the ${image.shortName} image (${Units.bytes(size)}). Prepare has root " +
-                        "check its SHA-256 (about a minute); if it differs, it is moved to the attic and you pick the .gz.",
+                        "check its SHA-256 (about a minute); if it differs, it is moved to the attic and you pick the archive.",
                 ),
             )
         }

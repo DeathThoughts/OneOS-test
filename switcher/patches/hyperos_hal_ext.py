@@ -24,6 +24,7 @@ must be the expected one, or nothing is written (fail closed).
 Usage: hyperos_hal_ext.py --expect N <apktool decoded jar directory> <helper class name>
 Prints the smali_* directories (dex files) it changed.
 """
+import hashlib
 import os
 import re
 import sys
@@ -34,6 +35,17 @@ CAST = re.compile(
     r"(\n    invoke-static \{\2\}, L([\w/$]+)\$Stub;->asInterface\(Landroid/os/IBinder;\)L\4;\n)")
 CALL = "invoke-interface {"
 EXT = "Landroid/os/IBinder;->getExtension()Landroid/os/IBinder;"
+
+# The sixth cast in the Popsicle Wi-Fi jar checks for null between getExtension
+# and asInterface. Match the audited method before inserting the guard there.
+POPSICLE_WIFI_CLASS = "com/android/server/wifi/WifiOptimizationImpl.smali"
+POPSICLE_WIFI_IFACE = "com/xiaomi/net/ip/IMiuiIpClientExtension"
+POPSICLE_WIFI_METHOD = re.compile(
+    rf"^\.method private getMiuiExtension\(Landroid/os/IBinder;\)L{POPSICLE_WIFI_IFACE};\n"
+    r".*?^\.end method(?=\r?$)", re.M | re.S)
+POPSICLE_WIFI_METHOD_SHA256 = "5dad924e68c4d09b68323f22b71ffa54a67030f70c34be4ced6c51c294de73af"
+POPSICLE_WIFI_CAST = (f"    invoke-static {{v2}}, L{POPSICLE_WIFI_IFACE}$Stub;->asInterface"
+                      f"(Landroid/os/IBinder;)L{POPSICLE_WIFI_IFACE};\n")
 
 HELPER_METHOD = """
 .method public static {name}(Landroid/os/IBinder;)Landroid/os/IBinder;
@@ -84,23 +96,46 @@ def main(argv):
         for f in fs:
             if f.endswith(".smali"):
                 p = os.path.join(d, f)
-                s = open(p).read()
+                with open(p, encoding="utf-8", newline="") as source:
+                    raw = source.read()
+                # The adjacent cast matcher still uses normalized newlines.
+                s = raw.replace("\r\n", "\n").replace("\r", "\n")
                 if EXT in s:
-                    files[p] = s
+                    files[p] = (s, raw)
     ifaces, total, out = {}, 0, {}
-    for p, s in sorted(files.items()):
+
+    def descriptor_check(iface, reg):
+        name = ifaces.setdefault(iface, f"ext{len(ifaces)}")
+        return (f"\n    invoke-static {{{reg}}}, L{helper_cls};->{name}(Landroid/os/IBinder;)Landroid/os/IBinder;\n"
+                f"\n    move-result-object {reg}\n")
+
+    def sub(m):
+        return m.group(1) + descriptor_check(m.group(4), m.group(2)) + m.group(3)
+
+    for p, (s, raw) in sorted(files.items()):
         calls = s.count(EXT)
-        casts = CAST.findall(s)
-        if calls != len(casts):
-            sys.exit(f"hyperos_hal_ext: {os.path.relpath(p, root)}: {calls} getExtension() calls, {len(casts)} of them casts")
-        def sub(m):
-            iface = m.group(4)
-            name = ifaces.setdefault(iface, f"ext{len(ifaces)}")
-            reg = m.group(2)
-            check = (f"\n    invoke-static {{{reg}}}, L{helper_cls};->{name}(Landroid/os/IBinder;)Landroid/os/IBinder;\n"
-                     f"\n    move-result-object {reg}\n")
-            return m.group(1) + check + m.group(3)
-        out[p] = CAST.sub(sub, s)
+        casts = len(CAST.findall(s))
+        relative = os.path.relpath(p, root)
+        popsicle_method = None
+        if (expect == 6 and calls == casts + 1
+                and relative.partition(os.sep)[2] == POPSICLE_WIFI_CLASS):
+            methods = POPSICLE_WIFI_METHOD.findall(raw)
+            if len(methods) != 1:
+                sys.exit(f"hyperos_hal_ext: {relative}: Popsicle getMiuiExtension() not found exactly once")
+            popsicle_method = methods[0]
+            if hashlib.sha256(popsicle_method.encode("utf-8")).hexdigest() != POPSICLE_WIFI_METHOD_SHA256:
+                sys.exit(f"hyperos_hal_ext: {relative}: Popsicle getMiuiExtension() fingerprint mismatch")
+            if popsicle_method.count(EXT) != 1 or popsicle_method.count(POPSICLE_WIFI_CAST) != 1:
+                sys.exit(f"hyperos_hal_ext: {relative}: unexpected Popsicle getMiuiExtension() cast")
+            casts += 1
+        if calls != casts:
+            sys.exit(f"hyperos_hal_ext: {relative}: {calls} getExtension() calls, {casts} of them casts")
+        patched = CAST.sub(sub, s)
+        if popsicle_method is not None:
+            guarded = popsicle_method.replace(
+                POPSICLE_WIFI_CAST, descriptor_check(POPSICLE_WIFI_IFACE, "v2") + "\n" + POPSICLE_WIFI_CAST, 1)
+            patched = patched.replace(popsicle_method, guarded, 1)
+        out[p] = patched
         total += calls
     if total != expect:
         sys.exit(f"hyperos_hal_ext: {total} extension casts, expected {expect}")

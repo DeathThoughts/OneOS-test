@@ -1765,6 +1765,29 @@ class StageScriptTest {
     }
 
     @Test
+    fun popsicleStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+        val profile = Profiles.S_8550
+        val image = Images.HYPEROS_POPSICLE
+        val set = PackageSets.HYPER_POPSICLE
+        fr.props["ro.product.model"] = "SM-S911B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val s = Stager(fr, profile, image.id)
+        for (other in listOf(Profiles.S_PLUS_8550, Profiles.S_ULTRA_8550, Profiles.S_8550_JP)) {
+            refused(fr.run(RootScript.Verb.BEGIN, "new", other.id, image.id, set.id, s.code), "does not run")
+        }
+        refused(s.begin(setId = PackageSets.ID_HYPER_F8U), "is not the file set")
+        s.prepare()
+        val marker = StageMarker.parse(File(fr.stage, StageMarker.FILE_NAME).readText())
+        assertEquals(image.id, marker?.imageId)
+        assertEquals(set.id, marker?.setId)
+        assertEquals((RootScript.SCRIPTS + set.names).toSet(), ShaList.parse(File(fr.stage, "files.sha256").readText()).entries.keys)
+        refused(s.launch(hideGms = "1"), "has no Google services a session may hide")
+        refused(s.launch(), "test root: every launch check passed")
+    }
+
+    @Test
     fun launchArgumentsReachRootChecks() = eachShell { fr ->
         val profile = Profiles.S_8550
         fr.props["ro.product.model"] = "SM-S911B"

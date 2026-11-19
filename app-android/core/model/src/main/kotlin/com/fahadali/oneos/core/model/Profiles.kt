@@ -519,6 +519,12 @@ object Profiles {
         notes = listOf(olderVendor("34 (Android 14)", "6.1")),
     )
 
+    // The original choices shared by the Galaxy S23, S23+ and au S23.
+    private val S23_CHOICES = listOf(
+        X9U_IN_1105_CHOICE, PIXEL9_CHOICE, INFINITYX_CHOICE, LINEAGE_CHOICE,
+        HYPEROS_CHOICE, OXYGEN16_CHOICE, NOTHING_CHOICE, ORIGINOS_CHOICE,
+    )
+
     /**
      * Galaxy S23 and S23+, from 0.4.11: probe reports of 2026-10-25
      * (SM-S911B dm1q and SM-S916U dm2q, SM8550, One UI 9.0, Android 17, one
@@ -535,7 +541,7 @@ object Profiles {
         codename = "dm1q",
         socModel = "SM8550",
         form = FormFactor.BAR,
-        choices = listOf(X9U_IN_1105_CHOICE, PIXEL9_CHOICE, INFINITYX_CHOICE, LINEAGE_CHOICE, HYPEROS_CHOICE, OXYGEN16_CHOICE, NOTHING_CHOICE, ORIGINOS_CHOICE), // 0.5.19: Nothing OS (Metroid) at the owner's request, untested
+        choices = S23_CHOICES + ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false),
         notes = listOf(EXPECT_NO_START),
     )
 
@@ -546,7 +552,7 @@ object Profiles {
         codename = "dm2q",
         socModel = "SM8550",
         form = FormFactor.BAR,
-        choices = listOf(X9U_IN_1105_CHOICE, PIXEL9_CHOICE, INFINITYX_CHOICE, LINEAGE_CHOICE, HYPEROS_CHOICE, OXYGEN16_CHOICE, NOTHING_CHOICE, ORIGINOS_CHOICE), // 0.5.19: Nothing OS (Metroid) at the owner's request, untested
+        choices = S23_CHOICES,
         notes = listOf(EXPECT_NO_START),
     )
 
@@ -1271,10 +1277,13 @@ object Profiles {
     /**
      * The au Galaxy S23, from 0.4.93: findings of 2026-11-11 (SCG19, ro.product.device SCG19, vendor
      * device dm1q, SM8550, One UI 9.0, Android 17 build CP2A.260605.016, vendor API 33, density 480,
-     * KernelSU; its installd table is the 85 methods of host_installd.txt). The [S_8550]'s systems and
-     * note, untested.
+     * KernelSU; its installd table is the 85 methods of host_installd.txt). The original S23 choices
+     * and note, untested.
      */
-    val S_8550_JP = S_8550.copy(id = ID_S_8550_JP, label = "Galaxy S23 (au)", modelPrefix = "SCG19", codename = "SCG19")
+    val S_8550_JP = S_8550.copy(
+        id = ID_S_8550_JP, label = "Galaxy S23 (au)", modelPrefix = "SCG19", codename = "SCG19",
+        choices = S23_CHOICES,
+    )
 
     /**
      * Galaxy M35 5G, from 0.4.95: findings of 2026-11-11 (SM-M356B, m35x, s5e8835 Exynos 1380, One UI 9.0,

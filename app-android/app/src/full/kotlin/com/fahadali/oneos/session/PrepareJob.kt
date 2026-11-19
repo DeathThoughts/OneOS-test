@@ -17,6 +17,7 @@ import com.fahadali.oneos.core.model.Plain
 import com.fahadali.oneos.core.model.PlainMessage
 import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.model.SessionEnv
+import com.fahadali.oneos.core.model.SingleImageZipInputStream
 import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.core.root.RootProbe
 import com.fahadali.oneos.core.root.RootScript
@@ -35,11 +36,11 @@ import java.util.zip.GZIPInputStream
  * again, publishes that check (so Switch and Home show it, not an older one),
  * picks what to do with the stage when the caller did not ([SetupPlan]: keep
  * the same system's apps and data, set another one aside, reuse the system
- * already installed when root vouches for it), hashes the picked .gz itself
+ * already installed when root vouches for it), hashes the picked archive itself
  * when Check file has not ("Check the download"; the identity gate still
  * refuses anything but the verified image), then the root script's verbs in
  * order: begin (stage adopted, moved aside or new), the image (the picked
- * .gz unpacked on the fly into `receive system.raw`, or `keep-raw` for the
+ * archive unpacked on the fly into `receive system.raw`, or `keep-raw` for the
  * image already on this phone), every session script and file of the
  * image's set on this phone, the installd table, session.env, finish (files
  * list, attic, marker), and a fresh read of the stage, published too. The
@@ -302,7 +303,7 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
         val set0 = candidate?.let { i -> profile.choice(i.id)?.packageSetId?.let { PackageSets.byId(it) } }
         update(state.copy(bytesTotal = (if (hashNeeded) gzBytes else 0L) + (if (onPhone) 0L else gzBytes) + (set0?.approxBytes ?: 0L)))
 
-        // 2. "Check the download": the picked .gz hashed here when Check file did not, so the identity gate can pass.
+        // 2. "Check the download": the picked archive is hashed here when Check file did not, so the identity gate can pass.
         var base = 0L
         if (hashNeeded) {
             val p = picked
@@ -437,11 +438,11 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
             step(Step.IMAGE, "Unpacking the download…")
             update(state.copy(stepTotal = image.gzBytes))
             val imageBase = base
-            val feed = ImageFeed(app, uri, image) { gz ->
-                // In Double: gz * rawBytes passes Long's range after about 1.2 GB of
-                // a large image's .gz, and the label showed wrong sizes and "?" (2026-10-25).
-                bytes(imageBase, gz, stepDone = gz) {
-                    "${Units.bytes((gz.toDouble() / image.gzBytes * image.rawBytes).toLong())} of ${Units.bytes(image.rawBytes)}"
+            val feed = ImageFeed(app, uri, image) { compressed ->
+                // In Double: compressed * rawBytes passes Long's range early in
+                // a large archive, and the label showed wrong sizes and "?" (2026-10-25).
+                bytes(imageBase, compressed, stepDone = compressed) {
+                    "${Units.bytes((compressed.toDouble() / image.gzBytes * image.rawBytes).toLong())} of ${Units.bytes(image.rawBytes)}"
                 }
             }
             verb(
@@ -538,9 +539,9 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
     }
 
     /**
-     * The picked .gz, unpacked on the fly into root's stdin: SHA-256 and size
-     * of the .gz and of the unpacked bytes, the ext4 magic at byte 1080, and
-     * GZIPInputStream's own CRC and ISIZE check at the end. Anything wrong
+     * The picked archive, unpacked on the fly into root's stdin: SHA-256 and size
+     * of the archive and of the unpacked bytes, the ext4 magic at byte 1080,
+     * and the archive decoder's CRC and size checks at the end. Anything wrong
      * stops the stream (RootShell then kills su, so root never keeps a short
      * image; its own size and hash checks refuse it anyway).
      */
@@ -578,41 +579,49 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                         return if (read(b, 0, 1) < 0) -1 else b[0].toInt() and 0xff
                     }
                 }
-                val gz = GZIPInputStream(counting, 1 shl 16)
+                val entryName = image.zipEntryName
+                val decoded = if (entryName == null) {
+                    GZIPInputStream(counting, 1 shl 16)
+                } else {
+                    SingleImageZipInputStream(counting, entryName, image.rawBytes)
+                }
                 val buf = ByteArray(1 shl 18)
                 val head = ByteArray(2)
-                while (true) {
-                    if (cancelled) throw IOException("stopped")
-                    val n = gz.read(buf)
-                    if (n < 0) break
-                    // ext4 superblock magic 0xEF53, little endian at byte 1080.
-                    for (k in 0 until n) {
-                        val at = rawBytes + k
-                        if (at == Images.EXT4_MAGIC_OFFSET) head[0] = buf[k]
-                        if (at == Images.EXT4_MAGIC_OFFSET + 1) {
-                            head[1] = buf[k]
-                            val magic = (head[0].toInt() and 0xff) or ((head[1].toInt() and 0xff) shl 8)
-                            if (magic != Images.EXT4_MAGIC) throw IOException("not an ext4 image")
+                decoded.use {
+                    while (true) {
+                        if (cancelled) throw IOException("stopped")
+                        val n = decoded.read(buf)
+                        if (n < 0) break
+                        // ext4 superblock magic 0xEF53, little endian at byte 1080.
+                        for (k in 0 until n) {
+                            val at = rawBytes + k
+                            if (at == Images.EXT4_MAGIC_OFFSET) head[0] = buf[k]
+                            if (at == Images.EXT4_MAGIC_OFFSET + 1) {
+                                head[1] = buf[k]
+                                val magic = (head[0].toInt() and 0xff) or ((head[1].toInt() and 0xff) shl 8)
+                                if (magic != Images.EXT4_MAGIC) throw IOException("not an ext4 image")
+                            }
+                            if (at > Images.EXT4_MAGIC_OFFSET + 1) break
                         }
-                        if (at > Images.EXT4_MAGIC_OFFSET + 1) break
+                        rawMd.update(buf, 0, n)
+                        rawBytes += n
+                        if (rawBytes > image.rawBytes) throw IOException("the image unpacks to more than ${image.rawBytes} bytes")
+                        out.write(buf, 0, n)
                     }
-                    rawMd.update(buf, 0, n)
-                    rawBytes += n
-                    if (rawBytes > image.rawBytes) throw IOException("the image unpacks to more than ${image.rawBytes} bytes")
-                    out.write(buf, 0, n)
+                    // The ZIP central directory and any unread trailing bytes count for the archive hash.
+                    // Drain before closing the decoder, which closes the counting stream too.
+                    do {
+                        val k = counting.read(buf, 0, buf.size)
+                    } while (k >= 0)
+                    out.flush()
+                    progress(gzBytes)
                 }
-                // Whatever follows the gzip stream counts for the file's hash too.
-                do {
-                    val k = counting.read(buf, 0, buf.size)
-                } while (k >= 0)
-                out.flush()
-                progress(gzBytes)
             }
         }
 
         fun problem(): String? = when {
-            gzBytes != image.gzBytes -> "the .gz has $gzBytes bytes, not ${image.gzBytes}"
-            Hashes.hex(gzMd.digest()) != image.gzSha256 -> "the .gz SHA-256 differs"
+            gzBytes != image.gzBytes -> "the archive is corrupt: has $gzBytes bytes, not ${image.gzBytes}"
+            Hashes.hex(gzMd.digest()) != image.gzSha256 -> "the archive SHA-256 differs"
             rawBytes != image.rawBytes -> "unpacked to $rawBytes bytes, not ${image.rawBytes}"
             Hashes.hex(rawMd.digest()) != image.rawSha256 -> "the unpacked SHA-256 differs"
             else -> null

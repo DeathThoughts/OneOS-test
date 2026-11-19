@@ -17,6 +17,22 @@ class PackageSetsTest {
 
     private fun guards(set: PackageSet) = Bundles.text("packages/${set.id}.guards.txt")
 
+    @Test
+    fun popsicleStagingSetMatchesItsPayloadAndGuardPins() {
+        val set = PackageSets.HYPER_POPSICLE
+        assertEquals(Images.HYPEROS_POPSICLE.id, set.imageId)
+        assertEquals(40, set.files.size)
+        val manifest = shas(set)
+        val guardsText = guards(set)
+        assertEquals(emptyList<String>(), set.check(manifest))
+        assertEquals(emptyList<String>(), set.checkGuards(guardsText, manifest))
+        assertEquals(ShaList.parse(manifest).entries.getValue("guards.txt"), Hashes.sha256(guardsText.toByteArray()))
+        assertEquals(FileRole.INJECTION_SHA256, set.file("oneos-telephony.sha256")?.role)
+        assertEquals(FileRole.APEX_PAYLOAD, set.file(PackageSets.GMS_PAYLOAD)?.role)
+        assertEquals(listOf(PackageSets.TETHERING), set.omitted)
+        assertTrue(set.hasReturnApp)
+    }
+
     @Test fun fold8StableInheritsEverySharedPayloadAndGuard() {
         val custom = PackageSets.N6_GLOBAL_F8
         assertEquals(n6.files + PackageFile("GlobalVerifiedAddons.tar", FileRole.GUEST_FIX), custom.files)
@@ -48,7 +64,7 @@ class PackageSetsTest {
         assertEquals("out/overlays_pixel_f8u_r19", pixel.sourceDir)
         assertEquals(
             listOf(PackageSets.N6_GLOBAL_F8, n6, PackageSets.X9U_IN_1105_SULTRA, pixel, PackageSets.PIXEL_SULTRA, PackageSets.PIXEL_F8, PackageSets.PIXEL9_SULTRA,
-                PackageSets.INFINITYX, PackageSets.HYPER_F8U, PackageSets.NOTHING_F8U, PackageSets.NOTHING_A, PackageSets.OXYGEN16, PackageSets.ORIGINOS, PackageSets.LINEAGE),
+                PackageSets.INFINITYX, PackageSets.HYPER_F8U, PackageSets.HYPER_POPSICLE, PackageSets.NOTHING_F8U, PackageSets.NOTHING_A, PackageSets.OXYGEN16, PackageSets.ORIGINOS, PackageSets.LINEAGE),
             PackageSets.ALL,
         )
         // Infinity-X (0.4.27): both guard jars, the camera codes (Java and native), the guest vold, the
@@ -91,12 +107,12 @@ class PackageSetsTest {
         // framework.jar and the guest vold (r7), the native camera client (r10), the 15 common payloads and bt.
         val hyper = PackageSets.HYPER_F8U
         assertEquals(Images.ID_HYPEROS_LHASA, hyper.imageId)
-        assertEquals("out/overlays_hyperos_r28", hyper.sourceDir)
-        assertEquals(39, hyper.files.size) // 0.4.38: + libsurfaceflinger_patched.so; 0.4.59: + telephony, two cameras; 0.4.70: + xiaomi-opt-telephony_patched.jar
+        assertEquals("out/overlays_hyperos_r29", hyper.sourceDir)
+        assertEquals(40, hyper.files.size) // r29 adds the guarded miui-framework.jar.
         assertEquals(listOf("socket_exec", "libaudiohal_aidl_patched.so", "MiWallpaper_patched.apk", "samcam.tar", "samcam_bar.tar"),
             hyper.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
         assertEquals(
-            listOf("services_patched.jar", "miui-services_patched.jar", "apprecovery.proinstaller_patched.jar", "framework_patched.jar",
+            listOf("services_patched.jar", "miui-services_patched.jar", "miui-framework_patched.jar", "apprecovery.proinstaller_patched.jar", "framework_patched.jar",
                 "miui-wifi-service_patched.jar", "miui-telephony-common_patched.jar", "vold_patched", "service.incremental_patched.so",
                 "libcamera_client_patched.so", "libsurfaceflinger_patched.so", "telephony-common_patched.jar"),
             hyper.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
