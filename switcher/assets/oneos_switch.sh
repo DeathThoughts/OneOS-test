@@ -166,7 +166,7 @@ done
 # vold_patched and service.incremental_patched.so (Pixel 17, and ColorOS 17
 # since 0.4.8) go with its guarded jars (the guest vold as "gvld", run 44), so
 # they are checked the same way.
-GUARD_JARS="services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
+GUARD_JARS="services_patched.jar $(awk '/^#/ { next } $2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
                                        $2 == "miui-services_patched.jar" || $2 == "apprecovery.proinstaller_patched.jar" ||
                                        $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
                                        $2 == "telephony-common_patched.jar" { print $2 }' "$STAGE/guards.txt")"
@@ -257,10 +257,13 @@ case "${ONEOS_HEAT_CAP_CPU:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP_CPU=$ONEOS_
 # oneos_root.sh unsets every other ONEOS_* variable.
 case "${ONEOS_GUEST_BOOST:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_BOOST=$ONEOS_GUEST_BOOST (0 or 1)" ;; esac
 case "${ONEOS_FULL_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_FULL_LOGS=$ONEOS_FULL_LOGS (0 or 1)" ;; esac
+# Silence the noise tags in the logcat capture (LOGCAT_FILTER, below): 0 or 1, unset meaning 1.
+case "${ONEOS_LOG_FILTER:-1}" in 0|1) ;; *) refuse "ONEOS_LOG_FILTER=$ONEOS_LOG_FILTER (0 or 1)" ;; esac
 # Quiet guest logs with Full session logs off (guest_props.sh, log.tag=W): 0
 # or 1, unset meaning 1. Only the adb loop sets it: the app's session.env has
 # no such key and oneos_root.sh unsets every other ONEOS_* variable.
 case "${ONEOS_GUEST_QUIET_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_QUIET_LOGS=$ONEOS_GUEST_QUIET_LOGS (0 or 1)" ;; esac
+case "${ONEOS_SHARE_FILES:-0}" in 0|1) ;; *) refuse "ONEOS_SHARE_FILES=$ONEOS_SHARE_FILES (0 or 1)" ;; esac
 [ "${ONEOS_GUEST_GMS:-1}" = 1 ] && [ "${ONEOS_GUEST_HIDE_GMS:-0}" = 1 ] && [ -f "$STAGE/gmssystem_payload.img" ] &&
     refuse "ONEOS_GUEST_GMS is on (the default) with gmssystem_payload.img staged, and ONEOS_GUEST_HIDE_GMS=1 hides Google services: set one of them to 0"
 # facehal-rs in a HyperOS guest is gone (review by the mlcraze5 fork,
@@ -288,7 +291,7 @@ fi
 # The guarded framework jars (scripts/make-overlays.sh: storage, installd,
 # power, sysrq and weaver guards). guest_prepare.sh checks them again.
 for need in $GUARD_JARS; do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$STAGE/guards.txt")
+    sum=$(awk -v n="$need" '$1 !~ /^#/ && $2 == n {print $1}' "$STAGE/guards.txt")
     [ -n "$sum" ] && [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] ||
         refuse "$need is missing or not the guarded build in guards.txt"
 done
@@ -296,7 +299,7 @@ done
 echo "preflight: guarded jars done $(date +%T)"
 # The guest vold as "gvld" takes both binaries (guest_prepare.sh refuses one
 # alone too, but only once One UI's framework is stopped).
-[ "$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")" = 1 ] &&
+[ "$(awk '/^#/ { next } $2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")" = 1 ] &&
     refuse "guards.txt lists only one of vold_patched and service.incremental_patched.so (a half-built set)"
 # The /data bridges (bridges.sh) and their floor, as guest_prepare.sh needs
 # them; nothing may be left mounted under the stage or bridged from a session
@@ -508,7 +511,9 @@ rm -f "$STAGE/full_logs_mid.log"
 # guest_no_apex_installs.py); a difference means a path the guards missed.
 # Read only; it only logs.
 host_state() {
-    f=$(readlink -f "$(getprop ro.frp.pst)" 2>/dev/null)
+    # One UI's FRP partition: the session points ro.frp.pst at the guest's own block (guest_props.sh).
+    f=$(cat "$STAGE/host_frp_pst" 2>/dev/null); [ -n "$f" ] || f=$(getprop ro.frp.pst)
+    f=$(readlink -f "$f" 2>/dev/null)
     [ -b "$f" ] && echo "frp $(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
     for p in /data/misc/gatekeeper /data/apex/active /data/apex/sessions; do
         [ -d "$p" ] && find "$p" -type f -exec stat -c '%n %s %Y' {} + 2>/dev/null | sort
@@ -524,7 +529,9 @@ echo "preflight: host state done $(date +%T)"
 # overwrite: a file a round skips this time, such as a stack of an app that is
 # not running, would be the last session's) and the return's capture.
 rm -rf "$STAGE/diag_wifi" "$STAGE/diag_fold" "$STAGE/diag_display" "$STAGE/diag_pages" \
-       "$STAGE/diag_20" "$STAGE/diag_40" "$STAGE/diag_90" "$STAGE/diag_final" "$STAGE/diag_return"
+       "$STAGE/diag_20" "$STAGE/diag_40" "$STAGE/diag_90" "$STAGE/diag_final" "$STAGE/diag_return" \
+       "$STAGE/diag_end"
+rm -f "$STAGE/mem_300.log" "$STAGE/heat_series.log"
 echo "Host state recorded: $(wc -l < "$STAGE/host_state.before") entries"
 # This phone's camera hole, while One UI's display service still runs, for
 # guest_props.sh (bar phones): the image's ro.oplus.display.screenhole.positon
@@ -900,6 +907,31 @@ echo "preflight: guest baseline done $(date +%T)"
 # guest's boot) after about 26 minutes. The watcher's 90 s round also keeps
 # the files of the boot in $LOGS/head (hard links, below).
 LOGS=/data/local/tmp/oneos_logs
+# Logcat filterspecs for the two captures below (the one this session starts and the
+# one the guest's OneOS app turns on mid-session), defined once so they cannot drift.
+# Galaxy S25 Ultra, ColorOS 17 guest, sessions 22343aacdd4e1d6c, 161a843fbaddcd7a and
+# f8c0108ef1bea94a (2026-11-18/19): the guest logs 210-420k lines/min at boot and
+# 20-150k/min later, so a 32 MB file lasted 30-60 s, the report (head/, the newest
+# files, crash files, the guest's last two) missed most of the middle of a session and
+# logd took about 19% of a core. A count of the captured guest windows showed these
+# tags are pure noise: silenced, they remove 17% / 18% / 37% of the lines (s1/s2/s3).
+# QuickStartRUSHelper (RUS list parse, 11-12k lines/session), SettingsState (E "invalid
+# flag name", 6-8k), OplusGcSupressionHelper (15-line stack per app start), minksocket
+# (Samsung host secure-world IPC), SurfaceControl (launcher setMatrix), DigitalClock,
+# the blur/render tags, SQLiteLog, Finsky, SG (pantanal UmsScanner), HYPER-HAL (Samsung
+# host perf HAL) and the other Oplus helpers. Nothing used for diagnosis is listed
+# (MediaProvider, StorageManager*, ActivityManager, WindowManager, Keyguard, Biometric,
+# camera, vold, init, OneOS*, audio...): '*:V' keeps every other tag. The specs go after
+# -f/-r/-n so return_to_oneui.sh's pkill '^logcat .*/oneos_logs/boot.log' still matches.
+# ONEOS_LOG_FILTER=0 (adb loop only, like ONEOS_GUEST_BOOST) captures everything again.
+# One line once assembled (the backslash-newlines vanish): the value is pasted into the
+# capture command's script text, where the quotes keep '*' from being a glob.
+LOGCAT_FILTER="QuickStartRUSHelper:S SettingsState:S OplusGcSupressionHelper:S minksocket:S \
+SurfaceControl:S DigitalClock:S UniRenderCanvasContext:S BackgroundBlurDrawable:S \
+Blur_WindowBlurSessionImpl:S Blur_ScreenCapture:S BlurApp:S SQLiteLog:S Finsky:S \
+SG:S OplusRequestedLayerState:S OplusStartingWindowManager:S OverlayManager:S \
+OplusAppDataMigrateManager:S ULELite:S Region:S HYPER-HAL:S '*:V'"
+if [ "${ONEOS_LOG_FILTER:-1}" = 0 ]; then LOGCAT_FILTER=""; fi
 # LOGCAT_HEAD=1 only for a capture this session starts: a capture already
 # running (by hand, or the last session's within the 120 s before
 # return_to_oneui.sh stops it) keeps its head/, which may hold the boot of an
@@ -932,7 +964,14 @@ elif [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
     else
         rm -rf "$LOGS.prev"; [ -d "$LOGS" ] && mv "$LOGS" "$LOGS.prev"
         mkdir -p "$LOGS"
-        $BB setsid logcat -b all -v threadtime -f "$LOGS/boot.log" -r 32768 -n 24 </dev/null >/dev/null 2>&1 &
+        # 0.5.20: through a small script that logs the end of the capture with its exit status (several Galaxy
+        # S24+/S24 FE sessions with full logs on had no capture at all, "0 files of the boot kept": the process had
+        # gone and nothing said when or why); the watcher's rounds start it again if it ended early (see there).
+        printf '%s\n' '#!/system/bin/sh' \
+            "logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER" \
+            "echo \"\$(date) logcat capture ended: exit \$? (\$(ls $LOGS 2>/dev/null | wc -l) files in $LOGS)\" >> $STAGE/auto_return.log" \
+            > "$STAGE/logcat_capture.sh"
+        $BB setsid sh "$STAGE/logcat_capture.sh" </dev/null >/dev/null 2>&1 &
         LOGCAT_HEAD=1
         echo "Logcat capture: $LOGS/boot.log"
     fi
@@ -953,11 +992,12 @@ fi
 # fell in the gap between the capture's head and its end (A56: 13:48-15:35);
 # this log had the whole A56 session but none of those tags.
 if [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
-    swp=$(cat "$STAGE/sound_watch.pid" 2>/dev/null)
-    case "$swp" in
-        ""|*[!0-9]*) ;;
-        *) tr '\0' ' ' < "/proc/$swp/cmdline" 2>/dev/null | grep -q "sound_watch.log" && kill "$swp" 2>/dev/null ;;
-    esac
+    # Every earlier one, by its command line (0.5.20): the saved pid missed some, and the two-hour
+    # timeout does not count while the phone sleeps, so readers from earlier sessions piled up (A36
+    # ColorOS 11-17: five at once, logd at 100 % CPU and the guest sluggish).
+    for swp in $(pgrep -f "^logcat .*$STAGE/sound_watch.log" 2>/dev/null) $(pgrep -f "timeout 7200 logca[t] .*$STAGE/sound_watch.log" 2>/dev/null); do
+        kill "$swp" 2>/dev/null
+    done
     [ -f "$STAGE/sound_watch.log" ] && mv -f "$STAGE/sound_watch.log" "$STAGE/sound_watch.prev"
     # incidentd: ColorOS sessions db19aee410bd79ff and 75e538ac0ed725df show incident_helper
     # and a second top at 40-100% CPU for 30-60 s several times a session; say what requests them.
@@ -1519,7 +1559,9 @@ kill -9 $(pidof system_server) 2>/dev/null || true
 # 47 s for the guest's permission service, and init rebooted the phone right after ("reboot,vold-failed",
 # 0.4.69 A15 c2da41ee: dumpstate pid 10916, "Check passed after 47063ms", shutdown 0.3 s later).
 rm -f "$STAGE/data/guest_audio.flag"
-nohup $BB sh -c "while true; do [ \"\$(getprop init.svc.zygote)\" = \"running\" ] && setprop ctl.stop zygote; [ \"\$(getprop init.svc.zygote_secondary)\" = \"running\" ] && setprop ctl.stop zygote_secondary; [ ! -f $STAGE/data/oneos_host_sf_frozen ] && [ \"\$(getprop init.svc.surfaceflinger)\" = \"running\" ] && setprop ctl.stop surfaceflinger; [ \"\$(getprop init.svc.bootanim)\" = \"running\" ] && setprop ctl.stop bootanim; [ -f $STAGE/data/guest_audio.flag ] && [ \"\$(getprop init.svc.audioserver)\" = \"running\" ] && setprop ctl.stop audioserver; for s in dumpstate dumpstatez bugreport bugreportd; do [ \"\$(getprop init.svc.\$s)\" = \"running\" ] && setprop ctl.stop \$s; done; sleep 0.2; done" </dev/null >/dev/null 2>&1 &
+# 0.5.18 (owner, A36: Nothing OS sluggish): 9 getprop processes every 0.2 s were about 9 % of a core all session.
+# Zygote and surfaceflinger still every 0.2 s; bootanim, audioserver and the dump services every second.
+nohup $BB sh -c "n=0; while true; do [ \"\$(getprop init.svc.zygote)\" = \"running\" ] && setprop ctl.stop zygote; [ ! -f $STAGE/data/oneos_host_sf_frozen ] && [ \"\$(getprop init.svc.surfaceflinger)\" = \"running\" ] && setprop ctl.stop surfaceflinger; n=\$((n + 1)); if [ \$n -ge 5 ]; then n=0; [ \"\$(getprop init.svc.zygote_secondary)\" = \"running\" ] && setprop ctl.stop zygote_secondary; [ \"\$(getprop init.svc.bootanim)\" = \"running\" ] && setprop ctl.stop bootanim; [ -f $STAGE/data/guest_audio.flag ] && [ \"\$(getprop init.svc.audioserver)\" = \"running\" ] && setprop ctl.stop audioserver; for s in dumpstate dumpstatez bugreport bugreportd; do [ \"\$(getprop init.svc.\$s)\" = \"running\" ] && setprop ctl.stop \$s; done; fi; sleep 0.2; done" </dev/null >/dev/null 2>&1 &
 sleep 1
 # The session's own copy of One UI's property store, now that One UI's
 # framework is down (guest_props.sh store-on): the guest's persist settings
@@ -1609,6 +1651,29 @@ ls -l /vendor/etc/displayconfig /vendor/odm/etc/displayconfig /vendor/odm/etc/de
       echo "== $b"; strings -a "$b" 2>/dev/null | grep -E '^/sys/|enabled|fold_state' | head -40
   done
 } > "$STAGE/diag_host/touch_nodes.txt" 2>&1
+# The panel's local HBM (in-house optical fingerprint spot, Galaxy A/S with an optical sensor): One UI's fingerprint
+# service leaves it at 1 (on, source off) while its keyguard waits for a finger, and the panel then draws its own
+# glowing circle over whatever is shown (A36, fresh Nothing OS, 0.5.18: from the guest's boot animation on, owner:
+# "glowing like hell"). One UI's service is stopped now: the panel starts the guest with it off.
+LHBM=/sys/class/lcd/panel/local_hbm
+if [ -w "$LHBM" ]; then
+    v=$(cat "$LHBM" 2>/dev/null)
+    case "$v" in 0|'') ;; *) echo 0 > "$LHBM" 2>/dev/null; echo "Panel local HBM was $v at the switch (One UI's fingerprint wait): now $(cat "$LHBM" 2>/dev/null)" ;; esac
+fi
+# Samsung's in-kernel touch booster (input_booster: each touch raises the CPU clocks for a few hundred ms). One UI
+# turns it on through its own services; a guest has none of them, so a session ran without it (enable_event 0):
+# ColorOS on the A36, 0.5.20, frames at 14-18 ms median at 120 Hz, 8 ms with it on (owner: "slightly better").
+# On for the session; return_to_oneui.sh puts One UI's value back. ONEOS_TOUCH_BOOST=0 leaves it.
+IB=/sys/class/input_booster/enable_event
+rm -f "$STAGE/host_input_booster"
+if [ "${ONEOS_TOUCH_BOOST:-1}" = 1 ] && [ -w "$IB" ]; then
+    v=$(cat "$IB" 2>/dev/null)
+    case "$v" in
+        0) echo "$v" > "$STAGE/host_input_booster"; echo 1 > "$IB" 2>/dev/null
+           echo "Touch booster: on for the session (One UI had $v): now $(cat "$IB" 2>/dev/null)" ;;
+        *) echo "Touch booster: already on ($v)" ;;
+    esac
+fi
 echo "=== [5/6] $(date +%T) Executing Mount Hierarchy Preparation ==="
 /system/bin/sh "$STAGE/guest_prepare.sh"
 PREP_RET=$?
@@ -2233,6 +2298,18 @@ case "${ONEOS_GUEST_DENSITY:-auto}" in
     [1-9][0-9][0-9]) [ "$ONEOS_GUEST_DENSITY" -ge 120 ] && [ "$ONEOS_GUEST_DENSITY" -le 640 ] && GUEST_DENSITY=$ONEOS_GUEST_DENSITY ;;
 esac
 [ "$GUEST_DENSITY" = "${ONEOS_GUEST_DENSITY:-auto}" ] || echo "ONEOS_GUEST_DENSITY=$ONEOS_GUEST_DENSITY is not off, auto or 120-640: auto"
+# The UI activator used to force 120 Hz on every phone.  On a 90 Hz panel that
+# creates an impossible [120, 120] DisplayModeDirector vote and Android falls
+# back to 60 Hz.  Read the highest physical mode (up to OneOS's 120 Hz policy)
+# from the One UI dump captured before the switch.  Keep 120 as the conservative
+# fallback for old stages or an incomplete dump.
+GUEST_REFRESH=120.0
+R=$(awk -F'fps=' '{ for (i = 2; i <= NF; i++) { v = $i + 0; if (v >= 30 && v <= 120 && v > m) m = v } }
+    END { if (m) printf "%.1f", m }' "$STAGE/display_host.txt" 2>/dev/null)
+case "$R" in
+    30.0|[3-9][0-9].0|1[01][0-9].0|120.0) GUEST_REFRESH=$R ;;
+esac
+echo "Guest refresh-rate policy: ${GUEST_REFRESH} Hz (One UI physical modes)"
 # ONEOS_GUEST_POSTURE=live: the fold line's posture follows the guest's hinge
 # state instead of always flat.
 # Live by default with the hinge sets of pull request #1 (Fold8) and the Fold8 Ultra's.
@@ -2249,6 +2326,19 @@ esac
 for h in $HINGE_SET; do
     grep -q "^  \"set\": \"$h\",\$" "$STAGE/.oneos_stage" && POSTURE_DEFAULT=live
 done
+# The contributor Lineage SystemUI uses Pixel's native half-fold posture.
+# The baseline donor leaves Stable's posture policy alone.
+if [ "${ONEOS_PROFILE:-}" = f8 ] && grep -q '^  "image": "lineage24-infiniti",$' "$STAGE/.oneos_stage" &&
+   [ -f "$STAGE/Fold8LineageSystemUI.apk" ] &&
+   [ "$(sha256sum "$STAGE/Fold8LineageSystemUI.apk" | cut -d' ' -f1)" != aa22961855b1f8a9d3dbbbc643922f9b216f6d411313e12eb8b70086287b84c3 ]; then
+    POSTURE_DEFAULT=live
+fi
+# Infinity-X's contributor SystemUI uses the same native hinge posture; Stable keeps its original default.
+if [ "${ONEOS_PROFILE:-}" = f8 ] && grep -q '^  "image": "infinityx41-findx9u",$' "$STAGE/.oneos_stage" &&
+   [ -f "$STAGE/Fold8InfinitySystemUI.apk" ] &&
+   [ "$(sha256sum "$STAGE/Fold8InfinitySystemUI.apk" | cut -d' ' -f1)" != 6a99684e831f9635738189d39667debe0f8b798012fa4eb622a7cb87ad9b1ddf ]; then
+    POSTURE_DEFAULT=live
+fi
 GUEST_POSTURE_LIVE=0; [ "${ONEOS_GUEST_POSTURE:-$POSTURE_DEFAULT}" = live ] && GUEST_POSTURE_LIVE=1
 GUEST_FOLD_FORM=0; [ "${ONEOS_GUEST_FORM:-fold}" = fold ] && GUEST_FOLD_FORM=1
 # An OxygenOS image (its stable display size resource, see "stable display size"
@@ -2426,13 +2516,14 @@ while true; do
                 echo \"[UI Activator] screen timeout: was stay_on_while_plugged_in=\${SOP:-?} screen_off_timeout=\${SOT:-?}; the forced values reset once (0, 60000)\"
             fi
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system haptic_feedback_enabled 1
-            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate 120.0
+            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate $GUEST_REFRESH
             # On ColorOS, panel_keeper and /data/oneos_sf_kick.sh already cure the
             # 24 Hz start without pinning; forcing min_refresh_rate 120.0 held
             # PRIORITY_USER_SETTING_MIN_RENDER_FRAME_RATE at 120 Hz all session over
             # OplusRefreshRateService (S25 Ultra, coloros17-findx9u-in-1105,
             # sessions db19aee410bd79ff and 75e538ac0ed725df: diag_90_display.txt).
             # Once per stage, delete a forced 120/120.0 floor; any other value stays.
+            # (0.5.20 upstream: the peak is the panel's highest physical mode, GUEST_REFRESH, not always 120.)
             if [ $GUEST_OPLUS = 1 ]; then
                 if [ -L $STAGE/data/oneos_min_refresh_reset ]; then
                     echo '[UI Activator] min refresh rate: data/oneos_min_refresh_reset is a link, not made by OneOS; left alone'
@@ -2451,7 +2542,7 @@ while true; do
                     esac
                 fi
             else
-                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 120.0
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate $GUEST_REFRESH
             fi
             # ColorOS's touch idle (OTI) pushes SurfaceFlinger to 240/60 Hz over the
             # 120 Hz policy on this panel (run 29); also staged off by guest_prepare.sh.
@@ -3048,9 +3139,26 @@ while true; do
             # The guest's updaters could hand an OTA to the phone's own
             # update_engine: ColorOS's, Pixel's factory OTA and Infinity-X's
             # Updater.
-            for p in com.oplus.ota com.google.android.factoryota com.infinity.updater; do
+            for p in com.google.android.factoryota com.infinity.updater; do
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm disable-user --user 0 \$p >/dev/null 2>&1 || true
             done
+            # ColorOS's updater stays enabled for its About phone banner (owner, 0.5.20: the banner went
+            # with the disabled app) but without network: chain3 (OEM deny) for its uid first, enabled after;
+            # if the block does not take, it is disabled as before.
+            if [ $GUEST_OPLUS = 1 ]; then
+                G=\"$BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh\"
+                \$G /system/bin/cmd connectivity set-chain3-enabled true >/dev/null 2>&1
+                \$G /system/bin/cmd connectivity set-package-networking-enabled false com.oplus.ota >/dev/null 2>&1
+                if \$G /system/bin/cmd connectivity get-package-networking-enabled com.oplus.ota 2>/dev/null | grep -q ':deny'; then
+                    \$G /system/bin/pm enable --user 0 com.oplus.ota >/dev/null 2>&1
+                    echo \"[UI Activator] ColorOS updater: enabled, network blocked (About phone banner kept)\"
+                else
+                    \$G /system/bin/pm disable-user --user 0 com.oplus.ota >/dev/null 2>&1
+                    echo \"[UI Activator] ColorOS updater: network block not available, disabled\"
+                fi
+            else
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm disable-user --user 0 com.oplus.ota >/dev/null 2>&1 || true
+            fi
             # Cover panel. With the fold layout (guest_start.sh wrote
             # data/oneos_fold_mode) ColorOS's DisplayManager switches the panels
             # on the lid switch and keeps the cover off while unfolded: only log
@@ -3335,6 +3443,18 @@ while true; do
             # earlier session made.
             gxo() { timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay \"\$@\" >/dev/null 2>&1; }
             gdim() { timeout 30 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_overlay_dimen.dex /system/bin/app_process /system/bin OneOSOverlayDimen \"\$@\" 2>&1 | grep -E '^(registered|failed)' | tail -n 1; }
+            # 0.5.18, Nothing OS (reports, A35: \"screen brightness is low compared to One UI\"): Nothing keeps its
+            # slider at most at config_screenBrightnessSettingMaximumFloat 0.294 (mScreenBrightnessMaximum in every
+            # Nothing session; every other guest 1.0 on the same panels), the rest being its own phones' sunlight
+            # boost, which a Galaxy never gets. The whole range, as the other guests have it; the framework reads it
+            # at start, so from the next session on.
+            if [ -f $STAGE/data/oneos_overlay_dimen.dex ] && { [ -e $STAGE/rootfs/system_ext/framework/nt-telephony-common.jar ] || [ -e $STAGE/rootfs/system/system_ext/framework/nt-telephony-common.jar ]; }; then
+                r=\$(gdim OneOSNtBrightness android android:dimen/config_screenBrightnessSettingMaximumFloat=f:1.0)
+                case \"\$r\" in
+                    registered*) gxo enable --user 0 com.android.shell:OneOSNtBrightness && echo \"[UI Activator] Nothing brightness: whole range (from the next session)\" ;;
+                    *) echo \"[UI Activator] Nothing brightness overlay not made: \$r\" ;;
+                esac
+            fi
             # The corner radius for the guests the block below leaves out (0.4.76,
             # host_corner_radius; see where the switch saves it): ColorOS on any
             # phone, every guest on a Fold. Made after the block.
@@ -3481,6 +3601,15 @@ while true; do
                 fi
                 ON=''
                 for o in \$OVS; do gxo enable --user 0 com.android.shell:\$o && ON=\"\$ON \$o\"; done
+                # 0.5.18 (owner, A36): Nothing's SystemUI reads the power key's place (the screen-off animation) once,
+                # when it starts, and in a guest it starts before these overlays hold: the animation went to Nothing's
+                # own 620 px every session, and right only after a SystemUI restart (owner: \"power animation good\",
+                # double tap to wake still working). Nothing OS with the power key overlay on: SystemUI restarted
+                # once, here, every session.
+                case \" \$ON \" in *\" OneOSNtPowerKey \"*)
+                    sp=\$(timeout 10 $BB nsenter -t \$PID -m /system/bin/pidof com.android.systemui 2>/dev/null)
+                    case \"\$sp\" in ''|*[!0-9\ ]*) ;; *) kill \$sp 2>/dev/null && echo \"[UI Activator] Nothing's SystemUI restarted for the power key place and status bar\" ;; esac ;;
+                esac
                 echo \"[UI Activator] status bar: One UI's cutout '\${HCS:-none}', as \$CUTU: '\${CUT:-none}', rect '\${CUTR:-none}'; height \${HSB:-?} px\${SBK:+ (\$HSBG px at the \${SBK% *} px the guest runs)}, corner radius \${HRC:-?} px; overlays on:\${ON:- none}\${DIMS:+ (not made:\$DIMS)}\"
             else
                 # No host cutout this session (ONEOS_GUEST_HOST_CUTOUT=0, or a
@@ -3845,7 +3974,7 @@ while true; do
 
             # Pixel Fold8 / Fold8 Ultra: start the system-UID sensor reader in the guest namespace
             # (fold8_pixel.sh prepare made runtime.sh only for those two sets).
-            if { [ \"${ONEOS_PROFILE:-}\" = f8 ] || [ \"${ONEOS_PROFILE:-}\" = f8u ]; } && grep -q '\"set\": \"pixel-f8u\\{0,1\\}\",' \"$STAGE/.oneos_stage\" && [ -f \"$STAGE/data/oneos_pixel_hinge/runtime.sh\" ]; then
+            if { [ \"${ONEOS_PROFILE:-}\" = f8 ] || [ \"${ONEOS_PROFILE:-}\" = f8u ]; } && grep -q '\"set\": \"\\(pixel-f8u\\{0,1\\}\\|lineage\\|infinityx\\)\",' \"$STAGE/.oneos_stage\" && [ -f \"$STAGE/data/oneos_pixel_hinge/runtime.sh\" ]; then
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh /data/oneos_pixel_hinge/runtime.sh runtime >\"$STAGE/pixel_hinge_runtime.log\" 2>&1 || echo '[UI Activator] Pixel hinge relay unavailable; native sensor fallback active'
             fi
 
@@ -3903,15 +4032,29 @@ while true; do
         fi
     fi
 done
-# This boot's pass is done: wait for a soft reboot of the guest, or end with
-# the session (the return's first step, or its namespace record gone).
+# This boot's pass is done: wait for a soft reboot of the guest, or for its
+# system_server to be replaced without one. The latter happens after a guest
+# framework crash/watchdog restart: softreboot.gen does not change, but helpers
+# tied to the old PID (notably edmnativehelper) exit. Without checking the PID
+# here the activator waits forever and every later camera open loses five
+# seconds to the missing Knox service.
 while [ \"\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null)\" = \"\$GEN\" ]; do
     sleep 2
     [ -f $STAGE/data/oneos_rec_stop ] && exit 0
     [ -f $STAGE/guest_mntns ] || exit 0
+    NPID=\$(pidof system_server | awk '{print \$1}')
+    if [ -n \"\$NPID\" ] && [ \"\$NPID\" != \"\$PID\" ]; then
+        echo \"[UI Activator] guest system_server changed \$PID -> \$NPID without a soft-reboot generation; starting another pass\"
+        break
+    fi
 done
-GEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=\$((PASS + 1))
-echo \"[UI Activator] soft reboot of the guest (generation \$GEN): pass \$PASS, waiting for its new boot\"
+NGEN=\$(cat $STAGE/tmp/softreboot.gen 2>/dev/null); PASS=\$((PASS + 1))
+if [ \"\$NGEN\" != \"\$GEN\" ]; then
+    GEN=\$NGEN
+    echo \"[UI Activator] soft reboot of the guest (generation \$GEN): pass \$PASS, waiting for its new boot\"
+else
+    echo \"[UI Activator] guest framework restart: pass \$PASS, waiting for its new boot\"
+fi
 done
 "
 # A fresh file every session: rm -f takes a link at that path away (not what
@@ -4032,10 +4175,12 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # skin. Every 10 s the guest's SKIN temperature (its thermal service on the
 # shared HAL, read as the sampler reads it) sets a level: from 45 C (Samsung's
 # SEVERE) every cpufreq policy's scaling_max_freq is 80% of its
-# cpuinfo_max_freq, from 47 C 65%, from 50 C 50%; a level ends 2 C under where
-# it began. The first reading under 45 C lifts a cap One UI left (run 45: half
-# clock for a whole session); after that the policies are written only when the
-# level changes, each change logged in $STAGE/heat_cap.log. Only scaling_max_freq
+# cpuinfo_max_freq, from 46.5 C 65%, from 48 C 50%; going up takes one reading,
+# and stepping down needs three consecutive readings (30 s) 2 C under the
+# level's threshold (< 43, < 44.5, < 46 C), logging down-holds as "held". The
+# first reading under 45 C lifts a cap One UI left (run 45: half clock for a
+# whole session); after that the policies are written only when the level
+# changes, each change logged in $STAGE/heat_cap.log. Only scaling_max_freq
 # (the sysfs request) is written: the kernel's own thermal limits stay. It stops
 # with the return (data/oneos_rec_stop) or when the guest's namespace record is
 # gone, giving the policies their full clock back if it had capped them;
@@ -4050,18 +4195,30 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # hottest CPU thermal zone (/sys/class/thermal, millidegrees; Qualcomm's cpu-*
 # and cpuss-*, Exynos and Tensor's BIG, MID and LITTLE, any other *cpu*; never
 # a gpu, ddr, modem, npu, battery or skin zone) and keeps a CPU level of its
-# own: 1 from 75 C, 2 from 80, 3 from 85, each ending 3 C under where it began.
-# A higher CPU level is entered only on three readings running (30 s) at or
-# above its threshold, so a single spike (a compile, an app start) does not cap
-# the clocks for the minutes the hysteresis then holds them (review by the
-# mlcraze5 fork, 2026-11-16); the skin levels still take one reading.
-# Two readings were not enough (S25 Ultra, Snapdragon 8 Elite, ColorOS 17,
-# session bceaef29fb128e94): single zones (cpu-1-1-1, cpu-1-0-1, cpu-0-2-1)
-# read 94-106 C for two readings and 64-79 C at the third, five times in
-# 3.5 min, while Samsung's AP sensor read 52-53 C and skin 44-46 C; each went
-# to level 3 (50%) and turned the guest boost off. The S23's 84-88 C above
-# held for minutes, so three readings still catch it. A reading that would
-# have gone up but was held back is logged once ("held"), with the two before.
+# own. Earlier (75/80/85 C, 3-reading entry, 1-reading exit; review by the
+# mlcraze5 fork, 2026-11-16; bceaef29fb128e94), S25 Ultra
+# coloros17-findx9u-in-1105 sessions db475ad5017133c4 (stage/heat_cap.log line
+# 8: 03:34:19 skin 41.8 C, ap 62.6 C, cpu 104.3 C (cpu-1-1-1), level 0 to 3:
+# 50%) and a12bf19e1931e81a still had peak skin 47.5 C across the four
+# sessions while every level-3 entry came from a CPU core zone, dropping GPU
+# to 525 MHz and turning oneos_guest_boost WALT input boost off, while core
+# temps cooled 15-35 C in one 10 s tick and the cap saw-toothed at 1.40-1.86
+# changes/min.
+# Skin thresholds 45.0 / 46.5 / 48.0 C (was 45 / 47.5 / 50; owner's decision,
+# review of the Curve B branch): Samsung's thermal HAL in the guest lists SKIN
+# hot thresholds [38, 40, 42, 45, 47, 60, 90] (diag_90_thermal.txt), so 47 C is
+# its CRITICAL point, and peak skin in four sessions was 47.5 C: the old 47.5
+# and 50 C steps were at or past CRITICAL before they acted.
+# Missing skin reading (dumpsys timed out): while the skin level is above 0 it
+# is held and the skin history is left as it was for that tick, instead of
+# dropping to the CPU level alone (skin 46, none, none, 44 gave levels
+# 1,0,0,1: full clock for two ticks, then capped again; review of the Curve B
+# branch).
+# Curve B CPU-zone thresholds: CPU level can never exceed level 2 (level 3
+# 50% CPU, 525 MHz GPU, boost off are skin >= 48.0 C only); level 1 at >= 82 C
+# for 3 consecutive readings, level 2 at >= 90 C for 4 consecutive readings;
+# stepping down requires 3 consecutive readings 4 C under the threshold (< 78 C,
+# < 86 C). Both up-holds and down-holds log "held" with the readings before.
 # The higher of the two levels is applied, with the same table; with no skin
 # reading the CPU level alone. The guest thermal status below stays on skin.
 # Samsung's AP sensor (the whole application processor, mName=AP in the same
@@ -4072,6 +4229,16 @@ echo "Session sampler: every 30 s to $STAGE/diag_series.txt"
 # thresholds.
 # ONEOS_HEAT_CAP_CPU=0 (the adb loop only: the app's session.env has no such
 # key): skin only, as before.
+# Post-camera cpufreq_max_limit release (S25 Ultra, coloros17-findx9u-in-1105,
+# session a12bf19e1931e81a): at 04:03:33 Samsung Camera ran and set
+# cpufreq_max_limit=1958400; after it closed, policy0/policy6 stayed clamped at
+# 1996800/1958400 for 92 s (04:03:39-04:05:11) because oneos_heat_cap only
+# clears $CFL inside full() at level 0. On every tick at level 1 or 2, when
+# HOST_LOW_POWER=0, $CFL is writable and != -1, and com.sec.android.app.camera
+# is no longer running (pidof), cam_limit() writes -1 to $CFL, records the
+# released value in $STAGE/cpufreq_max_limit.released just like full(), and
+# logs "camera gone: cpufreq_max_limit <old> -> -1". While the camera runs or
+# when One UI's power saving (HOST_LOW_POWER=1) is on, $CFL is never touched.
 # Guest thermal status (Pixel; owner's go, 2026-11-06). Samsung's thermal HAL
 # told Pixel CRITICAL at 49.6 C skin, and Pixel's JobScheduler holds every
 # ordinary job from SEVERE on (ThermalStatusRestriction, fixed in its code):
@@ -4108,9 +4275,9 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     F=$STAGE/heat_cap.log
     CFL=/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit
     if [ $HEAT_CAP = 1 ]; then
-        echo \"# \$(date) OneOS heat cap: from 45, 47, 50 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (2 C hysteresis)\" > \$F
+        echo \"# \$(date) OneOS heat cap: from 45.0, 46.5, 48.0 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)\" > \$F
         if [ $HEAT_CAP_CPU = 1 ]; then
-            echo \"# and from 75, 80, 85 C on the hottest CPU thermal zone (three readings running to go up, 3 C hysteresis); the higher level applies\" >> \$F
+            echo \"# and from 82, 90 C on the hottest CPU thermal zone for levels 1 and 2 only (three and four readings running to go up, three 4 C under to step down); the higher level applies\" >> \$F
         else
             echo \"# CPU thermal zones not read (ONEOS_HEAT_CAP_CPU=0): skin only\" >> \$F
         fi
@@ -4118,6 +4285,11 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         echo \"# \$(date) OneOS heat cap off (Cool down when hot): the guest thermal status only\" > \$F
     fi
     [ $GUEST_THERMAL_MAP = 1 ] && echo \"# guest thermal status from skin: NONE, LIGHT 47, MODERATE 50, SEVERE 53, the HAL status from 56 C (1 C hysteresis)\" >> \$F
+    # Every 30 s, this loop's own readings, for a before/after comparison (S25 Ultra,
+    # coloros17-findx9u-in-1105, sessions db475ad5017133c4 and a12bf19e1931e81a);
+    # heat_cap.log keeps its lines (scripts/test-heat-cap-cpu.py).
+    HS=$STAGE/heat_series.log
+    echo \"# \$(date) skin, ap, hottest CPU zone (C), level, skin and CPU levels, cpufreq_max_limit\" > \$HS
     # The GPU's ceiling vote (Samsung's gpu_max_clock, in MHz) outlives One UI's
     # SSRM the same way the CPU's does: a whole S23 session at 220 of 719 MHz
     # (HyperOS 0.5.13), so every app animation dropped frames in every guest.
@@ -4159,6 +4331,12 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
         gpu_at 100
         echo \"\$(date +%T) \$1: full clock:\$c\" >> \$F
     }
+    cam_limit() {
+        if [ \"$HOST_LOW_POWER\" = 0 ] && [ -w \$CFL ] && [ \"\$(cat \$CFL 2>/dev/null)\" != -1 ] && ! pidof com.sec.android.app.camera >/dev/null 2>&1; then
+            v=\$(cat \$CFL 2>/dev/null)
+            echo -1 > \$CFL 2>/dev/null && echo \"\$v\" > $STAGE/cpufreq_max_limit.released && echo \"\$(date +%T) camera gone: cpufreq_max_limit \$v -> \$(cat \$CFL 2>/dev/null)\" >> \$F
+        fi
+    }
     # The hottest CPU thermal zone: ct in millidegrees, cz its type; both
     # empty when none reads. Builtins only (read, case): it runs every 10 s
     # over every zone (about a hundred on a Snapdragon 8 Gen 2).
@@ -4182,10 +4360,11 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     lvl=0; first=1; tl=-1; lp=''
     # The level for the guest boost below: no boost at level 3.
     [ $HEAT_CAP = 1 ] && echo 0 > $STAGE/heat_cap.level
-    # cpu_prev, cpu_prev2: the two CPU readings before this one (milli C), not
-    # the cap percent pct below, which the same loop sets (review of de66247 by
-    # the mlcraze5 fork, 2026-11-16; three readings: S25 Ultra, bceaef29fb128e94).
-    slvl=0; clvl=0; cpu_prev=0; cpu_prev2=0
+    # slvl/clvl history: sk_prev, sk_prev2 (skin C) and cpu_prev..cpu_prev3 (milli C).
+    # Curve B (S25 Ultra, coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
+    # a12bf19e1931e81a): skin enters immediately and waits 3 readings (-2 C) to leave;
+    # CPU needs 3 >= 82 C for L1, 4 >= 90 C for L2 (max), and 3 (-4 C) to leave.
+    slvl=0; clvl=0; sk_prev=''; sk_prev2=''; cpu_prev=0; cpu_prev2=0; cpu_prev3=0; hst=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -4211,27 +4390,37 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 tl=\$nt
             fi
         fi
-        cpu_prev2=\$cpu_prev; cpu_prev=\${ct:-0}; ct=''; cz=''
+        ct=''; cz=''
         [ $HEAT_CAP = 1 ] && cpu_temp
-        if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ]; } && [ $HEAT_CAP = 1 ]; then
+        if { [ -z \"\$sk\" ] && [ \$slvl = 0 ]; } || [ $HEAT_CAP != 1 ]; then sk_prev2=''; sk_prev=''; fi
+        if [ -z \"\$ct\" ] || [ $HEAT_CAP != 1 ]; then cpu_prev3=0; cpu_prev2=0; cpu_prev=0; fi
+        if { [ -n \"\$sk\" ] || [ -n \"\$ct\" ] || [ \$slvl != 0 ]; } && [ $HEAT_CAP = 1 ]; then
             new=0; why=''
             if [ -n \"\$sk\" ]; then
-                slvl=\$(awk -v s=\"\$sk\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 47; t[3] = 50; while (l < 3 && s >= t[l + 1]) l++; while (l > 0 && s < t[l] - 2) l--; print l }')
+                sr=\$(awk -v s=\"\$sk\" -v p=\"\$sk_prev\" -v q=\"\$sk_prev2\" -v l=\$slvl 'BEGIN { t[1] = 45; t[2] = 46.5; t[3] = 48; pn = (p == \"\" ? 999 : p + 0); qn = (q == \"\" ? 999 : q + 0); while (l < 3 && s >= t[l + 1]) l++; hd = l; while (hd > 0 && s < t[hd] - 2) hd--; while (l > 0 && s < t[l] - 2 && pn < t[l] - 2 && qn < t[l] - 2) l--; if (hd < l) printf \"%d %g %s, %s\\n\", l, t[hd + 1] - 2, (p == \"\" ? \"-\" : p), (q == \"\" ? \"-\" : q); else print l }')
+                slvl=\${sr%% *}
+                case \"\$sr\" in
+                    *' '*) sr=\${sr#* }; echo \"\$(date +%T) skin \$sk C\$ap_c held: needs three readings under \${sr%% *} C (before: \${sr#* })\" >> \$F ;;
+                esac
+                sk_prev2=\$sk_prev; sk_prev=\$sk
                 new=\$slvl; why=\"skin \$sk C\"
+            elif [ \$slvl != 0 ]; then
+                # No skin reading this tick: hold the skin level, history untouched.
+                new=\$slvl; why=\"skin none, held at level \$slvl\"
             fi
             [ -n \"\$ap\" ] && why=\"\${why:+\$why, }ap \$ap C\"
             if [ -n \"\$ct\" ]; then
-                # Up only as far as this reading and the two before all reach; down on this one.
-                # h: where this reading alone would go; above l, it was held back, and the
-                # awk adds that threshold (C) and the two readings before (C) for the log.
-                cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v l=\$clvl 'BEGIN { t[1] = 75000; t[2] = 80000; t[3] = 85000; h = l; while (h < 3 && s >= t[h + 1]) h++; while (l < 3 && s >= t[l + 1] && p >= t[l + 1] && q >= t[l + 1]) l++; while (l > 0 && s < t[l] - 3000) l--; if (h > l) printf \"%d %d %d.%d, %d.%d\\n\", l, t[h] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
+                # Curve B: up 3 readings >= 82 C (L1), 4 >= 90 C (L2 max, never L3); down 3 < -4 C.
+                cr=\$(awk -v s=\$ct -v p=\$cpu_prev -v q=\$cpu_prev2 -v r=\$cpu_prev3 -v l=\$clvl 'BEGIN { t[1] = 82000; t[2] = 90000; hu = 0; while (hu < 2 && s >= t[hu + 1]) hu++; if (l < 1 && s >= t[1] && p >= t[1] && q >= t[1]) l = 1; if (l < 2 && s >= t[2] && p >= t[2] && q >= t[2] && r >= t[2]) l = 2; hd = l; while (hd > 0 && s < t[hd] - 4000) hd--; while (l > 0 && s < t[l] - 4000 && p < t[l] - 4000 && q < t[l] - 4000) l--; if (hu > l && hu == 1) printf \"%d three over %d %d.%d, %d.%d\\n\", l, t[1] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else if (hu > l && hu == 2) printf \"%d four over %d %d.%d, %d.%d, %d.%d\\n\", l, t[2] / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100), int(r / 1000), int(r % 1000 / 100); else if (hd < l) printf \"%d three under %d %d.%d, %d.%d\\n\", l, (t[hd + 1] - 4000) / 1000, int(p / 1000), int(p % 1000 / 100), int(q / 1000), int(q % 1000 / 100); else print l }')
                 clvl=\${cr%% *}
                 case \"\$cr\" in
-                    *' '*) cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\$ap_c held: needs three readings over \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
+                    *' '*) cr=\${cr#* }; hn=\${cr%% *}; cr=\${cr#* }; hd=\${cr%% *}; cr=\${cr#* }; echo \"\$(date +%T) cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\$ap_c held: needs \$hn readings \$hd \${cr%% *} C (before: \${cr#* })\" >> \$F ;;
                 esac
+                cpu_prev3=\$cpu_prev2; cpu_prev2=\$cpu_prev; cpu_prev=\$ct
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
+            case \$new in 1|2) cam_limit ;; esac
             if [ \"\$new\" = 0 ] && [ \$first = 1 ]; then
                 capped=''
                 for p in /sys/devices/system/cpu/cpufreq/policy*; do
@@ -4257,10 +4446,16 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
             [ \"\$new\" = \"\$lvl\" ] || echo \$new > $STAGE/heat_cap.level
             lvl=\$new; first=0
         fi
+        hst=\$((hst + 1))
+        if [ \$hst -ge 3 ]; then
+            hst=0; cfl=''; read -r cfl 2>/dev/null < \$CFL
+            cs=-; [ -n \"\$ct\" ] && cs=\"\$((ct / 1000)).\$((ct % 1000 / 100))(\$cz)\"
+            echo \"\$(date +%T) skin=\${sk:--} ap=\${ap:--} cpu=\$cs lvl=\$lvl s=\$slvl c=\$clvl cfl=\${cfl:--}\" >> \$HS
+        fi
         sleep 10
     done
 " </dev/null >/dev/null 2>&1 &
-    [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 1 ] && echo "Heat cap: on (from 45 C skin or 75 C on the CPU; every 10 s to $STAGE/heat_cap.log)"
+    [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 1 ] && echo "Heat cap: on (from 45 C skin or 82 C on the CPU; every 10 s to $STAGE/heat_cap.log)"
     [ $HEAT_CAP = 1 ] && [ $HEAT_CAP_CPU = 0 ] && echo "Heat cap: on (from 45 C skin, CPU zones off by ONEOS_HEAT_CAP_CPU=0; every 10 s to $STAGE/heat_cap.log)"
     [ $HEAT_CAP = 1 ] || echo "Heat cap: off (ONEOS_HEAT_CAP=0, Cool down when hot off in Advanced)"
     [ $GUEST_THERMAL_MAP = 1 ] && echo "Guest thermal status: from the skin temperature, the HAL status from 56 C ($STAGE/heat_cap.log)"
@@ -4551,6 +4746,34 @@ else
     echo "Guest boost: off (ONEOS_GUEST_BOOST=0)"
 fi
 
+# Local HBM keeper (0.5.18): the guest lights the fingerprint spot only while a finger is on the sensor
+# (OneOSSehTouch, ~1 s); a spot still on 10 s later was left by a touch whose up never came (or by anything
+# else) and would glow on the panel until the return. Every 5 s; three readings in a row other than 0: off.
+# Logged in $STAGE/lhbm_keeper.log; ends with the return, like the panel keeper.
+rm -f "$STAGE/lhbm_keeper.log"
+if [ -w /sys/class/lcd/panel/local_hbm ]; then
+    $BB sh -c "
+    : oneos_lhbm_keeper
+    echo \$\$ > /sys/fs/cgroup/cgroup.procs 2>/dev/null
+    F=$STAGE/lhbm_keeper.log; H=/sys/class/lcd/panel/local_hbm
+    echo \"# \$(date) OneOS local HBM keeper: every 5 s, off after 3 readings in a row that are not 0\" > \$F
+    n=0; offs=0
+    while true; do
+        if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
+            echo \"# \$(date +%T) stopped after \$offs resets\" >> \$F
+            exit 0
+        fi
+        v=\$(cat \$H 2>/dev/null)
+        case \"\$v\" in 0|'') n=0 ;; *) n=\$((n + 1)) ;; esac
+        if [ \$n -ge 3 ]; then
+            echo 0 > \$H 2>/dev/null; offs=\$((offs + 1)); n=0
+            echo \"\$(date +%T) local HBM \$v for 10+ s: off (now \$(cat \$H 2>/dev/null))\" >> \$F
+        fi
+        sleep 5
+    done
+    " </dev/null >/dev/null 2>&1 &
+    echo "Local HBM keeper started (fingerprint spot off when left on)"
+fi
 # Panel keeper (0.4.55). The guests OneOS pins at their top refresh rate (no
 # oplus-services.jar: Pixel, HyperOS, Nothing OS) could run a whole session with
 # the panel at 24 Hz under a SurfaceFlinger at 120 Hz: 10-15 fps (reports since
@@ -4723,7 +4946,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     rm -f $GUEST_FULLLOGS_REQ
                     if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && ! pgrep -f '^logcat .*$LOGS/boot.log' >/dev/null 2>&1; then
                         mkdir -p $LOGS
-                        $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 </dev/null >/dev/null 2>&1 &
+                        $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER </dev/null >/dev/null 2>&1 &
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\" >> $STAGE/full_logs_mid.log
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\"
                     fi
@@ -4804,6 +5027,24 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             echo \"guest battery service: \${a:-no answer}\"
                         fi ;;
                 esac
+                # Smoothness at the end, against diag_90's base (smoothness.txt there; S25 Ultra,
+                # coloros17-findx9u-in-1105, sessions db475ad5017133c4 and a12bf19e1931e81a):
+                # timestats, panel rate, missed frames, GPU memory, gfxinfo, reclaim and PSI.
+                # 3 s at most in all, so the return waits no longer; none without surfaceflinger.
+                SFP=\$(pidof surfaceflinger | awk '{print \$1}')
+                if [ -n \"\$SFP\" ]; then
+                    mkdir -p $STAGE/diag_end; s0=\$(date +%s)
+                    timeout 3 /system/bin/sh -c '
+                        P=\$1; gx() { $BB nsenter -t \$P -m /system/bin/sh /data/oneos_genv.sh \"\$@\"; }
+                        date +%T; gx /system/bin/dumpsys SurfaceFlinger --timestats -dump -maxlayers 20
+                        gx /system/bin/dumpsys SurfaceFlinger --timestats -disable
+                        gx /system/bin/dumpsys SurfaceFlinger | grep -E \" Hz:|missed frame count|Total imported by gralloc|Total GPU memory\"
+                        for p in com.android.systemui com.android.settings com.android.launcher; do echo \"== \$p\"; gx /system/bin/dumpsys gfxinfo \$p | grep -E \"Total frames|Janky|percentile\"; done
+                        grep -E \"^(pgscan_kswapd|pgsteal_kswapd|allocstall|compact_stall|pswpin|pswpout)\" /proc/vmstat
+                        for r in cpu memory io; do echo \$r: \$(cat /proc/pressure/\$r); done
+                    ' sh \$SFP > $STAGE/diag_end/smoothness.txt 2>&1
+                    echo \"\$(date) smoothness at the end: \$((\$(date +%s) - s0)) s ($STAGE/diag_end/smoothness.txt)\"
+                fi
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
             fi
             # Reaching the home screen only lifts the black-screen and time
@@ -4817,6 +5058,24 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # setup wizard on screen). From its dismissal, 120 s for the home.
             wm=0; [ \"\$(grep -c 'Dismissing bootanim' /data/local/tmp/ui_activator.log 2>/dev/null)\" -gt \"\${wmbase:-0}\" ] && wm=1
             [ \$wm = 1 ] && [ \$home = 0 ] && wmseen=\$((wmseen + 10))
+            # Guest memory 300 s after its home screen came, a RAM base before a ColorOS debloat
+            # (S25 Ultra, coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
+            # a12bf19e1931e81a). Once, in the background at nice 10, so nothing waits for it;
+            # nothing once this guest is gone (the return's oneos_rec_stop, or guest_mntns gone
+            # or another session's by then).
+            if [ \$home = 1 ] && [ -z \"\$memarm\" ]; then
+                memarm=1
+                ( mns=\$(cat $STAGE/guest_mntns 2>/dev/null); sleep 300
+                  SFP=\$(pidof surfaceflinger | awk '{print \$1}')
+                  [ -n \"\$SFP\" ] && [ -n \"\$mns\" ] && [ \"\$(cat $STAGE/guest_mntns 2>/dev/null)\" = \"\$mns\" ] &&
+                      [ ! -f $STAGE/data/oneos_rec_stop ] || exit 0
+                  { echo \"# \$(date) guest memory, \$((\$(date +%s) - \$(stat -c %Y $STAGE/guest_mntns))) s after the guest start\"
+                    nice -n 10 timeout 30 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys meminfo </dev/null 2>&1
+                    echo '== pm list packages -d'
+                    nice -n 10 timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm list packages -d </dev/null 2>&1
+                  } | head -c 524288 > $STAGE/mem_300.log
+                ) </dev/null >/dev/null 2>&1 &
+            fi
             # Display diagnostics from inside the guest (its own screencap and
             # dumpsys talk to its own surfaceflinger), kept in the stage dir.
             dname=''
@@ -4828,6 +5087,12 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # boot at run 44's rates, 192 MiB at most) get a second name in
             # $LOGS/head: hard links, no copy, and no space used until the
             # rotation deletes their first name. This session's capture only.
+            # The capture ended early (0.5.20, see where it starts): started again, appending to its file.
+            if [ $LOGCAT_HEAD = 1 ] && [ -n \"\$dname\" ] && [ -f $STAGE/logcat_capture.sh ] && ! pgrep -f \"^logcat .*$LOGS/boot.log\" >/dev/null 2>&1; then
+                mkdir -p $LOGS
+                $BB setsid sh $STAGE/logcat_capture.sh </dev/null >/dev/null 2>&1 &
+                echo \"\$(date) logcat capture had ended: started again\"
+            fi
             if [ \"\$dname\" = 90 ] && [ $LOGCAT_HEAD = 1 ]; then
                 rm -rf $LOGS/head && mkdir -p $LOGS/head
                 for f in $LOGS/boot.log $LOGS/boot.log.0[1-5]; do
@@ -4922,6 +5187,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     { for p in /sys/devices/system/cpu/cpufreq/policy*; do echo \"\$p cur/max/hw \$(cat \$p/scaling_cur_freq \$p/scaling_max_freq \$p/cpuinfo_max_freq 2>/dev/null | tr '\n' ' ')\"; done
                       echo \"gpu cur \$(cat /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq 2>&1) max \$(cat /sys/class/kgsl/kgsl-3d0/max_gpuclk 2>&1)\"
                       timeout 10 logcat -d -s thermal_core 2>/dev/null | tail -n 3; } > \$D/throttle.txt 2>&1
+                    # Incident reports (S25 Ultra, coloros17-findx9u-in-1105, session db475ad5017133c4: One UI's
+                    # incidentd made 95 in 16 min for com.oplus.obrain): who asks, IncidentManager or statsd.
+                    { timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys incidentcompanion
+                      echo ---
+                      timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd stats print-stats 2>&1 | head -n 120; } > \$D/incident.txt 2>&1
                     # Galaxy S24 family kernel panics in free_pipe_info (10 reports, 0.4.84-0.5.01, ColorOS IN,
                     # OriginOS and Pixel 9 Pro XL): the exiting thread is almost always named libtimer.so (else
                     # \"POSIX timer N\"), and no log tells whose it is. Record each such thread's process.
@@ -5059,7 +5329,9 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # - dexopt.txt: run 43's first boot failed to compile all 232
                         #   packages (NullPointerException in IArtd.maybeCreateSdc);
                         #   ColorOS's launcher too (com.android.launcher; S Ultra, X9U IN,
-                        #   session 146de99d left its dexopt status unknown);
+                        #   session 146de99d left its dexopt status unknown) and Samsung
+                        #   Camera (S25 Ultra, coloros17-findx9u-in-1105, sessions
+                        #   db475ad5017133c4 and a12bf19e1931e81a: run-from-apk);
                         # - frames.txt: launcher (Pixel's and ColorOS's) and Settings frame pacing;
                         # - comfort.txt: Comfort View settings, color matrix, bridge log;
                         # - signal_poll.txt, host_ril_props.txt (identifiers left out),
@@ -5076,9 +5348,18 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                           { grep -E 'missed frame count|usesDeviceComposition|composition=' \$D/surfaceflinger.txt | sed -e 's/^ *//' -e 's/layer=0x[0-9a-f]* //' | sort | uniq -c
                             echo \"composer rejections in the log: \$(timeout 10 logcat -d -b main -s SurfaceFlinger:E 2>/dev/null | grep -c -E 'executeCommands failed|presentOrValidate failed')\"
                             grep -h -E 'HW overlays|GPU composition' $STAGE/data/takeover.log 2>/dev/null; } > \$D/composition.txt 2>&1
-                          { for p in com.android.systemui com.google.android.apps.nexuslauncher com.android.launcher com.android.settings; do echo \"== pm art dump \$p\"; gx /system/bin/pm art dump \$p 2>&1 | head -n 30; done
+                          { for p in com.android.systemui com.google.android.apps.nexuslauncher com.android.launcher com.android.settings com.sec.android.app.camera; do echo \"== pm art dump \$p\"; gx /system/bin/pm art dump \$p 2>&1 | head -n 30; done
                             echo '== ArtService'; timeout 10 logcat -d -s ArtService 2>/dev/null | grep -m2 -A4 'Unexpected package-level'; } > \$D/dexopt.txt 2>&1
                           for p in com.google.android.apps.nexuslauncher com.android.launcher com.android.settings; do echo \"== \$p\"; gx /system/bin/dumpsys gfxinfo \$p 2>&1 | grep -E 'Total frames|Janky|percentile'; done > \$D/frames.txt 2>&1
+                          # Smoothness from here to the return (diag_end/smoothness.txt) for a
+                          # before/after comparison (S25 Ultra, coloros17-findx9u-in-1105, sessions
+                          # db475ad5017133c4 and a12bf19e1931e81a): ColorOS's launcher draws through
+                          # UniRenderSurface (0 frames in frames.txt), so SurfaceFlinger's timestats
+                          # and gfxinfo start counting now, with the reclaim and PSI lines as a base.
+                          [ \$dname = 90 ] && { date +%T; gx /system/bin/dumpsys SurfaceFlinger --timestats -clear -enable
+                            for p in com.android.systemui com.android.settings com.android.launcher; do gx /system/bin/dumpsys gfxinfo \$p reset >/dev/null; done
+                            grep -E '^(pgscan_kswapd|pgsteal_kswapd|allocstall|compact_stall|pswpin|pswpout)' /proc/vmstat
+                            for r in cpu memory io; do echo \$r: \$(cat /proc/pressure/\$r); done; } > \$D/smoothness.txt 2>&1
                           { for k in cv_enabled cv_preferred_intensity cv_dynamic_enabled; do echo \"\$k=\$(gx /system/bin/settings get system \$k 2>&1)\"; done
                             grep -i -E -A6 'color ?matrix|colortransform' \$D/surfaceflinger.txt | head -n 40
                             timeout 10 logcat -d -s OneOSComfortView DisplayTransformManager 2>/dev/null | tail -n 10; } > \$D/comfort.txt 2>&1

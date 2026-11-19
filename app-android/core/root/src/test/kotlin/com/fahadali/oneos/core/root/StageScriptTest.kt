@@ -92,11 +92,20 @@ class StageScriptTest {
             mode: String = "session", hideGms: String = "0", code: String = this.code,
             heatCap: String = "1", secIms: String = "0", edmStub: String = "0", verboseBoot: String = "0",
             fullLogs: String? = null, batMin: String? = null, batMaxT: String? = null,
+            patchAuto: String? = null, guestVulkan: String? = null, shareFiles: String? = null,
         ) = fr.run(
             RootScript.Verb.LAUNCH, mode, code, "0123456789abcdef", hideGms, heatCap, secIms, edmStub, verboseBoot,
-            // Owner's decision, 2026-11-17: the battery limits are args 10 and 11 (after fullLogs, whose default is 1).
-            *(if (batMin != null || batMaxT != null) listOfNotNull(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420")
-            else listOfNotNull(fullLogs)).toTypedArray(),
+            // Owner's decision, 2026-11-17: the battery limits are args 10 and 11 (after fullLogs, whose default is 1);
+            // automatic patch downloads is arg 12, the S23 Vulkan experiment is arg 13, and 0.5.20's Share my files
+            // is arg 14. A launch that names a later argument names every earlier one too.
+            *(when {
+                guestVulkan != null || shareFiles != null ->
+                    listOf(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420", patchAuto ?: "0", guestVulkan ?: "0") +
+                        listOfNotNull(shareFiles)
+                patchAuto != null -> listOf(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420", patchAuto)
+                batMin != null || batMaxT != null -> listOf(fullLogs ?: "1", batMin ?: "30", batMaxT ?: "420")
+                else -> listOfNotNull(fullLogs)
+            }).toTypedArray(),
         )
 
         fun prepare(mode: String = "new") {
@@ -1802,7 +1811,7 @@ class StageScriptTest {
     }
 
     @Test
-    fun patchAutoLaunchArgumentReachesRootChecks() = eachShell { fr ->
+    fun launchArgumentsReachRootChecks() = eachShell { fr ->
         val profile = Profiles.S_8550
         fr.props["ro.product.model"] = "SM-S911B"
         fr.props["ro.product.device"] = profile.codename
@@ -1810,21 +1819,43 @@ class StageScriptTest {
         fr.writeProps()
         val s = Stager(fr, profile)
         s.prepare()
-        val launch = listOf("session", s.code, "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500")
         for (patchAuto in listOf("0", "1")) {
-            refused(fr.run(RootScript.Verb.LAUNCH, *(launch + patchAuto).toTypedArray()),
-                "test root: every launch check passed")
+            refused(s.launch(patchAuto = patchAuto), "test root: every launch check passed")
         }
         for (guestVulkan in listOf("0", "1")) {
-            refused(fr.run(RootScript.Verb.LAUNCH, *(launch + listOf("0", guestVulkan)).toTypedArray()),
-                "test root: every launch check passed")
+            refused(s.launch(guestVulkan = guestVulkan), "test root: every launch check passed")
         }
-        val dry = listOf("dry") + launch.drop(1) + listOf("0", "1")
-        refused(fr.run(RootScript.Verb.LAUNCH, *dry.toTypedArray()),
+        refused(s.launch(mode = "dry", guestVulkan = "1"),
             "guest Vulkan requires a Galaxy S23 or A55 ColorOS 17 session")
+        val before = File(fr.stage, "session.env").readText()
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(patchAuto = "2") }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(guestVulkan = "2") }
+        assertEquals(before, File(fr.stage, "session.env").readText())
+        val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500")
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "2")).isNotEmpty())
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0")).isNotEmpty())
+        // The full 14-argument launch is valid; one more argument is not.
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0")).isEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0", "0")).isNotEmpty())
+    }
+
+    @Test
+    fun shareFilesChoiceIsWrittenOnlyAfterLaunchChecks() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val env = File(fr.stage, "session.env")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=0"))
+        refused(s.launch(shareFiles = "1"), "test root: every launch check passed")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=1"))
+        // The shorter launches (no shareFiles) still mean off.
+        refused(s.launch(), "test root: every launch check passed")
+        assertTrue(env.readLines().contains("ONEOS_SHARE_FILES=0"))
+        val before = env.readText()
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { s.launch(shareFiles = "2") }
+        assertEquals(before, env.readText())
+        val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500", "0", "0")
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "1").isEmpty())
     }
 
     @Test

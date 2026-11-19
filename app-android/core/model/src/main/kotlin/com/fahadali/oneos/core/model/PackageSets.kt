@@ -332,10 +332,13 @@ object PackageSets {
     val X9U_IN_1105_SULTRA = X9U_IN_SULTRA.copy(
         id = ID_X9U_IN_1105_SULTRA,
         imageId = Images.ID_FIND_X9U_IN_1105,
-        sourceDir = "out/overlays_x9u_in_1105_r2",
+        // 0.5.20 (r3): fingerprint from One UI (services_patched.jar: removal guard, AIDL sensor, its place,
+        // Samsung's touch request) and samcam_a.tar (the Galaxy A36's camera for this image, A and M phones).
+        sourceDir = "out/overlays_x9u_in_1105_r2", // this fork keeps its r6 pins in r2 (header of x9u-in-1105-sultra.sha256); 0.5.20 r3/r4 not used here yet
         // 0.5.05 (r2): oplus-framework_patched.jar right after the common files, as root's set_files lists it.
-        files = COMMON + OPLUS_FRAMEWORK_IMS + X9U_IN_SULTRA.files.drop(COMMON.size),
-        approxBytes = X9U_IN_SULTRA.approxBytes + 12_546_637L,
+        files = COMMON + OPLUS_FRAMEWORK_IMS + X9U_IN_SULTRA.files.drop(COMMON.size) +
+            PackageFile("samcam_a.tar", FileRole.GUEST_FIX),
+        approxBytes = X9U_IN_SULTRA.approxBytes + 12_546_637L + 80_261_120L,
     )
 
     /** The Pixel sets' files (root's SET_PIXEL): the same for every Pixel image. */
@@ -634,7 +637,7 @@ object PackageSets {
     val NOTHING_F8U = PackageSet(
         id = ID_NOTHING_F8U,
         imageId = Images.ID_NOTHING_METROID,
-        sourceDir = "out/overlays_nothing_r35",
+        sourceDir = "out/overlays_nothing_r38", // 0.5.17 r36: fingerprint from One UI, removal guard
         files = listOf(
             PackageFile("services_patched.jar", FileRole.GUARD_JAR),
             // 0.4.57 (r23): also Samsung IMS's framework members (guest_secims_members.py).
@@ -720,7 +723,7 @@ object PackageSets {
     val NOTHING_A = PackageSet(
         id = ID_NOTHING_A,
         imageId = Images.ID_NOTHING_ASTEROIDS,
-        sourceDir = "out/overlays_nothing_a_r1",
+        sourceDir = "out/overlays_nothing_a_r5", // 0.5.18 r5: OneOSSehTouch (TEST, not uploaded yet); 0.5.17 r2: fingerprint from One UI, removal guard
         files = listOf(
             PackageFile("services_patched.jar", FileRole.GUARD_JAR),
             PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
@@ -884,7 +887,7 @@ object PackageSets {
             PackageFile("samcam_a.tar", FileRole.GUEST_FIX) +
             PackageFile("samcam_bar.tar", FileRole.GUEST_FIX),
         omitted = listOf(TETHERING, CELLBROADCAST),
-        approxBytes = 387_175_398L + 8_538L + 118_120L + 80_271_360L + 78_120_960L,
+        approxBytes = 387_175_398L + 8_538L + 118_120L + 80_261_120L + 78_120_960L,
         hasReturnApp = true,
     )
 

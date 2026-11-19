@@ -52,6 +52,11 @@ HOLD = START[START.index("# One UI's albums in ColorOS (owner's decision"):
 LAUNCH = START[START.index("# One UI's albums (S25 Ultra session 9a5159cc76ee3748): One UI's media/0,\n"):
                START.index('echo "[Pivoted Root] time $($BB date +%T) zygote"')]
 
+# Shared folders (Share my files, full access): the part that binds One UI's folders once the guest's storage is
+# up, and releases the media hold the launch above set for them.
+SHARE_BINDS = START[START.index("# The media hold for these folders (owner's decision of 2026-11-18"):
+                    START.index('n=0\nwhile [ $n -lt 50 ]; do\n    [ "$(svc_pid $VOLD_NAME)" = "$VOLD_PID" ] && break')]
+
 # The fake content: the late step's queries are logged in content.log and answer
 # with two rows; the watch's (MEDIA_TEST_WATCH, set by the fake timeout 10) are
 # logged in content-watch.log and answer from watch.seq, one count per line
@@ -396,14 +401,19 @@ class Base(unittest.TestCase):
         (w / "props/sys.boot_completed").write_text("1")
         self.script(w / "bb", BUSYBOX)
         self.script(w / "fakebin/getprop", '#!/bin/sh\ncat "$MEDIA_TEST_ROOT/props/$1" 2>/dev/null\n')
-        self.script(w / "fakebin/setprop", '#!/bin/sh\nprintf %s "$2" > "$MEDIA_TEST_ROOT/props/$1"\n')
+        # Every setprop in order; the mount table as it was when the media hold was released.
+        self.script(w / "fakebin/setprop", '#!/bin/sh\nprintf %s "$2" > "$MEDIA_TEST_ROOT/props/$1"\n'
+                    'echo "$1=$2" >> "$MEDIA_TEST_ROOT/setprop.log"\n'
+                    '[ "$1=$2" != oneos.media.published=1 ] || cp "$MEDIA_TEST_ROOT/state" "$MEDIA_TEST_ROOT/published.state"\n')
         self.script(w / "fakebin/pidof", "#!/bin/sh\nexit 1\n")
         self.script(w / "system/bin/sh", f'#!/bin/sh\nexec {" ".join(SHELL)} "$@"\n')
         self.script(w / "data/oneos_genv.sh", '#!/bin/sh\nexec "$@"\n')
         self.script(w / "system/bin/am", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/am.log"\n'
                     'echo "Broadcasting: Intent { act=$4 dat=$6 }"\necho "Broadcast completed: result=0"\n')
         self.script(w / "system/bin/content", CONTENT)
+        # system_server's hold line (tag OneOSMediaHold) answers from hold.out.
         self.script(w / "fakebin/logcat", '#!/bin/sh\necho "$*" >> "$MEDIA_TEST_ROOT/logcat.log"\n'
+                    'case "$*" in *OneOSMediaHold*) cat "$MEDIA_TEST_ROOT/hold.out" 2>/dev/null; exit 0 ;; esac\n'
                     'cat "$MEDIA_TEST_ROOT/logcat.out" 2>/dev/null\n')
         self.proc(4242, MP_PKG, "Uid:\t10077\t10077\t10077\t10077\nGid:\t10077\t10077\t10077\t10077\n"
                   "Groups:\t1023 1078 9997 20077 50077\n",
@@ -466,11 +476,12 @@ class Base(unittest.TestCase):
                     os.rename(e, d / e.name)
         st["mounts"] = []
         self.state.write_text(json.dumps(st))
-        for log in ("am.log", "content.log", "content-watch.log", "logcat.log", "chcon.log"):
+        for log in ("am.log", "content.log", "content-watch.log", "logcat.log", "chcon.log",
+                    "setprop.log", "published.state"):
             (self.work / log).unlink(missing_ok=True)
 
-    def boot(self, mode="", vold_at=3, bad="", xuid="0", keep=False):
-        """keep: the mounts a test set up stay (otherwise each boot starts with none)."""
+    def boot(self, mode="", vold_at=3, bad="", xuid="0", keep=False, env=None):
+        """keep: the mounts a test set up stay (otherwise each boot starts with none). env: more variables."""
         if not keep:
             self.reset()
         st = json.loads(self.state.read_text())
@@ -492,7 +503,7 @@ class Base(unittest.TestCase):
                  "MEDIA_TEST_XUID": xuid, "MEDIA_TEST_CLOCK_SCALE": self.clock_scale,
                  "MEDIA_TEST_ALIASES": aliases, "MEDIA_TEST_DATA_ROOT": DATA_ROOT,
                  "MEDIA_TEST_VOLD_AT": str(vold_at or ""),
-                 "PATH": str(self.work / "fakebin") + ":" + os.environ["PATH"]},
+                 "PATH": str(self.work / "fakebin") + ":" + os.environ["PATH"], **(env or {})},
             capture_output=True, text=True, timeout=300,
         )
         for secret in SECRETS:
@@ -560,6 +571,31 @@ class GuestMediaGate(Base):
         self.assertEqual(["[Pivoted Root] Media prototype off: image is not ColorOS "
                           "(stage marker image 'lineage24-test')"], self.lines(result))
 
+    def test_share_my_files_keeps_the_album_prototype_off_for_the_boot(self):
+        # 0.5.20 upstream's Share my files binds One UI's DCIM, Pictures, ... over the guest's folders; the
+        # albums would list the same photos twice, so ONEOS_SHARE_FILES=1 turns the prototype (and, by the
+        # existing no-prototype rule, the media hold) off even with the opt-in marker in place.
+        self.photo("Pictures/X", "a.webp")
+        result = self.boot(env={"ONEOS_SHARE_FILES": "1"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], self.mounts())
+        self.assertEqual([], list((self.work / "data").glob("oneos_media_hold.*")))
+        self.assertEqual(
+            ["[Pivoted Root] Media prototype: off (Share my files is on; its folders carry the same photos)",
+             "[Pivoted Root] Media hold: off (the media prototype does not run this boot)"],
+            result.stdout.splitlines())
+        log = (self.work / "setprop.log").read_text().splitlines()
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], [l for l in log if l.startswith("oneos.media.")])
+        # Off (0) or absent: the prototype runs as before.
+        for env in ({"ONEOS_SHARE_FILES": "0"}, {}):
+            result = self.boot(env=env)
+            self.assertNotIn("Share my files", result.stdout)
+            self.assertIn("Media prototype: One UI's media/0 pinned read-only", result.stdout)
+        # Without the opt-in marker nothing about the prototype is printed, shared files or not.
+        self.opt_in.rmdir()
+        result = self.boot(env={"ONEOS_SHARE_FILES": "1"})
+        self.assertNotIn("Media prototype", result.stdout)
+
     def test_off_reasons_name_the_gate_check(self):
         self.opt_in.chmod(0o755)
         result = self.boot()
@@ -578,7 +614,8 @@ class GuestMediaGate(Base):
             result = self.boot(mode)
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual([], self.mounts())
-            self.assertEqual([f"[Pivoted Root] Media prototype off: {reason}"],
+            self.assertEqual([f"[Pivoted Root] Media prototype off: {reason}",
+                              "[Pivoted Root] Media hold: off (the media prototype does not run this boot)"],
                              result.stdout.splitlines())
         self.opt_in.rmdir()
         self.opt_in.write_text("")
@@ -1174,7 +1211,8 @@ class GuestMediaWatch(Base):
         self.assertEqual(0, result.returncode, result.stderr)
         boot = [l[len("[Pivoted Root] Media log (boot): "):] for l in result.stdout.splitlines()
                 if l.startswith("[Pivoted Root] Media log (boot): ")]
-        self.assertRegex(boot[0], r"^6 line\(s\) kept of 6; MediaProvider " + re.escape(MP_PKG) + r" pid 4242 running \d+ s$")
+        self.assertRegex(boot[0], r"^6 line\(s\) kept of 6; 0 quota-type error line\(s\) left out; MediaProvider "
+                         + re.escape(MP_PKG) + r" pid 4242 running \d+ s$")
         got = boot[1:]
         self.assertEqual(6, len(got), got)
         self.assertTrue(got[0].endswith("I MediaProvider: Scanning /storage/emulated/0/\u2026"), got[0])
@@ -1188,7 +1226,8 @@ class GuestMediaWatch(Base):
             self.assertNotIn(leak, "\n".join(l for l in out.splitlines() if "Media log" in l))
         self.assertTrue(all(ord(c) < 128 or c == "\u2026" for c in out))
         # Two captures: the boot part takes everything, the late part only what came after it.
-        log = (self.work / "logcat.log").read_text().splitlines()
+        # (and one of system_server's media hold line, see GuestMediaHold)
+        log = [l for l in (self.work / "logcat.log").read_text().splitlines() if "OneOSMediaHold" not in l]
         self.assertEqual(2, len(log), log)
         self.assertEqual(self.ARGS, log[0])
         self.assertRegex(log[1], r"^-d -b main,system -v threadtime -T \d+\.000 -s MediaProvider:V ")
@@ -1211,9 +1250,329 @@ class GuestMediaWatch(Base):
         self.script(self.work / "fakebin/logcat", "#!/bin/sh\nexit 1\n")
         result = self.boot()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("Media log (boot): 0 line(s) kept of 0; MediaProvider not running\n", result.stdout)
-        self.assertIn("Media log (late): 0 line(s) kept of 0; MediaProvider not running\n", result.stdout)
+        self.assertIn("Media log (boot): 0 line(s) kept of 0; 0 quota-type error line(s) left out; MediaProvider not running\n", result.stdout)
+        self.assertIn("Media log (late): 0 line(s) kept of 0; 0 quota-type error line(s) left out; MediaProvider not running\n", result.stdout)
+        self.assertIn("Media hold: system_server logged nothing (the set's services_patched.jar has no hold yet, "
+                      "or logcat had rotated)\n", result.stdout)
         self.assertIn("Media prototype: MediaStore lists 2 item(s) under OneUI/ 30 s after the scan request\n", result.stdout)
+
+
+class GuestMediaHold(Base):
+    """The media hold's signal (S25 Ultra session a12bf19e1931e81a: MediaProvider's mount scan found
+    OneUI/ empty and deleted every row). The guest's services.jar waits while oneos.media.hold is 1
+    until oneos.media.published is 1; guest_start.sh sets both and sends published once."""
+    RELEASED = r"\[Pivoted Root\] Media hold: released at \d\d:\d\d:\d\d \(\d+ s after the zygote launch, "
+    ON = "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the albums before MediaProvider's mount scan)"
+
+    def media_props(self):
+        log = self.work / "setprop.log"
+        return [l for l in log.read_text().splitlines() if l.startswith("oneos.media.")] if log.exists() else []
+
+    def released(self, result):
+        return [l for l in result.stdout.splitlines() if l.startswith("[Pivoted Root] Media hold: released")
+                or l.startswith("[Pivoted Root] Media hold: setprop oneos.media.published 1")]
+
+    def stale(self):
+        # The last boot's values: the props may survive it.
+        (self.work / "props/oneos.media.hold").write_text("1")
+        (self.work / "props/oneos.media.published").write_text("1")
+
+    def prop(self, name):
+        return (self.work / "props" / name).read_text()
+
+    def late(self, stubs):
+        """oneos_media_late with stubs after the real functions, started as next to the zygote."""
+        bb = self.work / "bb-stub"
+        self.script(bb, '#!/bin/sh\ncase "$1" in sleep) exit 0 ;; esac\nexec "$@"\n')
+        shell = (HOLD + stubs + "\noneos_media_tmp=/nonexistent-hold\noneos_media_hold_on=1\noneos_media_hold_sent=0\n"
+                 '( oneos_media_late; oneos_media_hold_done "oneos_media_late ended without releasing it" )\n')
+        return subprocess.run(SHELL + ["-c", shell], capture_output=True, text=True, timeout=120,
+                              env={**os.environ, "BB": str(bb), "MEDIA_TEST_ROOT": str(self.work),
+                                   "PATH": str(self.work / "fakebin") + ":" + os.environ["PATH"]})
+
+    def test_published_goes_to_0_before_hold_1_and_to_1_once_after_the_albums(self):
+        self.stale()
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        out = result.stdout
+        self.assertEqual(["oneos.media.published=0", "oneos.media.hold=1", "oneos.media.published=1"], self.media_props())
+        self.assertEqual("1", self.prop("oneos.media.hold"))
+        self.assertEqual("1", self.prop("oneos.media.published"))
+        self.assertEqual(1, out.count(self.ON + "\n"))
+        rel = self.released(result)
+        self.assertEqual(1, len(rel), rel)
+        self.assertRegex(rel[0], self.RELEASED + r"albums published: 2 mounted, 0 skipped\)$")
+        summary = out.index("Media prototype: albums: 2 found, 0 excluded, 2 mounted, 0 skipped\n")
+        self.assertLess(out.index(self.ON), out.index("Media prototype: the guest's vold built"))
+        self.assertLess(summary, out.index(rel[0]))
+        self.assertLess(out.index(rel[0]), out.index("Media prototype: hold released\n"))
+        self.assertNotIn("ended without releasing", out)
+        # Every album was mounted on every vold view when published went to 1.
+        at = {m["path"] for m in json.loads((self.work / "published.state").read_text())["mounts"]}
+        for name in ("Camera (One UI)", "Screenshots (One UI)"):
+            self.assertLessEqual(self.targets(name), at, name)
+
+    def test_the_knob_turns_the_hold_off_and_the_albums_are_still_published(self):
+        self.stale()
+        result = self.boot(env={"ONEOS_GUEST_MEDIA_HOLD": "0"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("[Pivoted Root] Media hold: off (ONEOS_GUEST_MEDIA_HOLD=0)\n", result.stdout)
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], self.media_props())
+        self.assertEqual("0", self.prop("oneos.media.hold"))
+        self.assertEqual([], self.released(result))
+        self.assertIn("Media prototype: albums: 2 found, 0 excluded, 2 mounted, 0 skipped\n", result.stdout)
+        self.assertIn("[Pivoted Root] Media hold: system_server logged nothing (the hold was off this boot)\n", result.stdout)
+        # Any other value is the default: on.
+        result = self.boot(env={"ONEOS_GUEST_MEDIA_HOLD": "1"})
+        self.assertIn(self.ON + "\n", result.stdout)
+        self.assertEqual(1, len(self.released(result)))
+
+    def test_without_the_media_prototype_the_hold_is_off_on_every_boot(self):
+        self.stale()
+        self.opt_in.rmdir()
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["[Pivoted Root] Media hold: off (the media prototype does not run this boot)"],
+                         [l for l in result.stdout.splitlines() if "Media hold" in l])
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], self.media_props())
+        self.assertEqual("0", self.prop("oneos.media.hold"))
+        self.assertEqual("0", self.prop("oneos.media.published"))
+
+    def test_no_vold_view_releases_the_hold_once(self):
+        result = self.boot(vold_at=0)
+        self.assertEqual(0, result.returncode, result.stderr)
+        out = result.stdout
+        rel = self.released(result)
+        self.assertEqual(1, len(rel), rel)
+        self.assertRegex(rel[0], self.RELEASED + r"skipped: vold built no storage view\)$")
+        self.assertLess(out.index("Media prototype skipped: the guest's vold built no storage view"), out.index(rel[0]))
+        self.assertLess(out.index(rel[0]), out.index("Media prototype: hold released\n"))
+        self.assertEqual(["oneos.media.published=0", "oneos.media.hold=1", "oneos.media.published=1"], self.media_props())
+
+    def test_no_album_mounted_releases_the_hold_after_the_summary(self):
+        self.exclude("DCIM/Camera", "DCIM/Screenshots")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        rel = self.released(result)
+        self.assertEqual(1, len(rel), rel)
+        self.assertRegex(rel[0], self.RELEASED + r"no album mounted: 0 skipped\)$")
+        self.assertLess(result.stdout.index("albums: 2 found, 2 excluded, 0 mounted, 0 skipped\n"),
+                        result.stdout.index(rel[0]))
+
+    def test_views_that_never_settle_release_the_hold(self):
+        result = self.late('oneos_media_views() { n=$(cat "$MEDIA_TEST_ROOT/n" 2>/dev/null || echo 0); n=$((n + 1)); '
+                           'echo "$n" > "$MEDIA_TEST_ROOT/n"; echo "/mnt/pass_through/0/emulated/$n"; }\n'
+                           'oneos_media_release_late() { echo release_late; }\noneos_media_watch() { :; }\n')
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(3, len(lines), lines)
+        self.assertIn("Media prototype skipped: the guest's storage views did not settle", lines[0])
+        self.assertRegex(lines[1], self.RELEASED + r"skipped: the storage views did not settle\)$")
+        self.assertEqual("release_late", lines[2])
+        self.assertEqual(["oneos.media.published=1"], self.media_props())
+
+    def test_albums_that_cannot_be_listed_release_the_hold(self):
+        result = self.late('oneos_media_views() { echo /mnt/pass_through/0/emulated/0; }\n'
+                           'oneos_media_albums() { echo nonsense; }\n'
+                           'oneos_media_release_late() { echo release_late; }\noneos_media_watch() { :; }\n')
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual("[Pivoted Root] Media prototype skipped: One UI's albums could not be listed in the hold", lines[-3])
+        self.assertRegex(lines[-2], self.RELEASED + r"skipped: the albums could not be listed\)$")
+        self.assertEqual("release_late", lines[-1])
+        self.assertEqual(["oneos.media.published=1"], self.media_props())
+
+    def test_the_safety_net_releases_a_hold_a_path_forgot_and_only_once(self):
+        result = self.late("oneos_media_late() { oneos_media_t0=$(date +%s); }\n")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertRegex(result.stdout, "^" + self.RELEASED + r"oneos_media_late ended without releasing it\)\n$")
+        self.assertEqual(["oneos.media.published=1"], self.media_props())
+        (self.work / "setprop.log").unlink()
+        result = self.late('oneos_media_late() { oneos_media_t0=$(date +%s); oneos_media_hold_done "first"; '
+                           'oneos_media_hold_done "second"; }\n')
+        self.assertRegex(result.stdout, "^" + self.RELEASED + r"first\)\n$")
+        self.assertEqual(["oneos.media.published=1"], self.media_props())
+
+    def test_every_early_return_before_the_summary_releases_the_hold(self):
+        body = START[START.index("oneos_media_late() {\n"):]
+        body = body[:body.index("\n}\n")]
+        lines = body.split("\n")
+        summary = [i for i, l in enumerate(lines) if 'Media prototype: albums: $oneos_media_listed found' in l]
+        self.assertEqual(1, len(summary))
+        returns = [i for i, l in enumerate(lines[:summary[0]]) if re.search(r"\breturn\b", l)]
+        self.assertEqual(2, len(returns), returns)
+        for i in returns:
+            self.assertTrue(any("oneos_media_hold_done " in l for l in lines[i - 6:i]), lines[i - 6:i + 1])
+        # The normal path's release is the first one after the summary, before the hold dir goes.
+        after = lines[summary[0]:]
+        first = next(i for i, l in enumerate(after) if "oneos_media_hold_done " in l)
+        self.assertLess(first, next(i for i, l in enumerate(after) if l.strip() == "oneos_media_release_late"))
+        # Nothing releases it while the albums are being mounted.
+        loop = "\n".join(lines[lines.index("    oneos_media_mounted=0"):summary[0]])
+        self.assertIn("oneos_media_publish_album", loop)
+        self.assertNotIn("oneos_media_hold_done", loop)
+
+    def test_system_servers_hold_line_is_logged_after_media_providers(self):
+        (self.work / "hold.out").write_bytes(b"--------- beginning of system\n" + b"".join(
+            b"11-18 10:00:0%d.000  1500  1530 I OneOSMediaHold: waited %d ms caf\xc3\xa9\n" % (i, i * 100)
+            for i in range(5)))
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        got = [l for l in result.stdout.splitlines() if l.startswith("[Pivoted Root] Media hold: system_server: ")]
+        self.assertEqual([f"[Pivoted Root] Media hold: system_server: 11-18 10:00:0{i}.000  1500  1530 I OneOSMediaHold: "
+                          f"waited {i * 100} ms caf" for i in (2, 3, 4)], got)
+        self.assertLess(result.stdout.index("Media log (boot): "), result.stdout.index(got[0]))
+        log = [l for l in (self.work / "logcat.log").read_text().splitlines() if "OneOSMediaHold" in l]
+        self.assertEqual(["-d -b main,system -s OneOSMediaHold"], log)
+
+    def test_quota_type_warnings_and_their_stack_lines_are_left_out(self):
+        # Both S25 Ultra sessions of 2026-11-18: every kept line was one of these.
+        lines = ["11-18 10:00:01.000  4242  4300 W MediaProvider: Failed to update quota type for /storage/emulated/0/OneUI/A (One UI)/a.jpg",
+                 "11-18 10:00:01.000  4242  4300 W MediaProvider: java.io.IOException: Operation not supported",
+                 "11-18 10:00:01.000  4242  4242 I MediaProvider: other thread in between",
+                 "11-18 10:00:01.000  4242  4300 W MediaProvider: \tat android.os.FileUtils.x(FileUtils.java:1)",
+                 "11-18 10:00:01.000  4242  4300 W MediaProvider: \tat com.android.providers.media.y(M.java:2)",
+                 "11-18 10:00:02.000  4242  4300 I MediaProvider: same thread next",
+                 "11-18 10:00:02.000  4242  4300 W MediaProvider: \tat stray.Stack(S.java:3)",
+                 "11-18 10:00:03.000  4242  4301 W MediaProvider: Failed to update quota type for /storage/emulated/0/OneUI/B (One UI)/b.png",
+                 "11-18 10:00:03.000  4242  4301 W MediaProvider: java.io.IOException: x",
+                 "11-18 10:00:04.000  4242  4242 I ModernMediaScanner: Scan of external_primary done"]
+        (self.work / "logcat.out").write_text("\n".join(lines) + "\n")
+        result = self.boot()
+        self.assertEqual(0, result.returncode, result.stderr)
+        for part in ("boot", "late"):
+            pre = f"[Pivoted Root] Media log ({part}): "
+            got = [l[len(pre):] for l in result.stdout.splitlines() if l.startswith(pre)]
+            self.assertRegex(got[0], r"^4 line\(s\) kept of 10; 6 quota-type error line\(s\) left out; MediaProvider ")
+            self.assertEqual(["other thread in between", "same thread next", "at stray.Stack(S.java:3)",
+                              "Scan of external_primary done"], [l.split(": ", 1)[1] for l in got[1:]])
+
+
+class GuestMediaShareHold(Base):
+    """The media hold for Share my files (full access in "One UI files in the other system", owner's decision of
+    2026-11-18, S25 Ultra): the same race as the albums, so the same hold. The launch sets it when folders are held
+    and the album prototype is off; the share_folders part releases it after its binds."""
+    ON = "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the shared folders before MediaProvider's mount scan)"
+    SHARE = {"ONEOS_SHARE_FILES": "1", "SHARE_HELD": "DCIM Pictures"}
+
+    def setUp(self):
+        super().setUp()
+        self.note = self.work / "data/oneos_share_hold_set"
+        self.log = self.work / "data/oneos_share.log"
+        (self.work / "hold").mkdir()
+        self.script(self.work / "fakebin/sleep", "#!/bin/sh\nexit 0\n")
+        self.script(self.work / "bb-share", '#!/bin/sh\ncase "$1" in mount|umount) exit 0 ;; esac\nexec "$@"\n')
+        self.script(self.work / "system/bin/content", "#!/bin/sh\nexit 0\n")
+
+    def props(self):
+        return [l for l in (self.work / "setprop.log").read_text().splitlines() if l.startswith("oneos.media.")] \
+            if (self.work / "setprop.log").exists() else []
+
+    def binds(self, storage_up=True, note=None, held="DCIM Pictures"):
+        """The share_folders part alone, in the background as in guest_start.sh, with the launch's note."""
+        (self.work / "setprop.log").unlink(missing_ok=True)
+        pt = self.work / "mnt/pass_through/0/emulated"
+        (pt / "0").mkdir(parents=True, exist_ok=True)
+        (self.work / "mountinfo").write_text("1 0 0:1 / / rw - tmpfs tmpfs rw\n"
+                                             + (f"9 1 0:70 / {pt} rw - fuse fuse rw\n" if storage_up else ""))
+        self.log.unlink(missing_ok=True)
+        self.note.unlink(missing_ok=True)
+        shell = SHARE_BINDS + "wait\n"
+        # The launch's note is written after the block removes last boot's, as the zygote launch does later on.
+        if note is not None:
+            shell = shell.replace("rm -f /data/oneos_share_hold_set\n",
+                                  f"rm -f /data/oneos_share_hold_set\necho {note} > /data/oneos_share_hold_set\n", 1)
+        shell = shell.replace("/proc/self/mountinfo", str(self.work / "mountinfo"))
+        shell = re.sub(r"""(?<![\w/.])/(data|postinstall|mnt|storage|system)(?=[/\s'"])""",
+                       lambda m: str(self.work / m[1]), shell)
+        result = subprocess.run(
+            SHELL + ["-c", shell], capture_output=True, text=True, timeout=120,
+            env={**os.environ, "BB": str(self.work / "bb-share"), "MEDIA_TEST_ROOT": str(self.work),
+                 "SHARE_HELD": held, "SHARE_HOLD": str(self.work / "hold"), "VOLD_NAME": "vold",
+                 "PATH": str(self.work / "fakebin") + ":" + os.environ["PATH"]})
+        self.assertEqual(0, result.returncode, result.stderr)
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_hold_is_on_with_the_share_and_the_note_tells_the_binds_part(self):
+        (self.work / "props/oneos.media.published").write_text("1")  # last boot's
+        result = self.boot(env=self.SHARE)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["oneos.media.published=0", "oneos.media.hold=1"], self.props())
+        self.assertEqual(1, result.stdout.splitlines().count(self.ON))
+        self.assertEqual("1\n", self.note.read_text())
+        # Not released by the launch: the binds part does that.
+        self.assertNotIn("Media hold: released", result.stdout)
+        self.assertIn("Media prototype: off (Share my files is on", result.stdout)
+        # The album hold's own line stays out of it.
+        self.assertNotIn("for the albums", result.stdout)
+
+    def test_the_knob_and_a_failing_setprop_leave_it_off_with_a_note_of_0(self):
+        result = self.boot(env={**self.SHARE, "ONEOS_GUEST_MEDIA_HOLD": "0"})
+        self.assertIn("[Pivoted Root] Media hold: off (ONEOS_GUEST_MEDIA_HOLD=0)\n", result.stdout)
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], self.props())
+        self.assertEqual("0\n", self.note.read_text())
+        self.script(self.work / "fakebin/setprop", "#!/bin/sh\nexit 1\n")
+        result = self.boot(env=self.SHARE)
+        self.assertIn("[Pivoted Root] Media hold: off (setprop failed)\n", result.stdout)
+        self.assertEqual("0\n", self.note.read_text())
+
+    def test_the_hold_is_never_set_when_neither_feature_is_on(self):
+        self.note.write_text("1\n")  # last boot's
+        # The albums on, nothing shared: the album hold, no note.
+        result = self.boot()
+        self.assertIn("Media hold: on (StorageManagerService waits up to 15 s for the albums", result.stdout)
+        self.assertNotIn("shared folders", result.stdout)
+        self.assertEqual(["oneos.media.published=0", "oneos.media.hold=1", "oneos.media.published=1"], self.props())
+        # Share on but nothing could be held (One UI's storage not reachable): off, and no note.
+        self.note.unlink()
+        result = self.boot(env={"ONEOS_SHARE_FILES": "1"})
+        self.assertIn("[Pivoted Root] Media hold: off (the media prototype does not run this boot)\n", result.stdout)
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], self.props())
+        self.assertFalse(self.note.exists())
+        # Neither on.
+        self.opt_in.rmdir()
+        result = self.boot()
+        self.assertEqual(["oneos.media.hold=0", "oneos.media.published=0"], self.props())
+        self.assertFalse(self.note.exists())
+
+    def test_released_after_the_binds_and_before_the_rescan(self):
+        lines = self.binds(note="1")
+        self.assertEqual(["oneos.media.published=1"], self.props())
+        self.assertRegex(lines[0], r"^\d\d:\d\d:\d\d shared from One UI after 0s: DCIM Pictures$")
+        self.assertRegex(lines[1], r"^\d\d:\d\d:\d\d Media hold: released \(after the binds\)$")
+        self.assertRegex(lines[2], r"media rescan asked$")
+
+    def test_released_when_the_guests_storage_never_came_up(self):
+        lines = self.binds(storage_up=False, note="1")
+        self.assertEqual(["oneos.media.published=1"], self.props())
+        self.assertEqual(2, len(lines), lines)
+        self.assertRegex(lines[0], r"never came up; nothing shared$")
+        self.assertRegex(lines[1], r"^\d\d:\d\d:\d\d Media hold: released \(the guest's storage never came up\)$")
+
+    def test_no_release_without_a_hold(self):
+        # The launch's note says 0 (knob or failed setprop), or never came: nothing to release.
+        for note in ("0", None):
+            lines = self.binds(note=note)
+            self.assertEqual([], self.props(), note)
+            self.assertFalse(any("Media hold" in l for l in lines), lines)
+            lines = self.binds(storage_up=False, note=note)
+            self.assertEqual([], self.props(), note)
+            self.assertFalse(any("Media hold" in l for l in lines), lines)
+
+    def test_a_failing_setprop_is_logged_and_the_rest_goes_on(self):
+        self.script(self.work / "fakebin/setprop", "#!/bin/sh\nexit 1\n")
+        lines = self.binds(note="1")
+        self.assertRegex(lines[1], r"Media hold: setprop oneos.media.published 1 failed \(after the binds\); "
+                                   r"StorageManagerService waits out its 15 s$")
+        self.assertRegex(lines[2], r"media rescan asked$")
+
+    def test_last_boots_note_is_removed_before_the_background_part_starts(self):
+        start = START.index("if [ -n \"$SHARE_HELD\" ]; then\n    # Last boot's note")
+        block = START[start:start + 400]
+        self.assertLess(block.index("rm -f /data/oneos_share_hold_set"), block.index("    ("))
+        # And the launch writes the note after it sets the hold, never before.
+        self.assertLess(START.index("oneos_media_share_hold=1"), START.index("> /data/oneos_share_hold_set"))
+        self.assertLess(start, START.index("oneos_media_share_hold=1"))
 
 
 class GuestMediaShareOrder(unittest.TestCase):
@@ -1229,7 +1588,7 @@ class GuestMediaShareOrder(unittest.TestCase):
         detach = at("$BB umount -l /postinstall 2>/dev/null")
         chown = at('chown -R 1023:1023 "$d" 2>/dev/null || true')
         chmod = at('chmod -R 777 "$d" 2>/dev/null || true')
-        launch = at("( oneos_media_late ) </dev/null &")
+        launch = at('( oneos_media_late; oneos_media_hold_done "oneos_media_late ended without releasing it" ) </dev/null &')
         zygote = at('echo "[Pivoted Root] time $($BB date +%T) zygote"')
         self.assertLess(stage, detach)
         self.assertLess(detach, chown)
