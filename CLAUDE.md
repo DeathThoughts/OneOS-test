@@ -11,8 +11,11 @@ subagent does the hands-on work.
   causes, the design of a fix and every decision stay with it.
 - Every file change is made by a subagent, briefed with a self-contained,
   precise task that already carries the design: code, tests, scripts,
-  version bumps, comments, docs and CLAUDE.md itself. The owner picks the
-  subagents' model in the session.
+  version bumps, comments, docs. The owner picks the subagents' model; every
+  subagent is started with that model named explicitly, never left to
+  inherit the main session's.
+- Light changes (a few lines, docs, CLAUDE.md, a pin or a wording fix) the
+  main session makes itself (owner, 2026-11-18): a brief would cost more.
 - The main session reviews every result before it is committed: a full
   review for anything in the guest's boot path (guest_start.sh,
   guest_prepare.sh, oneos_switch.sh, return_to_oneui.sh), safety,
@@ -21,6 +24,18 @@ subagent does the hands-on work.
 - Git and GitHub operations with no file edit (commit, push, opening and
   merging a PR, fetching a log) are done by the main session directly: a
   brief would cost more than the command.
+
+## Work from other AIs
+
+Owner's rule, 2026-11-18. When the owner sends another AI's report or audit
+(not the owner's own words, and not a subagent of this session):
+
+- The owner and the main session review it together first; nothing is
+  implemented from it straight away.
+- The main session then writes that AI a precise prompt (in English) with
+  the agreed scope, and that AI implements it and opens the PR.
+- The main session reviews the PR or the work and approves only what is
+  right. It implements such work itself only when the owner asks it to.
 
 ## Biometrics in the guest (fingerprint and face)
 
