@@ -472,18 +472,19 @@ class Pins(unittest.TestCase):
         self.assertIn('r6: r5 plus services_patched.jar re-patched in place by patches/guest_media_mount_hold.py',
                       (self.PKG / 'x9u-in-1105-sultra.sha256').read_text())
 
-    def test_r6_files_have_a_size_and_a_source(self):
+    def test_set_files_have_a_size_and_a_source(self):
+        # r6 brought the hold; r7 (2026-11-18) keeps it in a jar re-patched over r6's.
         sha = self.pins(self.PKG / 'x9u-in-1105-sultra.sha256')
         remote = dict(l.split(' ', 1) for l in (self.PKG / 'remote.txt').read_text().split('\n')
                       if re.match(r'^[0-9a-f]{64} ', l))
         sizes = dict(l.split(' ', 1) for l in (self.PKG / 'sizes.txt').read_text().split('\n')
                      if re.match(r'^[0-9a-f]{64} ', l))
         for n in ('services_patched.jar', 'guards.txt'):
-            self.assertEqual(remote[sha[n]], 'gh:DeathThoughts/OneOS-test:coloros-1105-r6', n)
+            self.assertRegex(remote[sha[n]], r'^gh:DeathThoughts/OneOS-test:coloros-1105-r[67]$', n)
             self.assertGreater(int(sizes[sha[n]]), 0, n)
         self.assertEqual(int(sizes[sha['guards.txt']]), (self.PKG / 'x9u-in-1105-sultra.guards.txt').stat().st_size)
         wf = (ROOT / '.github/workflows/publish-set-files.yml').read_text()
-        self.assertIn('default: "coloros-1105-r6"', wf)
+        self.assertRegex(wf, r'default: "coloros-1105-r[67]"')
 
 
 if __name__ == '__main__':

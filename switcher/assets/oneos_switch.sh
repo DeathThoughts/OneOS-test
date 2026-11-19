@@ -166,7 +166,7 @@ done
 # vold_patched and service.incremental_patched.so (Pixel 17, and ColorOS 17
 # since 0.4.8) go with its guarded jars (the guest vold as "gvld", run 44), so
 # they are checked the same way.
-GUARD_JARS="services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
+GUARD_JARS="services_patched.jar $(awk '/^#/ { next } $2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
                                        $2 == "miui-services_patched.jar" || $2 == "apprecovery.proinstaller_patched.jar" ||
                                        $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
                                        $2 == "telephony-common_patched.jar" { print $2 }' "$STAGE/guards.txt")"
@@ -289,7 +289,7 @@ fi
 # The guarded framework jars (scripts/make-overlays.sh: storage, installd,
 # power, sysrq and weaver guards). guest_prepare.sh checks them again.
 for need in $GUARD_JARS; do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$STAGE/guards.txt")
+    sum=$(awk -v n="$need" '$1 !~ /^#/ && $2 == n {print $1}' "$STAGE/guards.txt")
     [ -n "$sum" ] && [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] ||
         refuse "$need is missing or not the guarded build in guards.txt"
 done
@@ -297,7 +297,7 @@ done
 echo "preflight: guarded jars done $(date +%T)"
 # The guest vold as "gvld" takes both binaries (guest_prepare.sh refuses one
 # alone too, but only once One UI's framework is stopped).
-[ "$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")" = 1 ] &&
+[ "$(awk '/^#/ { next } $2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")" = 1 ] &&
     refuse "guards.txt lists only one of vold_patched and service.incremental_patched.so (a half-built set)"
 # The /data bridges (bridges.sh) and their floor, as guest_prepare.sh needs
 # them; nothing may be left mounted under the stage or bridged from a session

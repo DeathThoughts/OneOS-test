@@ -100,14 +100,14 @@ fi
 # vold_patched and service.incremental_patched.so (the guest vold as "gvld"),
 # HyperOS's miui-services_patched.jar and apprecovery.proinstaller_patched.jar,
 # and the Pixel camera client libraries.
-for need in services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
+for need in services_patched.jar $(awk '/^#/ { next } $2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
                                         $2 == "miui-services_patched.jar" || $2 == "apprecovery.proinstaller_patched.jar" ||
                                         $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
                                         $2 == "libcamera_client_patched.so" || $2 == "libcameracompatbilityinfo_patched.so" ||
                                         $2 == "libsurfaceflinger_patched.so" || $2 == "telephony-common_patched.jar" ||
                                         $2 == "vivo-services_patched.jar" || $2 == "vivo-telephony-common-platform-ex_patched.jar" ||
                                         $2 == "oplus-framework_patched.jar" { print $2 }' "$STAGE/guards.txt"); do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$STAGE/guards.txt")
+    sum=$(awk -v n="$need" '$1 !~ /^#/ && $2 == n {print $1}' "$STAGE/guards.txt")
     if [ -z "$sum" ] || [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" != "$sum" ]; then
         echo "ERROR: $STAGE/$need missing or not the guarded build in guards.txt; not starting the guest"
         exit 3
@@ -2059,7 +2059,7 @@ fi
 # services.jar that looks up "vold" next to this vold would get One UI's.
 # guest_start.sh reads oneos_vold_name and checks both names before going on.
 rm -f "$STAGE/data/oneos_vold_name"
-VG=$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")
+VG=$(awk '/^#/ { next } $2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$STAGE/guards.txt")
 if [ "$VG" = 2 ]; then
     chmod 755 "$STAGE/vold_patched"
     chmod 644 "$STAGE/service.incremental_patched.so"
@@ -2095,7 +2095,7 @@ if [ -e "$VSJ" ] || [ -L "$VSJ" ]; then
     fi
     VJ=$(stat -c %d:%i "$VSJ" 2>/dev/null)
     if [ -z "$VJ" ] || [ "$VJ" != "$(stat -c %d:%i "$STAGE/vivo-services_patched.jar" 2>/dev/null)" ] ||
-        ! awk '$2 == "vivo-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+        ! awk '$1 !~ /^#/ && $2 == "vivo-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
         echo "ERROR: the guarded vivo-services.jar is not in place; not starting the guest"
         exit 3
     fi
@@ -2199,7 +2199,7 @@ fi
 if [ -e "$ROOTFS/system/framework/oplus-services.jar" ] || [ -L "$ROOTFS/system/framework/oplus-services.jar" ]; then
     OSJ=$(stat -c %d:%i "$ROOTFS/system/framework/oplus-services.jar" 2>/dev/null)
     if [ -z "$OSJ" ] || [ "$OSJ" != "$(stat -c %d:%i "$STAGE/oplus-services_patched.jar" 2>/dev/null)" ] ||
-        ! awk '$2 == "oplus-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+        ! awk '$1 !~ /^#/ && $2 == "oplus-services_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
         echo "ERROR: the guarded oplus-services.jar is not in place; not starting the guest"
         exit 3
     fi
@@ -2487,7 +2487,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
         fi
         MJ=$(stat -c %d:%i "$MIUI_FW/$j.jar" 2>/dev/null)
         if [ -z "$MJ" ] || [ "$MJ" != "$(stat -c %d:%i "$STAGE/${j}_patched.jar" 2>/dev/null)" ] ||
-            ! awk -v n="${j}_patched.jar" '$2 == n { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+            ! awk -v n="${j}_patched.jar" '$1 !~ /^#/ && $2 == n { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
             echo "ERROR: the guarded $j.jar is not in place; not starting the guest"
             exit 3
         fi
@@ -2503,7 +2503,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
     fi
     MJ=$(stat -c %d:%i "$HFW" 2>/dev/null)
     if [ -z "$MJ" ] || [ "$MJ" != "$(stat -c %d:%i "$STAGE/framework_patched.jar" 2>/dev/null)" ] ||
-        ! awk '$2 == "framework_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
+        ! awk '$1 !~ /^#/ && $2 == "framework_patched.jar" { f = 1 } END { exit !f }' "$STAGE/guards.txt"; then
         echo "ERROR: HyperOS's framework.jar with One UI's camera status format is not in place; not starting the guest"
         exit 3
     fi
@@ -3362,12 +3362,21 @@ fi
 #   (com.coloros.assistantscreen) crashes, Meta and Branch.io wakelocks, and unused
 #   OPPO/Microsoft apps (ebadge, microsoft.*, pictorial, member, heytap.browser) are
 #   disabled for user 0 and recorded in /data/oneos_oplus_bloat_off.
+#   com.oplus.ota (System updates) crashed at every start with "Failed to find
+#   update_engine" (session 161a843fbaddcd7a, 18:51:13 and 18:54:35): the guest has no
+#   update_engine and must never update itself, so it is disabled the same way.
 #   com.oplus.games (Game Assistant) ran at 82.1% CPU plus a 46.4% sandboxed WebView
-#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34), so it stays
-#   enabled for the in-game sidebar and has its background execution restricted
-#   (RUN_ANY_IN_BACKGROUND ignore, standby bucket restricted, recorded in
-#   /data/oneos_oplus_restricted), while com.oplus.cosa and com.oplus.statistics.rom
-#   (135 callers) stay enabled and unrestricted. An owner's own disabled/restricted
+#   with no game running (session a12bf19e1931e81a, cpu_top.log 04:05:34). It was first
+#   restricted, then left unrestricted for its in-game sidebar; the sidebar did not
+#   appear either way (sessions 22343aacdd4e1d6c restricted, f8c0108ef1bea94a
+#   unrestricted, Mobile Legends at 03:50), so the restriction was not the cause. The
+#   owner has no use for the game services (2026-11-19): Game Assistant, Game Center
+#   (com.nearme.gamecenter) and Quick games (com.heytap.quickgame) are disabled with the
+#   rest; ColorOS's game boost needs OPPO's ORMS, which Samsung does not have (see
+#   docs/dead-ends.md). RESTRICT_PKGS is empty, so run_restrict only undoes what OneOS
+#   recorded in /data/oneos_oplus_restricted (appops default, bucket active) on the next
+#   switch; com.oplus.cosa and com.oplus.statistics.rom (135 callers) stay enabled and
+#   unrestricted. An owner's own disabled/restricted
 #   state is never recorded or undone; ONEOS_GUEST_OPLUS_BLOAT=1 turns back on and
 #   unrestricts only what OneOS recorded.
 #   A package the owner had disabled (or already restricted) is never listed or touched,
@@ -3380,9 +3389,9 @@ if [ -f "$ROOTFS/system/framework/oplus-services.jar" ]; then
 BLOAT_MODE=${BLOAT_MODE:-off}
 TELE_PKGS="com.oplus.onetrace com.oplus.olc"
 TELE_REC=/data/oneos_oplus_telemetry_off
-BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser"
+BLOAT_PKGS="com.android.hotwordenrollment.okgoogle com.android.hotwordenrollment.xgoogle com.facebook.appmanager com.facebook.services com.facebook.system com.facebook.katana com.oplus.ebadge com.microsoft.appmanager com.microsoftsdk.crossdeviceservicebroker com.microsoft.deviceintegrationservice com.oppo.quicksearchbox com.heytap.pictorial com.coloros.assistantscreen com.oplus.member com.heytap.browser com.oplus.ota com.oplus.games com.nearme.gamecenter com.heytap.quickgame"
 BLOAT_REC=/data/oneos_oplus_bloat_off
-RESTRICT_PKGS="com.oplus.games"
+RESTRICT_PKGS=""
 RESTRICT_REC=/data/oneos_oplus_restricted
 log() { echo "$(date +%T) $*"; }
 is_pkg() { case "$1" in ''|*[!A-Za-z0-9._]*) return 1 ;; esac; }
@@ -3960,8 +3969,10 @@ done
 # (the else below). The guest enrolls and removes nothing of its own: enrollment is One UI's only.
 if [ "$BIO_GUARD" = 1 ]; then
     # ColorOS can only use the biometrics the phone's TEE already holds. Enrolling
-    # inside the guest needs a HardwareAuthToken, and the guest has no gatekeeper
-    # to mint one (its PIN is verified locally), so ColorOS's "Add" does nothing.
+    # inside the guest needs a HardwareAuthToken the phone's HAL accepts, and the
+    # guest has no gatekeeper to mint one (its PIN is verified locally; the guest
+    # lock only hands Settings a placeholder token, which the HAL refuses, and
+    # guest_no_biometric_writes.py fails every enroll before it), so "Add" does nothing.
     # Carry One UI's enrollment metadata across instead: the templates never leave
     # the TEE, and no credential, gatekeeper handle or SP blob is read.
     #
@@ -4025,7 +4036,13 @@ if [ "$BIO_GUARD" = 1 ]; then
     # The guest's /data/system (BIO_DST is its users/0: one level up was users/, where OneOSUdfps never looked).
     UFILE=$STAGE/data/system/oneos_udfps
     rm -f "$UFILE" "$STAGE/data/system/users/oneos_udfps"
-    if [ -n "$UPOS" ] && [ -n "$UGEO" ]; then
+    # Only for an optical sensor (One UI's floating features, the check the local-HBM block below uses too): the
+    # location was only tried on the A36's optical sensor, and the S25 Ultra's ultrasonic sensor unlocks ColorOS
+    # fine without it (sessions db475ad5017133c4, a12bf19e1931e81a), so its working fingerprint is left as it is.
+    FF=/system/etc/floating_feature.xml
+    if ! grep -q '<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>[^<]*optical' "$FF" 2>/dev/null; then
+        echo "Guest biometrics: in-display sensor place not given (not an optical sensor)"
+    elif [ -n "$UPOS" ] && [ -n "$UGEO" ]; then
         UXYR=$(echo "$UPOS $UGEO" | awk '{ n = split($1, p, ","); w = $2; h = $3; dpi = $4;
             if (n < 6 || w < 100 || h < 100 || dpi < 100) exit; ppm = dpi / 25.4;
             x = int(w / 2 + p[2] * ppm + 0.5); y = int(h - (p[1] + p[4] / 2) * ppm + 0.5); r = int(p[5] / 2 * ppm + 0.5);
@@ -4041,7 +4058,6 @@ if [ "$BIO_GUARD" = 1 ]; then
     # UI does; without both every capture failed (A36). The marker is what it looks for.
     LFILE=$STAGE/data/system/oneos_fp_lhbm
     rm -f "$LFILE"
-    FF=/system/etc/floating_feature.xml
     if grep -q '<SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>1</SEC_FLOATING_FEATURE_LCD_CONFIG_LOCAL_HBM>' "$FF" 2>/dev/null &&
        grep -q '<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>[^<]*optical' "$FF" 2>/dev/null &&
        [ -e /sys/class/lcd/panel/local_hbm ]; then

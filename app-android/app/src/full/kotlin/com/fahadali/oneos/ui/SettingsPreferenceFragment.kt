@@ -1,7 +1,9 @@
 package com.fahadali.oneos.ui
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
@@ -35,6 +37,8 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
     private var lastRemove: RemoveJob.Phase? = null
     // The album picker opens once per list root gave for a tap, never for one from before this screen started.
     private var shownPick = 0
+    // The mode just picked, shown while root's call for it runs (see bindMedia).
+    private var pendingMode: FilesMode? = null
     override fun onStart() {
         super.onStart()
         lastRemove = RemoveJob.state.phase
@@ -106,21 +110,33 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
         row(sessions, R.string.last_title, target = LastSessionActivity::class.java)
         toggle(sessions, R.string.advanced_heat_cap_title, R.string.advanced_heat_cap_summary, SessionPrefs.heatCap(ctx)) { SessionPrefs.setHeatCap(ctx, it) }
         toggle(sessions, R.string.advanced_full_logs_title, R.string.advanced_full_logs_summary, SessionPrefs.fullLogs(ctx)) { SessionPrefs.setFullLogs(ctx, it) }
-        toggle(sessions, R.string.advanced_share_files_title, R.string.advanced_share_files_summary, SessionPrefs.shareFiles(ctx)) { SessionPrefs.setShareFiles(ctx, it) }
         toggle(sessions, R.string.usage_count_title, R.string.usage_count_summary, SessionPrefs.usageCount(ctx)) { SessionPrefs.setUsageCount(ctx, it) }
-        // One UI photos (build 156; the owner made its marker by hand from a root shell; first put in the unused
-        // AdvancedFragment, so the S25 Ultra's Settings did not show it): root on/off, read at the next guest boot.
-        // Off until root says on; held while a call runs. The listener returns false: the switch follows root's
-        // answer when the state updates, so a refusal never shows a wrong position.
-        sessions.addDescribedPreference(SwitchPreferenceCompat(ctx).apply {
-            key = MEDIA_KEY
-            setTitle(R.string.oneui_media_title)
+        // One UI files in the other system: one choice instead of the two switches there were (the owner found two
+        // confusing; owner's decision of 2026-11-18, after the S25 Ultra). It writes the two mechanisms underneath
+        // as they were: view = root's oneui-media marker (read-only albums), full = SessionPrefs.shareFiles
+        // (launch arg, real folders read-write). The listener returns false: the row follows the state when it
+        // updates, so a refusal from root or a cancelled question never shows a wrong position.
+        sessions.addDescribedPreference(ListPreference(ctx).apply {
+            key = FILES_KEY
+            setTitle(R.string.oneui_files_title)
+            entries = arrayOf<CharSequence>(getString(R.string.oneui_files_off), getString(R.string.oneui_files_view), getString(R.string.oneui_files_full))
+            entryValues = arrayOf<CharSequence>(FilesMode.OFF.key, FilesMode.VIEW.key, FilesMode.FULL.key)
             isIconSpaceReserved = false; isPersistent = false
-            setOnPreferenceChangeListener { _, next -> OneUiMedia.set(ctx, next as Boolean); false }
+            setOnPreferenceChangeListener { _, next ->
+                val mode = FilesMode.of(next as String)
+                if (mode == FilesMode.FULL) {
+                    // Real files, read and write: only on a yes (owner's decision of 2026-11-18).
+                    AlertDialog.Builder(requireContext()).setTitle(R.string.oneui_files_full_confirm_title)
+                        .setMessage(R.string.oneui_files_full_confirm_message)
+                        .setPositiveButton(R.string.oneui_files_full_confirm_run) { _, _ -> applyMode(ctx, mode) }
+                        .setNegativeButton(android.R.string.cancel, null).show()
+                } else applyMode(ctx, mode)
+                false
+            }
         })
         // Which of One UI's albums ColorOS shows (owner's decision after the Galaxy S25 Ultra, session
         // 92032e7ae892154c): root lists them on each tap, so a folder made in One UI since shows up; the
-        // choice is root's file, read at the next guest boot, and works with the switch on or off.
+        // choice is root's file, read at the next guest boot, and is offered under "View One UI photos".
         sessions.addDescribedPreference(Preference(ctx).apply {
             key = ALBUMS_KEY
             setTitle(R.string.oneui_media_albums_title)
@@ -172,15 +188,42 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
     }
 
     // State updates change the existing rows and never rebuild the screen: a rebuild gives the RecyclerView a
-    // new adapter and the list jumps to the top (the owner's Galaxy S25 Ultra, 2026-11-17). Preference.setChecked
-    // does not call the change listener (only a user click does), so this cannot re-trigger OneUiMedia.set.
+    // new adapter and the list jumps to the top (the owner's Galaxy S25 Ultra, 2026-11-17). Preference.setValue
+    // does not call the change listener (only a user pick does), so this cannot re-trigger applyMode.
     private fun bindMedia(st: OneUiMedia.State) {
-        findPreference<SwitchPreferenceCompat>(MEDIA_KEY)?.apply {
-            summary = mediaSummary(st); isChecked = st.media?.on == true; isEnabled = !st.busy
+        // While root's call runs its state still says the old thing, so the pick is shown until it answered.
+        if (!st.busy) pendingMode = null
+        val mode = pendingMode ?: currentMode(requireContext(), st)
+        findPreference<ListPreference>(FILES_KEY)?.apply {
+            value = mode.key; summary = filesSummary(st, mode); isEnabled = !st.busy
         }
         findPreference<Preference>(ALBUMS_KEY)?.apply {
-            summary = albumsSummary(st); isEnabled = !st.busy
+            summary = albumsSummary(st); isEnabled = !st.busy && mode == FilesMode.VIEW
         }
+    }
+
+    /** What the setting is now: full if Share my files is on, else view if root's marker is on, else off. */
+    private fun currentMode(ctx: Context, st: OneUiMedia.State): FilesMode = when {
+        SessionPrefs.shareFiles(ctx) -> FilesMode.FULL
+        st.media?.on == true -> FilesMode.VIEW
+        else -> FilesMode.OFF
+    }
+
+    /** Writes [mode] into the two mechanisms underneath; root's call is asynchronous, the flag is not. */
+    private fun applyMode(ctx: Context, mode: FilesMode) {
+        if (OneUiMedia.state.busy) return  // OneUiMedia would drop the call: change nothing
+        SessionPrefs.setShareFiles(ctx, mode == FilesMode.FULL)
+        val albumsOn = mode == FilesMode.VIEW
+        if (OneUiMedia.state.media?.on != albumsOn) {
+            pendingMode = mode
+            OneUiMedia.set(ctx, albumsOn)
+        }
+        bindMedia(OneUiMedia.state)
+    }
+
+    private enum class FilesMode(val key: String) {
+        OFF("off"), VIEW("view"), FULL("full");
+        companion object { fun of(key: String) = values().firstOrNull { it.key == key } ?: OFF }
     }
 
     private fun bindRemove(rs: RemoveJob.State) {
@@ -192,13 +235,17 @@ class SettingsPreferenceFragment : InsetPreferenceFragment() {
     }
 
     private companion object {
-        val MEDIA_KEY = "setting_${R.string.oneui_media_title}"
+        val FILES_KEY = "setting_${R.string.oneui_files_title}"
         val ALBUMS_KEY = "setting_${R.string.oneui_media_albums_title}"
     }
 
-    /** The switch's text, then what root said when it read or changed nothing, or what is at the marker's path. */
-    private fun mediaSummary(st: OneUiMedia.State): String {
-        val base = getString(R.string.oneui_media_summary)
+    /** The chosen mode's text, then what root said when it read or changed nothing, or what is at the marker's path. */
+    private fun filesSummary(st: OneUiMedia.State, mode: FilesMode): String {
+        val base = getString(when (mode) {
+            FilesMode.OFF -> R.string.oneui_files_off_summary
+            FilesMode.VIEW -> R.string.oneui_files_view_summary
+            FilesMode.FULL -> R.string.oneui_files_full_summary
+        })
         val problem = st.problem.takeUnless { st.problemOnAlbums }
         val why = st.media?.why
         val note = when {

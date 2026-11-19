@@ -51,14 +51,14 @@ fi
 # ColorOS set's, vold_patched and service.incremental_patched.so a Pixel set's
 # (make-overlays.sh lists them in guards.txt when it built them).
 [ -f "$OVERLAYS/guards.txt" ] || { echo "$OVERLAYS: no guards.txt" >&2; exit 1; }
-for need in services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" { print $2 }' "$OVERLAYS/guards.txt"); do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$OVERLAYS/guards.txt" 2>/dev/null || true)
+for need in services_patched.jar $(awk '/^#/ { next } $2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" { print $2 }' "$OVERLAYS/guards.txt"); do
+    sum=$(awk -v n="$need" '$1 !~ /^#/ && $2 == n {print $1}' "$OVERLAYS/guards.txt" 2>/dev/null || true)
     if [ -z "$sum" ] || [ ! -f "$OVERLAYS/$need" ] || [ "$(sha256sum "$OVERLAYS/$need" | cut -d' ' -f1)" != "$sum" ]; then
         echo "$OVERLAYS: $need missing or not the one in its guards.txt" >&2
         exit 1
     fi
 done
-if [ "$(awk '$2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$OVERLAYS/guards.txt")" = 1 ]; then
+if [ "$(awk '/^#/ { next } $2 == "vold_patched" { v = 1 } $2 == "service.incremental_patched.so" { i = 1 } END { print v + i }' "$OVERLAYS/guards.txt")" = 1 ]; then
     echo "$OVERLAYS: guards.txt lists only one of vold_patched and service.incremental_patched.so" >&2
     exit 1
 fi

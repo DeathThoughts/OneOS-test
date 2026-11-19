@@ -31,19 +31,21 @@ from pull request #152 by @vdcoolok.
   only; no fingerprint or face is enrolled in the guest. It uses One UI's: `guest_prepare.sh`
   carries One UI's enrollment list into the guest at every switch, the templates stay in the
   phone's secure hardware, and the guest unlocks with them through the phone's own fingerprint
-  and face services. A match of the guest lock answers with no gatekeeper handle and no token,
-  so "Add fingerprint" or "Add face" in the guest refuses or shows an error. (An earlier build
-  handed guest Settings a token to enroll with; sets built from that version keep it until
-  their `services_patched.jar` is built again.)
+  and face services. A match of the guest lock answers with the lock's own gatekeeper-password
+  handle, which `verifyGatekeeperPasswordHandle` turns into a placeholder token: guest Settings
+  asks for one before any biometric page (without it Nothing OS's Settings crashed on
+  Fingerprint, "Unable to request Gatekeeper HAT"). Nothing of the phone's gatekeeper or
+  keystore is reached, and the phone's fingerprint HAL checks the token's MAC and refuses the
+  placeholder, so "Add fingerprint" or "Add face" in the guest ends with an error.
   The guest cannot add or delete one either way: a request there to enroll or to remove a
   fingerprint or a face ends with an error before it reaches the sensor, and One UI's
-  enrollments stay as they are (`switcher/patches/guest_no_biometric_writes.py`, in a set from
-  the next build of its `services_patched.jar` on; until then nothing in a guest's framework
-  stops "Delete fingerprint" in its Settings from removing One UI's).
+  enrollments stay as they are, token or not (`switcher/patches/guest_no_biometric_writes.py`,
+  in a set from the next build of its `services_patched.jar` on; until then nothing in a
+  guest's framework stops "Delete fingerprint" in its Settings from removing One UI's).
 - **Not a device credential for apps.** An app that asks for the device PIN in its own prompt, or
   ties keys or passkeys to the screen lock, behaves as on a phone without a secure lock.
-- Nothing of it reaches the phone: no gatekeeper enrolment, no weaver slot, no auth token, no
-  keystore call. One UI's lock state is exactly what it was before the session.
+- Nothing of it reaches the phone: no gatekeeper enrolment, no weaver slot, no auth token of the
+  phone's (the placeholder token is the guest lock's own), no keystore call. One UI's lock state is exactly what it was before the session.
 
 ## Forgotten
 
@@ -75,18 +77,19 @@ screen lock.
 
 ## How it is built
 
-`guest_local_lock.py` runs in `scripts/make-overlays.sh` after the gatekeeper guard and makes six
+`guest_local_lock.py` runs in `scripts/make-overlays.sh` after the gatekeeper guard and makes seven
 changes to `services.jar`, all or none; a framework of another shape is left as it is (no guest
 lock there):
 
 | Where | Change |
 | --- | --- |
 | `LockSettingsService.setLockCredentialInternal` | the guest lock is asked first, in front of the gatekeeper guard; with no guest lock and nothing to set, the guard answers as before |
-| `LockSettingsService.doVerifyCredential` | with a guest lock set, its record answers: match, wrong (with the wait), or "try again in" |
+| `LockSettingsService.doVerifyCredential` | with a guest lock set, its record answers: match (with the guest lock's own gatekeeper-password handle), wrong (with the wait), or "try again in" |
+| `LockSettingsService.verifyGatekeeperPasswordHandle` | the guest lock's own handle (given with a match) is answered with the placeholder token `OneOSGuestLock.hat()` makes; any other handle goes to the framework |
 | `LockSettingsService.getCredentialType` | the guest lock's type for the lock screen and Settings; the service's own state stays "none", so storage and keys are handled as without a lock |
 | `LockSettingsService.enforceFrpNotActive` | off: in a guest "FRP active" only says that One UI's FRP secret could not be read (`guest_pdb_init_survives.py`), and the only lock behind the check is the guest's own record |
 | `TrustManagerService.notifyKeystoreOfDeviceLockState` | a locked guest is not reported to the phone's keystore daemon (it would drop user 0's unlocked-device keys until the phone itself is unlocked) |
-| `biometrics.PreAuthInfo` | apps' prompts see no device credential: the prompt would need a gatekeeper token |
+| `biometrics.PreAuthInfo` | apps' prompts see no device credential: the prompt would need a gatekeeper token the guest lock cannot give |
 
 The checks themselves are in `OneOSGuestLock` (`switcher/patches/OneOSGuestLock.java`, one class,
 only `java.*` and `javax.crypto`); `scripts/build-guest-lock-smali.sh` turns it into the smali the

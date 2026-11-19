@@ -2259,12 +2259,34 @@ echo "[Pivoted Root] time $($BB date +%T) vold-wait"
 # namespaces as slaves), each held folder goes over the guest's own at both
 # places; the guest's files in those folders stay underneath, untouched.
 # Then a rescan of the volume so the gallery lists them. Log: /data/oneos_share.log.
+# The media hold for these folders (owner's decision of 2026-11-18, S25 Ultra): MediaProvider's mount scan races
+# these binds the way it raced the albums (it scanned the empty DCIM and the rest, dropped the rows, and a rescan
+# had to index everything again). The hold is set next to the zygote launch, far below; this background part
+# must not release it before then (the launch sets published to 0 first), so it waits for the launch's note in
+# /data/oneos_share_hold_set (1: the hold is on, 0: it is not) and releases only on a 1.
+oneos_share_hold_release() {
+    hw=0
+    until [ -e /data/oneos_share_hold_set ] || [ $hw -ge 120 ]; do sleep 1; hw=$((hw + 1)); done
+    [ "$(cat /data/oneos_share_hold_set 2>/dev/null)" = 1 ] || return 0
+    if setprop oneos.media.published 1 2>/dev/null; then
+        echo "$(date +%T) Media hold: released ($1)"
+    else
+        echo "$(date +%T) Media hold: setprop oneos.media.published 1 failed ($1); StorageManagerService waits out its 15 s"
+    fi
+}
 if [ -n "$SHARE_HELD" ]; then
+    # Last boot's note must not release this boot's hold early.
+    rm -f /data/oneos_share_hold_set
     (
         PT=/mnt/pass_through/0/emulated
         n=0
         until awk -v m="$PT" '$5 == m {f = 1} END {exit !f}' /proc/self/mountinfo && [ -d "$PT/0" ]; do
-            n=$((n + 1)); [ $n -ge 300 ] && { echo "$(date +%T) the guest's storage ($PT) never came up; nothing shared"; exit 0; }
+            n=$((n + 1))
+            [ $n -ge 300 ] && {
+                echo "$(date +%T) the guest's storage ($PT) never came up; nothing shared"
+                oneos_share_hold_release "the guest's storage never came up"
+                exit 0
+            }
             sleep 1
         done
         done_=""
@@ -2279,6 +2301,7 @@ if [ -n "$SHARE_HELD" ]; then
         done
         echo "$(date +%T) shared from One UI after ${n}s:${done_:- none}"
         $BB umount -l "$SHARE_HOLD" 2>/dev/null
+        oneos_share_hold_release "after the binds"
         n=0
         while [ "$(getprop sys.boot_completed)" != 1 ] && [ $n -lt 600 ]; do sleep 2; n=$((n + 2)); done
         sleep 20
@@ -4626,9 +4649,21 @@ fi
 # to 0 first, so a hold never meets the last boot's 1. A set whose
 # services.jar has no hold reads neither and nothing changes.
 # ONEOS_GUEST_MEDIA_HOLD=0 leaves the hold off.
+# Share my files (full access in "One UI files in the other system") has the same race with its binds: with
+# folders held and the albums off, the hold is set the same way and released by the share_folders part above
+# (oneos_share_hold_release), not by oneos_media_late.
 oneos_media_hold_on=0
 oneos_media_hold_sent=0
-if [ -z "$oneos_media_tmp" ]; then
+oneos_media_share_hold=0
+if [ -z "$oneos_media_tmp" ] && [ -n "$SHARE_HELD" ]; then
+    if [ "${ONEOS_GUEST_MEDIA_HOLD:-1}" = 0 ]; then
+        oneos_media_hold_why="ONEOS_GUEST_MEDIA_HOLD=0"
+    elif setprop oneos.media.published 0 2>/dev/null && setprop oneos.media.hold 1 2>/dev/null; then
+        oneos_media_share_hold=1
+    else
+        oneos_media_hold_why="setprop failed"
+    fi
+elif [ -z "$oneos_media_tmp" ]; then
     oneos_media_hold_why="the media prototype does not run this boot"
 elif [ "${ONEOS_GUEST_MEDIA_HOLD:-1}" = 0 ]; then
     oneos_media_hold_why="ONEOS_GUEST_MEDIA_HOLD=0"
@@ -4637,8 +4672,12 @@ elif setprop oneos.media.published 0 2>/dev/null && setprop oneos.media.hold 1 2
 else
     oneos_media_hold_why="setprop failed"
 fi
+# Tells the share_folders part whether it has a hold to release (only when it runs at all).
+[ -z "$SHARE_HELD" ] || echo "$oneos_media_share_hold" > /data/oneos_share_hold_set 2>/dev/null
 if [ "$oneos_media_hold_on" = 1 ]; then
     echo "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the albums before MediaProvider's mount scan)"
+elif [ "$oneos_media_share_hold" = 1 ]; then
+    echo "[Pivoted Root] Media hold: on (StorageManagerService waits up to 15 s for the shared folders before MediaProvider's mount scan)"
 else
     setprop oneos.media.hold 0 2>/dev/null
     setprop oneos.media.published 0 2>/dev/null
