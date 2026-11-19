@@ -248,11 +248,11 @@ class StageScriptTest {
             assertEquals("$min $max: $r", RootScript.EXIT_USAGE, r.exit)
             assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf(min, max)).isNotEmpty())
         }
-        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + listOf("0", "0", "0")).exit)
+        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + listOf("0", "0", "0", "0")).exit)
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(10)))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf("100", "300")))
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + listOf("0", "0", "0")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + listOf("0", "0", "0", "0")).isNotEmpty())
     }
 
     @Test
