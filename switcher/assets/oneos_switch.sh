@@ -48,6 +48,9 @@ root_only() {
 # app starts the tool again at boot (aee4e2df on 0.5.04: refused after two restarts), so
 # the message asks for the app to be uninstalled.
 #
+# An app update can unlink the executable while it still runs (S24 Ultra, 0.5.25,
+# report 176dcdab). The scan keeps matching that process after the update.
+#
 # Found with one ls and one awk, not a readlink fork per process: S25 Ultra
 # session c2d30e95cde9775b spent 9 s of its 15 s preflight here
 # ("oneos_switch.sh start 05:52:13", "process scan done 05:52:22") on ~1500
@@ -70,28 +73,37 @@ libtimer_exe() {
           p = substr(l, j + length(root)); sub(/\/exe$/, "", p)
           if (p !~ /^[0-9]+$/) next
           c++
-          if (t !~ /^\/data\/app\/.*\/lib\/.*\/libtimer\.so$/) next
+          if (t !~ /^\/data\/app\/.*\/lib\/.*\/libtimer\.so( \(deleted\))?$/) next
           if (!n++) m = p " " t }
         END { if (n) print m; else if (c) print "none" }' || :
 }
-lt=$(libtimer_exe /proc)
+refuse_libtimer() {
+    lt_pid=$1
+    lt_exe=$2
+    lt_proc=$3
+    a=${lt_exe#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
+    case "$lt_exe:$a" in
+        *" (deleted)":*|*:|*:*/*)
+            a=$(tr '\0' ' ' 2>/dev/null < "$lt_proc/$lt_pid/cmdline" |
+                sed -n 's|^/data/app/[^/]*/\([A-Za-z0-9_.]*\)-[^/]*/lib/.*|\1|p')
+            [ -n "$a" ] || a="(an app updated since it started the tool)" ;;
+    esac
+    refuse "the app $a runs a kernel tool (libtimer.so, pid $lt_pid) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again"
+}
+libtimer_proc=/proc
+lt=$(libtimer_exe "$libtimer_proc")
 if [ -z "$lt" ]; then
     echo "preflight: process scan fell back to readlink (ls gave no link targets)"
-    for ex in /proc/[0-9]*/exe; do
+    for ex in "$libtimer_proc"/[0-9]*/exe; do
         t=$(readlink "$ex" 2>/dev/null) || continue
         case "$t" in
-            /data/app/*/lib/*/libtimer.so)
-                a=${t#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
-                refuse "the app $a runs a kernel tool (libtimer.so, pid $(echo "$ex" | cut -d/ -f3)) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
+            /data/app/*/lib/*/libtimer.so|/data/app/*/lib/*/libtimer.so" (deleted)")
+                pid=${ex%/exe}
+                refuse_libtimer "${pid##*/}" "$t" "$libtimer_proc" ;;
         esac
     done
 elif [ "$lt" != none ]; then
-    t=${lt#* }
-    case "$t" in
-        /data/app/*/lib/*/libtimer.so)
-            a=${t#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
-            refuse "the app $a runs a kernel tool (libtimer.so, pid ${lt%% *}) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again" ;;
-    esac
+    refuse_libtimer "${lt%% *}" "${lt#* }" "$libtimer_proc"
 fi
 echo "preflight: process scan done $(date +%T)"
 
@@ -3475,6 +3487,7 @@ while true; do
                [ -f $STAGE/data/oneos_overlay_dimen.dex ] && { [ \"$GUEST_AOSP_SYSUI$GUEST_MIUI\" = 00 ] || [ $GUEST_FOLD_FORM = 1 ]; }; then
                 CRAD=\$(head -n 1 $STAGE/host_corner_radius)
                 case \"\$CRAD\" in ''|*[!0-9]*) CRAD='' ;; esac
+                [ $GUEST_MIUI = 1 ] && [ -n \"\$CRAD\" ] && CRAD=\$((CRAD / 2))
             fi
             if [ \"${ONEOS_GUEST_HOST_CUTOUT:-1}\" = 1 ] && [ -f $STAGE/host_statusbar ] && [ ! -L $STAGE/host_statusbar ]; then
                 HCS=\$(sed -n 's/^spec=//p' $STAGE/host_statusbar | head -n 1)
@@ -3508,6 +3521,11 @@ while true; do
                 case \"\$CUT\$CUTR\" in *[!-0-9A-Za-z._,@\\ ]*) CUT='' CUTR='' ;; esac
                 HSB=\$(sed -n 's/^height=//p' $STAGE/host_statusbar | head -n 1)
                 HRC=\$(sed -n 's/^radius=//p' $STAGE/host_statusbar | head -n 1)
+                # HyperOS animates app launches as cards with the window corner radius; at this phone's own
+                # (A36: 118 px) they stayed round far into the launch (owner 11-19: \"so much rounded before they
+                # fill\"); half of it looked right on the A36 (60 px).
+                HRCF=\$HRC
+                [ $GUEST_MIUI = 1 ] && case \"\$HRC\" in ''|*[!0-9]*) ;; *) HRC=\$((HRC / 2)) ;; esac
                 OVS=''
                 if [ -n \"\$CUT\" ] && [ -n \"\$CUTR\" ] &&
                    gxo fabricate --target android --name OneOSCutout android:string/config_mainBuiltInDisplayCutout string \"\$CUT\" &&
@@ -3554,9 +3572,11 @@ while true; do
                            # Where the corner's curve leaves the status bar's icons
                            # room: at a third of the bar's height (the top of the
                            # clock's digits). Only over the 8dp the static RRO
-                           # gives (24 px), both sides alike. AOSP SystemUI only.
-                           PAD=\$(awk -v r=\"\$HRC\" -v h=\"\${HSBG:-0}\" -v k=\"\$SBK\" 'BEGIN { if (split(k, a, \" \") == 2) r = r * a[1] / a[2]; y = h / 3; p = 0; if (y < r) p = r - sqrt(r * r - (r - y) * (r - y)); printf \"%d\", p + 0.5 }')
-                           if [ $GUEST_AOSP_SYSUI = 1 ] && [ \"\${PAD:-0}\" -gt 24 ]; then
+                           # gives (24 px), both sides alike.
+                           PAD=\$(awk -v r=\"\${HRCF:-\$HRC}\" -v h=\"\${HSBG:-0}\" -v k=\"\$SBK\" 'BEGIN { if (split(k, a, \" \") == 2) r = r * a[1] / a[2]; y = h / 3; p = 0; if (y < r) p = r - sqrt(r * r - (r - y) * (r - y)); printf \"%d\", p + 0.5 }')
+                           # HyperOS too (11-19, A36): Xiaomi's own SystemUI overlay gives 100 px, the
+                           # clock started at 113 px; this phone's curve gives 36 (\"perfect\", owner).
+                           if { [ $GUEST_AOSP_SYSUI = 1 ] || [ $GUEST_MIUI = 1 ]; } && [ \"\${PAD:-0}\" -gt 24 ]; then
                                r=\$(gdim OneOSCornerPadding com.android.systemui com.android.systemui:dimen/rounded_corner_content_padding=\$PAD com.android.systemui:dimen/ongoing_appops_dot_min_padding=\$PAD)
                                case \"\$r\" in registered*) OVS=\"\$OVS OneOSCornerPadding\" ;; *) DIMS=\"\$DIMS padding \$PAD px: \$r;\" ;; esac
                            fi
