@@ -3229,12 +3229,17 @@ if ! content query --uri "$uri" --where "featurename=\"$f\"" 2>/dev/null | grep 
     # under the user (0.5.11: S23 6d70cb6b took the restart 2 min in, with Settings
     # open, for a SystemUI crash, and went back to One UI).
     echo "wallpaper AOD feature added; SystemUI restarts at the next screen off"
+    # Not during the return to One UI either: return_to_oneui.sh creates /data/oneos_rec_stop
+    # as its first step, and the screen goes off then (S25 Ultra X9U IN f8c0108ef1bea94a:
+    # SystemUI restarted at 03:55:10, in the return). The guest is going away; nothing to do.
     (n=0
-     while [ $n -lt 1440 ]; do
+     while [ $n -lt 1440 ] && [ ! -f /data/oneos_rec_stop ]; do
          dumpsys power 2>/dev/null | grep -q 'mWakefulness=Awake' || break
          n=$((n + 1)); sleep 5
      done
-     if [ $n -lt 1440 ]; then
+     if [ -f /data/oneos_rec_stop ]; then
+         echo "$(date +%T) return to One UI: no SystemUI restart for the wallpaper AOD feature"
+     elif [ $n -lt 1440 ]; then
          p=$(pidof com.android.systemui)
          [ -z "$p" ] || kill -TERM $p
          echo "$(date +%T) screen off: SystemUI restarted for the wallpaper AOD feature"
