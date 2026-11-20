@@ -56,7 +56,7 @@ class ApkSeriesTest {
         )
         assertEquals(
             setOf(PackageSets.ID_X9U_IN_1105_SULTRA, PackageSets.ID_INFINITYX, PackageSets.ID_LINEAGE, PackageSets.ID_HYPER_F8U, PackageSets.ID_NOTHING_F8U,
-                PackageSets.ID_ONEUI95, PackageSets.ID_ORIGINOS),
+                PackageSets.ID_ONEUI95, PackageSets.ID_ORIGINOS, PackageSets.ID_PIXEL9_SULTRA),
             ApkSeries.S26.setIds().intersect(ApkSeries.S25.setIds()),
         )
         for (s in ApkSeries.entries) assertNotEquals(s.id, PackageSets.ALL.size, s.setIds().size)

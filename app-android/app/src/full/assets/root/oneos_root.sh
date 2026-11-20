@@ -280,6 +280,7 @@ profile_info() {
         s-9965) echo "SM-S942 m1s s5e9965 bar" ;;
         a55) echo "SM-A556 a55x s5e8845 bar" ;;
         s25-fe) echo "SM-S731 r13s s5e9945 bar" ;;
+        s26-fe) echo "SM-S741 r14s s5e9955 bar" ;;
         s-8450) echo "SM-S901 r0q SM8450 bar" ;;
         m55s) echo "SM-M558 m55xq SM7450 bar" ;;
         s-plus-9945) echo "SM-S926 e2s s5e9945 bar" ;;
@@ -630,6 +631,12 @@ profile_set() {
         "s25-fe lineage24-infiniti") echo lineage ;;
         "s25-fe oneui95-s948b") echo oneui95 ;;
         "s25-fe hyperos-lhasa") echo hyper-f8u ;;
+        "s26-fe coloros17-findx9u-in-1105") echo x9u-in-1105-sultra ;;
+        "s26-fe pixel9proxl-komodo") echo pixel9-sultra ;;
+        "s26-fe infinityx41-findx9u") echo infinityx ;;
+        "s26-fe lineage24-infiniti") echo lineage ;;
+        "s26-fe oneui95-s948b") echo oneui95 ;;
+        "s26-fe hyperos-lhasa") echo hyper-f8u ;;
         "s-8450 oxygenos16-cph2745") echo oxygen16 ;;
         "m55s oxygenos16-cph2745") echo oxygen16 ;;
         "s-9945 nothingos5-metroid") echo nothing-f8u ;;

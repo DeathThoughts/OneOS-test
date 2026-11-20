@@ -1206,6 +1206,7 @@ class StageScriptTest {
             // 0.4.52: the Exynos Galaxy S26.
             Profiles.S_9965 to "SM-S942B",
             Profiles.FLIP7 to "SM-F766U",
+            Profiles.S26_FE to "SM-S741U",
             // 0.4.29: the Galaxy A57.
             Profiles.A57 to "SM-A576B",
             // 0.4.31: the Galaxy A56.

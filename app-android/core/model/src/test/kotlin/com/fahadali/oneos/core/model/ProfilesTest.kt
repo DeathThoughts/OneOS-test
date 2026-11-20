@@ -322,7 +322,7 @@ class ProfilesTest {
                 Profiles.S_FE_9925, Profiles.S_FE_8450, Profiles.S_PLUS_9925, Profiles.S_ULTRA_9925, Profiles.S_ULTRA_8450,
                 Profiles.A55, Profiles.S25_FE, Profiles.S_8450, Profiles.M55S, Profiles.S_ULTRA_8450_JP, Profiles.S_PLUS_9945,
                 Profiles.S_ULTRA_8550_JP, Profiles.S_9925, Profiles.A16_MTK, Profiles.S_8550_JP,
-                Profiles.M35, Profiles.A15_5G, Profiles.S_PLUS_8650,
+                Profiles.M35, Profiles.A15_5G, Profiles.S_PLUS_8650, Profiles.S26_FE,
             ),
             Profiles.BUILT_IN,
         )
@@ -506,7 +506,7 @@ class ProfilesTest {
                 Profiles.S_ULTRA_8750, Profiles.S_8750, Profiles.S_PLUS_8750, Profiles.S_ULTRA_8650, Profiles.S_8650, Profiles.S_8550, Profiles.S_PLUS_8550,
                 Profiles.FLIP7, Profiles.A56, Profiles.A57, Profiles.FLIP5,
                 Profiles.S_ULTRA_8550, Profiles.FLIP6, Profiles.S_9945, Profiles.S_EDGE_8750, Profiles.S_FE_9945, Profiles.FLIP7_FE,
-                Profiles.S25_FE, Profiles.S_PLUS_9945, Profiles.S_ULTRA_8550_JP, Profiles.S_8550_JP, Profiles.S_PLUS_8650,
+                Profiles.S25_FE, Profiles.S_PLUS_9945, Profiles.S_ULTRA_8550_JP, Profiles.S_8550_JP, Profiles.S_PLUS_8650, Profiles.S26_FE,
             ),
             Profiles.BUILT_IN.filter { it.choice(Images.ID_PIXEL_KOMODO) != null },
         )
@@ -639,6 +639,18 @@ class ProfilesTest {
     }
 
     @Test
+    fun galaxyS26FeUsesFlip7ImagesOnBarSettings() {
+        val profile = Profiles.S26_FE
+        assertEquals(profile, Profiles.resolve("SM-S741U", "r14s", "s5e9955").profile)
+        assertEquals(FormFactor.BAR, profile.form)
+        assertEquals(Profiles.FLIP7.choices, profile.choices)
+        assertFalse(profile.testedWithAnyImage)
+        assertEquals(listOf(Profiles.ID_NOTE_EXYNOS, Profiles.ID_NOTE_OLDER_VENDOR), profile.notes.map { it.id })
+        assertNull(Profiles.resolve("SM-S741U", "b7s", "s5e9955").profile)
+        assertNull(Profiles.resolve("SM-S741U", "r14s", "s5e9945").profile)
+    }
+
+    @Test
     fun builtInProfilesNeverOverlap() {
         val all = Profiles.BUILT_IN
         for (a in all) {
@@ -703,7 +715,7 @@ class ProfilesTest {
                 assertNull(p.id, p.choice(Images.ID_ONEUI95))
             }
         }
-        assertEquals(49, Profiles.BUILT_IN.count { it.choice(Images.ID_ONEUI95) != null })
+        assertEquals(50, Profiles.BUILT_IN.count { it.choice(Images.ID_ONEUI95) != null })
         assertEquals(listOf(Images.ID_OXYGEN16), Profiles.A06.choices.map { it.imageId })
     }
 }
