@@ -5,11 +5,18 @@
 # Only the dex files that contain a patched class are rebuilt; the rest of each
 # jar is copied byte for byte from the image.
 #
-# Usage: scripts/make-overlays.sh <system.img> [outdir]   (default out/overlays)
+# Usage: scripts/make-overlays.sh <system.img> [outdir] [--madrid]
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 IMG="$1"
 OUT="${2:-$ROOT/out/overlays}"
+MADRID=0
+case "${3:-}" in
+    "") ;;
+    --madrid) MADRID=1 ;;
+    *) echo "usage: $0 <system.img> [outdir] [--madrid]" >&2; exit 2 ;;
+esac
+[ "$#" -le 3 ] || { echo "usage: $0 <system.img> [outdir] [--madrid]" >&2; exit 2; }
 APKTOOL=${APKTOOL:-$(ls "$ROOT"/mysticgsi/tools/apktool/*.jar 2>/dev/null | head -1)}
 # aapt2, zipalign, apksigner and android.jar for the checks and static RROs below.
 SDK="${ANDROID_HOME:-/opt/android-sdk}"
@@ -25,7 +32,7 @@ decode() {
     java -jar "$APKTOOL" d -q -f -r -o "$1" "$2" || return 1
     sed -i 's/^  minSdkVersion: .*/  minSdkVersion: 29/' "$1/apktool.yml"
 }
-[ -f "$IMG" ] || { echo "usage: $0 <system.img> [outdir]" >&2; exit 2; }
+[ -f "$IMG" ] || { echo "usage: $0 <system.img> [outdir] [--madrid]" >&2; exit 2; }
 
 # Popsicle's guard sites and dex layout were checked on this exact image.
 IMAGE_SHA=$(sha256sum < "$IMG")
@@ -79,12 +86,14 @@ rm -f "$OUT/vold_patched" "$OUT/service.incremental_patched.so"
 "$DEBUGFS" -R "dump /system/apex/com.android.crashrecovery.apex $WORK/crashrecovery-aosp.apex" "$IMG" 2>/dev/null
 "$DEBUGFS" -R "dump /system/apex/com.google.android.crashrecovery_compressed.apex $WORK/crashrecovery-google-compressed.apex" "$IMG" 2>/dev/null
 "$DEBUGFS" -R "dump /system/apex/com.android.crashrecovery.capex $WORK/crashrecovery-aosp.capex" "$IMG" 2>/dev/null
-python3 -I - "$WORK" "$OUT/vold_patched" "$OUT/service.incremental_patched.so" <<'PYEOF'
+python3 -I - "$WORK" "$OUT/vold_patched" "$OUT/service.incremental_patched.so" "$MADRID" <<'PYEOF'
 import hashlib, os, sys
-work, vold_out, inc_out = sys.argv[1:4]
+work, vold_out, inc_out, madrid = sys.argv[1:5]
 # The NULs either side: the whole string, not a suffix of a longer one.
 NAME = (b"\0vold\0", b"\0gvld\0")
 TRY_START = (bytes.fromhex("b3060036"), bytes.fromhex("35000014"))
+HYPEROS_CRASHRECOVERY_CAPEX = "c1babb552c0e161e7cbaa3b26c30e23a870f76f352a6e3c19a17f2e01a70131f"
+MADRID_BUILD = "HyperOS OS4.0 Madrid"
 BUILDS = [
     ("Pixel 17 (yogi)", {
         "vold": "5ecfb2f67a941129a382a150a865d01ad62898d534dafc102ac1fab832b335b7",
@@ -184,8 +193,17 @@ BUILDS = [
     ("HyperOS OS4.0 Popsicle OS4.0.0.39.XPBCNXM", {
         "vold": "f93d8d75894dacf39842fd349c7c271f18794dec0a3a450d56b39464b89273e4",
         "service.incremental.so": "2a8a3ff60d47b438acef3338d2f28ea13cc54cce1cad5d8bd55aa68f4adb7caa",
-        "crashrecovery-aosp.capex": "c1babb552c0e161e7cbaa3b26c30e23a870f76f352a6e3c19a17f2e01a70131f",
+        "crashrecovery-aosp.capex": HYPEROS_CRASHRECOVERY_CAPEX,
     }, [("vold", 0xf45c, NAME), ("vold", 0x6ce00, TRY_START), ("service.incremental.so", 0x64785, NAME)]),
+    # Xiaomi 18 Pro Max CN (Madrid), HyperOS OS4.0.30.0.XEOCNXM.
+    # start() takes "vold" at 0x3832d (adrp/add at 0xa79a8/0xa79ac), and
+    # try_start() has the same branch at 0xa7398. Both incremental lookups use
+    # "vold" at 0x649af. The crashrecovery CAPEX is identical to Popsicle's.
+    (MADRID_BUILD, {
+        "vold": "23a81165937cb949f17bdf87f0dd96526cc1ed093ba559051c5ce910bf06cec9",
+        "service.incremental.so": "3b541bd10d4d7553fe31f28de309e3d2566ab1095113abd95ebbfa9cddb02667",
+        "crashrecovery-aosp.capex": HYPEROS_CRASHRECOVERY_CAPEX,
+    }, [("vold", 0x3832c, NAME), ("vold", 0xa7398, TRY_START), ("service.incremental.so", 0x649ae, NAME)]),
     # Nothing OS 5.0 (Metroid, AQ3A.250924.001): start() takes "vold" at 0xe1e8
     # (adrp 0xe000 + add 0x1e8 at 0x64d38, then String16 and a new
     # VoldNativeService; the binary's only "\0vold\0", whose other 9 references
@@ -268,6 +286,10 @@ def sha(d):
     return hashlib.sha256(d).hexdigest()
 data = {n: read(n) for n in ("vold", "service.incremental.so", "crashrecovery-google.apex", "crashrecovery-aosp.apex", "crashrecovery-google-compressed.apex", "crashrecovery-aosp.capex")}
 build = next((b for b in BUILDS if all(sha(data[n]) == want for n, want in b[1].items())), None)
+if madrid == "1" and (build is None or build[0] != MADRID_BUILD):
+    sys.exit("vold: --madrid requires the pinned Madrid vold, incremental service and crashrecovery CAPEX")
+if madrid == "0" and build is not None and build[0] == MADRID_BUILD:
+    sys.exit("vold: the pinned Madrid binaries require --madrid")
 if build is None:
     have = ", ".join("%s %s" % (n, sha(d)[:12] if d else "missing") for n, d in data.items())
     print("vold: not a build this was written against (%s): not patched, the guest vold keeps the name vold" % have)
@@ -287,6 +309,13 @@ if [ -f "$OUT/vold_patched" ]; then
     chmod 755 "$OUT/vold_patched"
     chmod 644 "$OUT/service.incremental_patched.so"
     VOLD_GVLD=1
+fi
+if [ "$MADRID" = 1 ]; then
+    in_image /system/system_ext/framework/miui-services.jar ||
+        { echo "ERROR: --madrid requires miui-services.jar" >&2; exit 1; }
+    rm -f "$OUT/libsurfaceflinger_patched.so"
+    "$DEBUGFS" -R "dump /system/system_ext/lib64/libsurfaceflinger.so $WORK/libsurfaceflinger.so" "$IMG" 2>/dev/null
+    python3 -I "$ROOT/switcher/patches/hyperos_sf_group.py" --madrid "$WORK/libsurfaceflinger.so" "$OUT/libsurfaceflinger_patched.so"
 fi
 if [ "$POPSICLE" = 1 ] && [ "$VOLD_GVLD" != 1 ]; then
     echo "ERROR: the pinned Popsicle image needs the gvld overlays" >&2
@@ -662,7 +691,7 @@ if in_image $MIUI_JAR; then
     done
     "$DEBUGFS" -R "dump $MIUI_JAR $WORK/miui-services.jar" "$IMG" 2>/dev/null
     decode "$WORK/miui" "$WORK/miui-services.jar"
-    if [ "$POPSICLE" = 1 ]; then
+    if [ "$POPSICLE" = 1 ] || [ "$MADRID" = 1 ]; then
         DIRS=$(python3 -I "$ROOT/switcher/patches/miui_guards.py" --variant popsicle "$WORK/miui")
     elif [ "$HONGKONG" = 1 ]; then
         DIRS=$(python3 -I "$ROOT/switcher/patches/miui_guards.py" --variant hongkong "$WORK/miui")
@@ -712,9 +741,15 @@ if in_image $MIUI_JAR; then
     "$DEBUGFS" -R "dump $WIFI_JAR $WORK/miui-wifi-service.jar" "$IMG" 2>/dev/null
     decode "$WORK/mwifi" "$WORK/miui-wifi-service.jar"
     WIFI_CASTS=5
-    [ "$POPSICLE" != 1 ] || WIFI_CASTS=6
+    if [ "$POPSICLE" = 1 ] || [ "$MADRID" = 1 ]; then
+        WIFI_CASTS=6
+    fi
     set -- --expect "$WIFI_CASTS" "$WORK/mwifi" HalExtWifi
-    [ "$HONGKONG" != 1 ] || set -- --hongkong "$@"
+    if [ "$MADRID" = 1 ]; then
+        set -- --madrid "$@"
+    elif [ "$HONGKONG" = 1 ]; then
+        set -- --hongkong "$@"
+    fi
     DIRS=$(python3 -I "$ROOT/switcher/patches/hyperos_hal_ext.py" "$@")
     java -jar "$APKTOOL" b -q -o "$WORK/mwifi-rebuilt.jar" "$WORK/mwifi"
     cp "$WORK/miui-wifi-service.jar" "$OUT/miui-wifi-service_patched.jar"
@@ -1223,7 +1258,7 @@ fi
             $([ -f libcamera_client_patched.so ] && echo libcamera_client_patched.so) \
             $([ -f libcameracompatbilityinfo_patched.so ] && echo libcameracompatbilityinfo_patched.so))
     fi
-    if [ "$POPSICLE" = 1 ]; then
+    if [ "$POPSICLE" = 1 ] || [ "$MADRID" = 1 ]; then
         (cd "$OUT" && sha256sum libsurfaceflinger_patched.so)
     fi
 } > "$OUT/guards.txt"

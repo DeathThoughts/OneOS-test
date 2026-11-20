@@ -67,10 +67,10 @@ class PopsicleNative(unittest.TestCase):
         self.assertEqual(sha(data), sha(self.sf_input.read_bytes()))
         return result
 
-    def run_vold(self, inputs, pins=()):
+    def run_vold(self, inputs, pins=(), madrid=False):
         for name, data in inputs.items():
             (self.work / name).write_bytes(data)
-        result = self.run_patch(VOLD_SCRIPT, (self.work, self.vold_out, self.inc_out), pins)
+        result = self.run_patch(VOLD_SCRIPT, (self.work, self.vold_out, self.inc_out, int(madrid)), pins)
         for name, data in inputs.items():
             self.assertEqual(sha(data), sha((self.work / name).read_bytes()), name)
         return result
@@ -121,6 +121,15 @@ class PopsicleNative(unittest.TestCase):
                     self.assertIn("not a build this was written against", result.stdout)
                     self.assertFalse(self.vold_out.exists())
                     self.assertFalse(self.inc_out.exists())
+
+    def test_madrid_vold_requires_madrid_native_pins(self):
+        inputs = {name: fixture(sites) for name, sites in VOLD_SITES.items()}
+        pins = [(stock, inputs[name]) for name, stock in VOLD_SHAS.items()]
+        result = self.run_vold(inputs, pins, madrid=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("--madrid requires the pinned Madrid", result.stderr)
+        self.assertFalse(self.vold_out.exists())
+        self.assertFalse(self.inc_out.exists())
 
     def test_vold_checks_every_patch_site_before_writing_either_output(self):
         inputs = {name: fixture(sites) for name, sites in VOLD_SITES.items()}
