@@ -66,6 +66,15 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
+
+## ColorOS 17, OnePlus 13T China TWNTY4.0c build
+
+- File: `OneOS_ColorOS17_Twinity4c.zip` (5.19 GB)
+- SHA-256: `71ad5919cbb6d813b8815e6dc4b27790c23724ca4f7441eb2a5c1ace08fbdc4e`
+- Download: https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity4c-81fff7581ff4
+- Phones:
+  - Galaxy S23 (SM-S911, SM8550), not tested yet
 
 ## Pixel 11 Fold, yogi build
 
@@ -118,6 +127,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 Ultra (au) (SCG20, SM8550), not tested yet
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Infinity-X 4.1, Find X9 Ultra build
 
@@ -174,6 +184,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## HyperOS, Xiaomi 18 Fold build
 
@@ -227,6 +238,15 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
+
+## HyperOS 4, Xiaomi 17 Pro Max build
+
+- File: `Hyperos_popsicle_17_17OS4_0_260909_233731301_QCPECN_S_AB_20260920.zip` (4.00 GB)
+- SHA-256: `1603c41aceb505ae6c51349a51312e127433eb80cd5a297bbb49a6eb7e70caf9`
+- Download: https://github.com/DeathThoughts/OneOS-test/releases/tag/images
+- Phones:
+  - Galaxy S23 (SM-S911, SM8550), not tested yet
 
 ## Nothing OS 5.0, Metroid build
 
@@ -410,6 +430,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## One UI 9.5, Galaxy S26 Ultra build
 
@@ -466,3 +487,4 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
