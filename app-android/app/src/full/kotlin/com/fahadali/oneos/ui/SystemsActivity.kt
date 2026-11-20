@@ -474,7 +474,7 @@ class SystemsFragment : Fragment() {
         val lineage = image(com.fahadali.oneos.core.model.SystemFamily.LINEAGE, Images.LINEAGE24)
         val oneui = image(com.fahadali.oneos.core.model.SystemFamily.ONEUI, Images.ONEUI95)
         // OxygenOS 16 (Android 16, 0.4.67) only where the phone can take it (One UI 8), and first there.
-        val entries = listOfNotNull(
+        val familyEntries = listOfNotNull(
             CatalogEntry(oxygen.name, oxygen, R.drawable.os_oxygenos, true).takeIf { available.any { it.id == oxygen.id } },
             // OriginOS 7 (0.4.73, experimental) only on its phones (the Snapdragon S23 to S26 series, the Exynos S24 and S24+, and Z Fold7/8).
             CatalogEntry(origin.name, origin, R.drawable.os_originos, true).takeIf { available.any { it.id == origin.id } },
@@ -491,6 +491,23 @@ class SystemsFragment : Fragment() {
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
         )
 
+        val entries = if (p?.id == Profiles.ID_S26_FE) {
+            val shownIds = familyEntries.mapNotNull { it.image?.id }.toSet()
+            val artByFamily = familyEntries.associate { it.image?.family to it.art }
+            val variants = available.filterNot { it.id in shownIds }.map {
+                CatalogEntry(it.nameWithVariant, it, artByFamily.getValue(it.family), true)
+            }
+            familyEntries.map { entry ->
+                val ref = entry.image
+                if (ref != null && available.count { it.family == ref.family } > 1) {
+                    entry.copy(name = ref.nameWithVariant)
+                } else {
+                    entry
+                }
+            } + variants
+        } else {
+            familyEntries
+        }
 
         currentEntries = entries
         val state = if (revealed) carousel.layoutManager?.onSaveInstanceState() else null
@@ -601,7 +618,11 @@ class SystemsFragment : Fragment() {
             p?.choice(image?.id.orEmpty())?.tested == true -> R.string.catalog_optimised
             else -> R.string.catalog_experimental
         })
-        badge.text = if (image?.id == Images.ID_HYPEROS_POPSICLE || image?.id == Images.ID_COLOROS17_TWINTY4C) "${entry.name} · $status" else status
+        val showVariant = image != null && (
+            image.id == Images.ID_HYPEROS_POPSICLE || image.id == Images.ID_COLOROS17_TWINTY4C ||
+                (p?.id == Profiles.ID_S26_FE && p.images().count { it.family == image.family } > 1)
+            )
+        badge.text = if (showVariant) "${entry.name} · $status" else status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send

@@ -1237,6 +1237,31 @@ class StageScriptTest {
         }
     }
 
+    @Test
+    fun galaxyS26FeStagesAndroid17ImagesOnly() = eachShell { fr ->
+        val profile = Profiles.S26_FE
+        fr.props["ro.product.model"] = "SM-S741U"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        for (image in Images.ALL.filter { it.sdk == 37 }) {
+            val stager = Stager(fr, profile, image.id)
+            stager.ok(stager.begin("keep"))
+            refused(stager.begin("keep", PackageSets.ID_OXYGEN16), "is not the file set")
+        }
+        refused(
+            fr.run(RootScript.Verb.BEGIN, "keep", profile.id, Images.ID_OXYGEN16, PackageSets.ID_OXYGEN16, "4"),
+            "does not run ${Images.ID_OXYGEN16}",
+        )
+        val stager = Stager(fr, profile)
+        stager.prepare("keep")
+        refused(stager.launch(), "test root: every launch check passed")
+
+        fr.props["ro.build.version.sdk"] = "36"
+        fr.writeProps()
+        refused(stager.launch(), "Android SDK 36, the image is 37")
+    }
+
     /** The CN builds have no Google services: neither env nor launch may hide them, and a refused launch changes nothing.
      *  HyperOS (Xiaomi 18 Fold, CN) since 0.4.51, when the CN Find X9 Ultra build was retired. */
     @Test
@@ -1765,7 +1790,7 @@ class StageScriptTest {
     }
 
     @Test
-    fun popsicleStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+    fun popsicleStagesAndPassesLaunchChecksOnTheBaseGalaxyS23() = eachShell { fr ->
         val profile = Profiles.S_8550
         val image = Images.HYPEROS_POPSICLE
         val set = PackageSets.HYPER_POPSICLE
@@ -1788,7 +1813,7 @@ class StageScriptTest {
     }
 
     @Test
-    fun twinityStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+    fun twinityStagesAndPassesLaunchChecksOnTheBaseGalaxyS23() = eachShell { fr ->
         val profile = Profiles.S_8550
         val image = Images.COLOROS17_TWINTY4C
         val set = PackageSets.TWINTY_S23

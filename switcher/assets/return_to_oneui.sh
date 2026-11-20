@@ -1217,7 +1217,7 @@ if [ -d "$LOGS" ] && [ ! -L "$LOGS" ]; then
     echo $! > "$S/store_watch.pid"
     STOP_TOKEN="$(date +%s).$$"
     echo "$STOP_TOKEN" > "$LOGS/logcat.stop" 2>/dev/null
-    "$BB" sh -c "sleep 600; [ \"\$(cat $LOGS/logcat.stop 2>/dev/null)\" = $STOP_TOKEN ] || exit 0; rm -f $LOGS/logcat.stop; pkill -f '^logcat .*/data/local/tmp/oneos_logs/boot.log'" </dev/null >/dev/null 2>&1 &
+    "$BB" sh -c "sleep 600; [ \"\$(cat $LOGS/logcat.stop 2>/dev/null)\" = $STOP_TOKEN ] || exit 0; rm -f $LOGS/logcat.stop; pkill -f '^(/system/bin/)?logcat .*/data/local/tmp/oneos_logs/boot[.]log( |$)'" </dev/null >/dev/null 2>&1 &
 fi
 "$BB" rm -rf $NODES
 echo "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) $(date +%s)" > $S/return_inplace.done
