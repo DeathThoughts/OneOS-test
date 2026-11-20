@@ -1320,7 +1320,7 @@ object Profiles {
     /**
      * Galaxy S26 FE: probe findings of 2026-11-19 (SM-S741U, r14s, s5e9955, One UI 9.0 and
      * Android 17, vendor API 202404, kernel 6.6, SVE and SVE2, no SME). Its 85-method installd
-     * table matches the baseline. It takes the Z Flip7's systems on the bar settings, untested.
+     * table matches the baseline. Every current Android 17 image is offered on the bar settings, untested.
      */
     val S26_FE = PhoneProfile(
         id = ID_S26_FE,
@@ -1329,7 +1329,22 @@ object Profiles {
         codename = "r14s",
         socModel = "s5e9955",
         form = FormFactor.BAR,
-        choices = FLIP7.choices,
+        choices = listOf(
+            X9U_IN_1105_CHOICE,
+            ImageChoice(Images.ID_FIND_N6, PackageSets.ID_N6_F8U, tested = false),
+            ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false),
+            ImageChoice(Images.ID_PIXEL_YOGI, PackageSets.ID_PIXEL_F8, tested = false),
+            ImageChoice(Images.ID_PIXEL_KODIAK, PackageSets.ID_PIXEL_SULTRA, tested = false),
+            PIXEL9_CHOICE,
+            INFINITYX_CHOICE,
+            LINEAGE_CHOICE,
+            HYPEROS_CHOICE,
+            ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false),
+            NOTHING_CHOICE,
+            NOTHING_A_CHOICE,
+            ORIGINOS_CHOICE,
+            ONEUI95_CHOICE,
+        ),
         notes = listOf(EXYNOS, olderVendor("202404 (Android 15)", "6.6")),
     )
 

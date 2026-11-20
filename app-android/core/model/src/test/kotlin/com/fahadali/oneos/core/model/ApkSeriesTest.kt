@@ -23,15 +23,15 @@ class ApkSeriesTest {
     }
 
     @Test
-    fun popsicleShipsInTheSeriesThatIncludesGalaxyS23() {
-        assertEquals(listOf(ApkSeries.S25), ApkSeries.entries.filter {
+    fun popsicleShipsInTheS26AndS25Series() {
+        assertEquals(listOf(ApkSeries.S26, ApkSeries.S25), ApkSeries.entries.filter {
             PackageSets.ID_HYPER_POPSICLE in it.setIds()
         })
     }
 
     @Test
-    fun twinityShipsInTheSeriesThatIncludesGalaxyS23() {
-        assertEquals(listOf(ApkSeries.S25), ApkSeries.entries.filter {
+    fun twinityShipsInTheS26AndS25Series() {
+        assertEquals(listOf(ApkSeries.S26, ApkSeries.S25), ApkSeries.entries.filter {
             PackageSets.ID_TWINTY_S23 in it.setIds()
         })
     }
@@ -48,16 +48,17 @@ class ApkSeriesTest {
 
     @Test
     fun aSeriesDownloadIsMuchSmallerThanTheAllInOne() {
-        // The Fold's sets are not an S phone's but Infinity-X's and HyperOS's (0.4.27, 0.4.31: one set each on
-        // every phone; 0.4.36 Nothing OS's on all three), and the two S series share the ColorOS ones too.
         assertEquals(
             setOf(PackageSets.ID_INFINITYX, PackageSets.ID_LINEAGE, PackageSets.ID_HYPER_F8U, PackageSets.ID_NOTHING_F8U, PackageSets.ID_ONEUI95, PackageSets.ID_ORIGINOS),
             ApkSeries.FOLD.setIds().intersect(ApkSeries.S25.setIds()),
         )
         assertEquals(
-            setOf(PackageSets.ID_X9U_IN_1105_SULTRA, PackageSets.ID_INFINITYX, PackageSets.ID_LINEAGE, PackageSets.ID_HYPER_F8U, PackageSets.ID_NOTHING_F8U,
-                PackageSets.ID_ONEUI95, PackageSets.ID_ORIGINOS, PackageSets.ID_PIXEL9_SULTRA),
+            ApkSeries.S25.setIds() - PackageSets.ID_OXYGEN16,
             ApkSeries.S26.setIds().intersect(ApkSeries.S25.setIds()),
+        )
+        assertEquals(
+            ApkSeries.FOLD.setIds() - setOf(PackageSets.N6_GLOBAL_F8.id, PackageSets.ID_PIXEL_F8U),
+            ApkSeries.FOLD.setIds().intersect(ApkSeries.S26.setIds()),
         )
         for (s in ApkSeries.entries) assertNotEquals(s.id, PackageSets.ALL.size, s.setIds().size)
     }

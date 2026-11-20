@@ -256,7 +256,7 @@ jobs:
             --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.popsicleStagingSetMatchesItsPayloadAndGuardPins' \
             --tests '*SingleImageZipInputStreamTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
-            --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23'
+            --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnTheBaseGalaxyS23'
 
       - name: Verify ColorOS Twinity image and staging
         env:
@@ -271,9 +271,11 @@ jobs:
           cd app-android
           ./gradlew --console=plain :core:model:test \
             --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.twinityStagingSetMatchesItsPayloadAndGuardPins' \
-            --tests '*ProfilesTest.twinityIsOfferedOnlyOnTheBaseGalaxyS23' --tests '*SingleImageZipInputStreamTest'
+            --tests '*ProfilesTest.twinityIsOfferedOnTheBaseGalaxyS23AndS26Fe' --tests '*SingleImageZipInputStreamTest' \
+            --tests '*DeviceListTest' --tests '*ImageGuideTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
-            --tests '*StageScriptTest.twinityStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23'
+            --tests '*StageScriptTest.twinityStagesAndPassesLaunchChecksOnTheBaseGalaxyS23' \
+            --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
 
       - name: Verify signed guest startup patch lifecycle
         run: |

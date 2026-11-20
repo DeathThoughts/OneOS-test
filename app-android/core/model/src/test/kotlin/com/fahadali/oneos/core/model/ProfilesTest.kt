@@ -9,17 +9,17 @@ import org.junit.Test
 
 class ProfilesTest {
     @Test
-    fun popsicleIsOfferedOnlyOnTheBaseGalaxyS23() {
+    fun popsicleIsOfferedOnTheBaseGalaxyS23AndS26Fe() {
         val image = Images.ID_HYPEROS_POPSICLE
-        assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
+        assertEquals(listOf(Profiles.S_8550, Profiles.S26_FE), Profiles.BUILT_IN.filter { it.choice(image) != null })
         assertEquals(ImageChoice(image, PackageSets.ID_HYPER_POPSICLE, tested = false), Profiles.S_8550.choice(image))
         assertEquals(PackageSets.ID_HYPER_F8U, Profiles.S_8550.choice(Images.ID_HYPEROS_LHASA)?.packageSetId)
     }
 
     @Test
-    fun twinityIsOfferedOnlyOnTheBaseGalaxyS23() {
+    fun twinityIsOfferedOnTheBaseGalaxyS23AndS26Fe() {
         val image = Images.ID_COLOROS17_TWINTY4C
-        assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
+        assertEquals(listOf(Profiles.S_8550, Profiles.S26_FE), Profiles.BUILT_IN.filter { it.choice(image) != null })
         assertEquals(ImageChoice(image, PackageSets.ID_TWINTY_S23, tested = false), Profiles.S_8550.choice(image))
     }
 
@@ -263,7 +263,7 @@ class ProfilesTest {
             listOf(Profiles.F8U, Profiles.S_ULTRA_8850, Profiles.S_ULTRA_8750, Profiles.S_8750, Profiles.FOLD7, Profiles.S_PLUS_8750,
                 Profiles.FOLD8, Profiles.S_8850, Profiles.S_8850_JP, Profiles.S_ULTRA_8650, Profiles.S_8650, Profiles.S_8550, Profiles.S_PLUS_8550,
                 Profiles.S_PLUS_8850, Profiles.S_PLUS_9965, Profiles.FOLD6, Profiles.FLIP8, Profiles.S_ULTRA_8550, Profiles.S_9945, Profiles.S_EDGE_8750,
-                Profiles.S_9965, Profiles.S_PLUS_9945, Profiles.S_ULTRA_8550_JP, Profiles.S_8550_JP, Profiles.S_PLUS_8650),
+                Profiles.S_9965, Profiles.S_PLUS_9945, Profiles.S_ULTRA_8550_JP, Profiles.S_8550_JP, Profiles.S_PLUS_8650, Profiles.S26_FE),
             Profiles.BUILT_IN.filter { it.choice(Images.ID_NOTHING_METROID) != null },
         )
         // Galaxy S23 and S23+ (0.4.11): the X9U image, untested, with the will-most-likely-not-start note.
@@ -287,7 +287,7 @@ class ProfilesTest {
         }
         // 0.4.82: OriginOS 7 also on the Snapdragon S24 and S23 phones (untested there), last in their lists;
         // 0.4.83 (owner: "the same supported roms as s24 ultra to plus and base too") the Exynos S24 and S24+,
-        // the only Exynos phones with it. Tested on the Z Fold8 Ultra only.
+        // joined by the Galaxy S26 FE. Tested on the Z Fold8 Ultra only.
         val offerOrigin = Profiles.BUILT_IN.filter { it.choice(Images.ID_ORIGINOS7) != null }
         assertEquals(
             setOf(
@@ -298,11 +298,12 @@ class ProfilesTest {
                 Profiles.ID_S_ULTRA_8550, Profiles.ID_S_PLUS_8550, Profiles.ID_S_8550,
                 Profiles.ID_S_ULTRA_8550_JP, // 0.4.92: the au S23 Ultra, the S23 Ultra's list
                 Profiles.ID_S_8550_JP, // 0.4.93: the au S23, the S23's list
+                Profiles.ID_S26_FE,
             ),
             offerOrigin.map { it.id }.toSet(),
         )
         assertEquals(
-            listOf(Profiles.ID_S_9945, Profiles.ID_S_PLUS_9945),
+            listOf(Profiles.ID_S_9945, Profiles.ID_S_PLUS_9945, Profiles.ID_S26_FE),
             offerOrigin.filter { p -> p.notes.any { it.id == Profiles.ID_NOTE_EXYNOS } }.map { it.id },
         )
         assertEquals(listOf(Profiles.ID_F8U), offerOrigin.filter { it.choice(Images.ID_ORIGINOS7)!!.tested }.map { it.id })
@@ -478,7 +479,9 @@ class ProfilesTest {
                 assertNotNull("${p.id} ${c.packageSetId}", set)
                 assertEquals("${p.id} ${c.imageId}", image!!.id, set!!.imageId)
                 val colorOs = image.family == SystemFamily.COLOROS
-                assertEquals("${p.id} ${set.id}", p.form == FormFactor.FOLD && colorOs, PackageSets.WALLPAPER_GRID_RRO in set.names)
+                // The S26 FE shares the N6 set; guest_prepare installs its wallpaper grid only on fold profiles.
+                val foldGridSet = (p.form == FormFactor.FOLD && colorOs) || (p == Profiles.S26_FE && image.id == Images.ID_FIND_N6)
+                assertEquals("${p.id} ${set.id}", foldGridSet, PackageSets.WALLPAPER_GRID_RRO in set.names)
                 assertEquals(c, p.choice(c.imageId))
             }
             assertEquals(p.choices.map { it.imageId }, p.images().map { it.id })
@@ -492,10 +495,9 @@ class ProfilesTest {
         assertTrue(Profiles.BUILT_IN.filter { it.choice(Images.ID_FIND_X9U_IN_1105) != null }.all { it.form == FormFactor.BAR || it.form == FormFactor.FLIP })
         assertEquals(listOf(Profiles.FLIP7, Profiles.FLIP5, Profiles.FLIP8, Profiles.FLIP6, Profiles.FLIP7_FE), Profiles.BUILT_IN.filter { it.form == FormFactor.FLIP })
         // The Pixel 11 Fold image on the SM8850 folds (it ran on the Fold8 Ultra; 0.4.10 the Z Fold8, untested), with the Fold's set.
-        assertEquals(listOf(Profiles.F8U, Profiles.FOLD8), Profiles.BUILT_IN.filter { it.choice(Images.ID_PIXEL_YOGI) != null })
-        // The Pixel 11 images only on chips with SVE, which their system code needs: SM8850, and (0.4.17) the
-        // Exynos 2600 of the S26+; not the older Snapdragons nor the Flip7's Exynos 2500 (no SME).
-        val sve = setOf("SM8850", "s5e9965")
+        assertEquals(listOf(Profiles.F8U, Profiles.FOLD8, Profiles.S26_FE), Profiles.BUILT_IN.filter { it.choice(Images.ID_PIXEL_YOGI) != null })
+        // The Pixel 11 images need SVE and SVE2. The S26 FE probe reports both.
+        val sve = setOf("SM8850", "s5e9965", "s5e9955")
         assertTrue(Profiles.BUILT_IN.filter { it.socModel !in sve }.all { p -> p.images().none { "sve" in it.cpuRequired } })
         // 0.4.22: the Pixel 9 Pro XL image, which needs none, on the SM8750 bar phones and the S24 Ultra; not the
         // Z Fold7 (a bar phone's system on a fold). 0.4.30: also the S23s and the Z Flip5 (Infinity-X started on
@@ -639,11 +641,20 @@ class ProfilesTest {
     }
 
     @Test
-    fun galaxyS26FeUsesFlip7ImagesOnBarSettings() {
+    fun galaxyS26FeOffersEveryAndroid17ImageOnBarSettings() {
         val profile = Profiles.S26_FE
         assertEquals(profile, Profiles.resolve("SM-S741U", "r14s", "s5e9955").profile)
         assertEquals(FormFactor.BAR, profile.form)
-        assertEquals(Profiles.FLIP7.choices, profile.choices)
+        val android17 = Images.ALL.filter { it.sdk == 37 }.map { it.id }.toSet()
+        assertEquals(android17, profile.choices.map { it.imageId }.toSet())
+        assertEquals(android17.size, profile.choices.size)
+        assertEquals(Images.ID_FIND_X9U_IN_1105, profile.recommended?.imageId)
+        for (choice in profile.choices) {
+            assertEquals(choice.imageId, PackageSets.byId(choice.packageSetId)?.imageId)
+        }
+        assertEquals(PackageSets.ID_N6_F8U, profile.choice(Images.ID_FIND_N6)?.packageSetId)
+        assertEquals(PackageSets.ID_PIXEL_F8, profile.choice(Images.ID_PIXEL_YOGI)?.packageSetId)
+        assertNull(profile.choice(Images.ID_OXYGEN16))
         assertFalse(profile.testedWithAnyImage)
         assertEquals(listOf(Profiles.ID_NOTE_EXYNOS, Profiles.ID_NOTE_OLDER_VENDOR), profile.notes.map { it.id })
         assertNull(Profiles.resolve("SM-S741U", "b7s", "s5e9955").profile)

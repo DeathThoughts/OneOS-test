@@ -3066,6 +3066,30 @@
           "tested": false
         },
         {
+          "image": "coloros17-findn6",
+          "label": "ColorOS 17, Find N6 global build",
+          "set": "n6-f8u",
+          "tested": false
+        },
+        {
+          "image": "coloros17-twinity4c",
+          "label": "ColorOS 17, OnePlus 13T China TWNTY4.0c build",
+          "set": "twinity-s23",
+          "tested": false
+        },
+        {
+          "image": "pixel11fold-yogi",
+          "label": "Pixel 11 Fold, yogi build",
+          "set": "pixel-f8",
+          "tested": false
+        },
+        {
+          "image": "pixel11pro-kodiak",
+          "label": "Pixel 11 Pro, kodiak build",
+          "set": "pixel-sultra",
+          "tested": false
+        },
+        {
           "image": "pixel9proxl-komodo",
           "label": "Pixel 9 Pro XL, komodo build",
           "set": "pixel9-sultra",
@@ -3087,6 +3111,30 @@
           "image": "hyperos-lhasa",
           "label": "HyperOS, Xiaomi 18 Fold build",
           "set": "hyper-f8u",
+          "tested": false
+        },
+        {
+          "image": "hyperos-popsicle",
+          "label": "HyperOS 4, Xiaomi 17 Pro Max build",
+          "set": "hyper-popsicle",
+          "tested": false
+        },
+        {
+          "image": "nothingos5-metroid",
+          "label": "Nothing OS 5.0, Metroid build",
+          "set": "nothing-f8u",
+          "tested": false
+        },
+        {
+          "image": "nothingos5-asteroids",
+          "label": "Nothing OS 5.0, A series build",
+          "set": "nothing-a",
+          "tested": false
+        },
+        {
+          "image": "originos7-pd2609ma",
+          "label": "OriginOS 7, vivo PD2609MA build",
+          "set": "originos",
           "tested": false
         },
         {
