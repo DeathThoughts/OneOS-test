@@ -25,6 +25,7 @@ import com.fahadali.oneos.core.model.SwitchGates
 import com.fahadali.oneos.core.root.RootProbe
 import com.fahadali.oneos.core.root.RootScript
 import com.fahadali.oneos.core.root.SetupPlan
+import com.fahadali.oneos.session.AppAssets
 import com.fahadali.oneos.session.LogJob
 import com.fahadali.oneos.session.PrepareJob
 import com.fahadali.oneos.session.Readiness
@@ -139,7 +140,7 @@ internal object FixActions {
     fun pickedImage(ctx: Context, profile: PhoneProfile?): ImageRef? {
         val p = SessionPrefs.picked(ctx) ?: return null
         if (profile == null) return null
-        val id = ImageIdentifier.identify(p.check, profile)
+        val id = ImageIdentifier.identify(p.check, profile, AppAssets.availableImages(ctx))
         if (id.state != ImageState.VERIFIED && id.state != ImageState.NOT_CHECKED) return null
         return id.image?.takeIf { profile.choice(it.id) != null }
     }
@@ -214,7 +215,7 @@ internal object FixActions {
             SetupPlan.reusesInstalled(st, image, profile, BuildConfig.VERSION_CODE) ->
                 startSetup(a, PrepareJob.Plan(RootScript.BeginMode.KEEP, SessionPrefs.Source.ON_PHONE), updating = true)
             // The download is written into the stage (10 GB): confirmed first.
-            SessionPrefs.picked(a)?.let { ImageIdentifier.identify(it.check, profile).image?.id == image.id } == true ->
+            SessionPrefs.picked(a)?.let { ImageIdentifier.identify(it.check, profile, AppAssets.availableImages(a)).image?.id == image.id } == true ->
                 AlertDialog.Builder(a)
                     .setTitle(a.getString(R.string.confirm_setup_title, system))
                     .setMessage(a.getString(R.string.confirm_setup_file, system))

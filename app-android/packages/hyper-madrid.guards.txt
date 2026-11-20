@@ -1,0 +1,21 @@
+# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets, ksuappid and mediahold guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)
+# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)
+# HyperOS: miui-services_patched.jar and apprecovery.proinstaller_patched.jar (patches/miui_guards.py)
+# HyperOS: framework_patched.jar (patches/hyperos_framework.py, CameraStatus as One UI's cameraserver writes it; 0.4.31: and One UI's camera transaction codes, patches/pixel_camera_abi.py)
+# HyperOS: miui-wifi-service_patched.jar (patches/hyperos_hal_ext.py, Xiaomi's HAL extension casts only on Xiaomi's)
+# HyperOS: miui-telephony-common_patched.jar (patches/hyperos_telephony.py, the IMS controller without an IMS phone)
+# HyperOS: miui-framework_patched.jar (patches/hyperos_displayfeature_stub.py, DisplayFeatureManager a no-op without Xiaomi's displayfeature service: the fingerprint-on-display overlay crashed SystemUI)
+# telephony-common_patched.jar: the SMS service centre as an international number (patches/guest_smsc_international.py); SEND_SMS error 66 (sent, no result payload) counted as sent (patches/guest_sms_invalid_response.py)
+# libcamera_client_patched.so, libcameracompatbilityinfo_patched.so: the native camera client with One UI's codes (patches/pixel_camera_native.py)
+5be094575a87ee7c1f24612c09f0eee6b4c1bb5ae9bf14ef6513f0029f5c11d3  services_patched.jar
+219211bd077598878ee65b74bf9cfe8689e1f7b973813da1079596459bb16b1e  miui-services_patched.jar
+783effa8447f5294e4c2b7a183370545b07f1531df520f144843c3df8983fca6  apprecovery.proinstaller_patched.jar
+e3b983dd9303e036635f566c22d08a7ad5fa04d59a8d89d7f870dcb69947df14  framework_patched.jar
+e206e1c1b6155a356e2e2df27d6208cc251447248b3dbd6dde3e42b98b8c678b  miui-wifi-service_patched.jar
+5494b3e6eb3f9bb080de8955ed7eb20bd212eb2b1acdd4d15ecf126151da47cd  miui-telephony-common_patched.jar
+e6c8e97eb09669b9be364812cd90cc70fab5264c75025637ed803ad0e0e45091  miui-framework_patched.jar
+61a29567f3f894d5944b5ab5f57331205c79b5b03283fcfa7cc6d2bd1d1c2283  vold_patched
+f786400efceda164e04bb85c2ebe9477b6f688aeb06b724af06e95b57de2ebd5  service.incremental_patched.so
+905f017569aff6bc100be99531075ff299492d4e522729141276cc23394ec660  telephony-common_patched.jar
+6c1e3145d4d4fba2d8413e9266e1d6c4685fcce545663e681751213809427cbd  libcamera_client_patched.so
+19304a06c27d89db46c4d431e53c024454c3c82ef6d2789819cbb7ee5d262f37  libsurfaceflinger_patched.so

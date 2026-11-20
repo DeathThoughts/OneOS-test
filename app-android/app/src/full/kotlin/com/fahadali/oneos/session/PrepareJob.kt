@@ -262,19 +262,20 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
         val check = StageCheck.runBlocking(app, StageCheck.Mode.FULL) { detail(it) }
         StageCheck.publish(check)
         val profile = Profiles.resolve(check.facts).profile ?: throw Stop("No OneOS profile for this phone.")
+        val availableImages = AppAssets.availableImages(app)
         val st = check.status
         var picked = SessionPrefs.picked(app)
 
         // A reuse update targets the installed image, even if an older download
         // selection names a different OS. Fresh prepare gates below decide it again.
-        val stagedCandidate = st.staged(profile)?.first
-            ?: st.marker?.takeIf { st.ours && it.profileId == profile.id }?.let { m -> Images.byId(m.imageId)?.takeIf { profile.choice(it.id) != null } }
+        val stagedCandidate = st.staged(profile)?.first?.takeIf { it in availableImages }
+            ?: st.marker?.takeIf { st.ours && it.profileId == profile.id }?.let { m -> Images.byId(m.imageId, availableImages)?.takeIf { profile.choice(it.id) != null } }
             ?: st.pendingUpdate?.takeIf { st.partial && it.profileId == profile.id }
-                ?.let { m -> Images.byId(m.imageId)?.takeIf { profile.choice(it.id) != null } }
+                ?.let { m -> Images.byId(m.imageId, availableImages)?.takeIf { profile.choice(it.id) != null } }
             // An interrupted setup has no marker, but root can identify its raw image.
-            ?: profile.images().firstOrNull { st.partial && st.rawVerifiedSha256 == it.rawSha256 }
+            ?: profile.images(availableImages).firstOrNull { st.partial && st.rawVerifiedSha256 == it.rawSha256 }
         val candidate = if (plan.source == SessionPrefs.Source.ON_PHONE) stagedCandidate else
-            picked?.let { ImageIdentifier.identify(it.check, profile).image?.takeIf { i -> profile.choice(i.id) != null } } ?: stagedCandidate
+            picked?.let { ImageIdentifier.identify(it.check, profile, availableImages).image?.takeIf { i -> profile.choice(i.id) != null } } ?: stagedCandidate
         update(state.copy(image = candidate))
         val auto = candidate?.let { SetupPlan.decide(st, it, profile, BuildConfig.VERSION_CODE, hasDownload = picked != null) }
         update(state.copy(plan = auto))
@@ -285,7 +286,7 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
         // "stops at Check the system already on this phone"): the picked download of that system, else a
         // stop that says to pick it.
         val planSource = if (plan.source == SessionPrefs.Source.ON_PHONE && candidate != null && st.rawSize != candidate.rawBytes) {
-            if (picked?.let { ImageIdentifier.identify(it.check, profile).image?.id == candidate.id } == true) SessionPrefs.Source.GZ
+            if (picked?.let { ImageIdentifier.identify(it.check, profile, availableImages).image?.id == candidate.id } == true) SessionPrefs.Source.GZ
             else throw Stop(onPhoneGone(candidate.name))
         } else plan.source
         val source = planSource ?: when (auto?.source) {

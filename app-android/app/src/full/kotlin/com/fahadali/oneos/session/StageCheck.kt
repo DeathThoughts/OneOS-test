@@ -224,7 +224,7 @@ object StageCheck : BackgroundJob<StageCheck.State>(State(), "oneos-check") {
             zygiskNextVersionCode = st.props["zygisksu.versionCode"]?.trim()?.toIntOrNull(),
             series = ApkSeries.byId(BuildConfig.SERIES),
         )
-        val report = SwitchGates.evaluate(phase, input).let { evaluated ->
+        val report = SwitchGates.evaluate(phase, input, images = AppAssets.availableImages(app)).let { evaluated ->
             if (Profiles.forkPatchesTested(facts.model)) evaluated else evaluated.copy(
                 gates = evaluated.gates + Gate(
                     Finding("fork-patch-compatibility", Level.WARN,

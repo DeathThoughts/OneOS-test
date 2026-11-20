@@ -162,6 +162,7 @@ object PackageSets {
     const val ID_PIXEL_SULTRA = "pixel-sultra"
     const val ID_HYPER_F8U = "hyper-f8u"
     const val ID_HYPER_POPSICLE = "hyper-popsicle"
+    const val ID_HYPER_MADRID = "hyper-madrid"
     const val ID_TWINTY_S23 = "twinity-s23"
     const val ID_PIXEL9_SULTRA = "pixel9-sultra"
     const val ID_INFINITYX = "infinityx"
@@ -618,6 +619,14 @@ object PackageSets {
         hasReturnApp = true,
     )
 
+    /** Madrid's verified overlays have the same staged filenames as Popsicle's. */
+    val HYPER_MADRID = HYPER_POPSICLE.copy(
+        id = ID_HYPER_MADRID,
+        imageId = Images.ID_HYPEROS_MADRID,
+        sourceDir = "out/madrid-overlays",
+        approxBytes = 692_146_285L,
+    )
+
     /**
      * Nothing OS 5.0 (0.4.33), out/overlays_nothing_r11. The smallest set so far:
      * Nothing's system is close enough to AOSP that only services.jar and
@@ -953,7 +962,7 @@ object PackageSets {
         hasReturnApp = true,
     )
 
-    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE, TWINTY_S23, ONEUI95)
+    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, HYPER_MADRID, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE, TWINTY_S23, ONEUI95)
 
     fun byId(id: String, sets: List<PackageSet> = ALL): PackageSet? = sets.firstOrNull { it.id == id }
 }

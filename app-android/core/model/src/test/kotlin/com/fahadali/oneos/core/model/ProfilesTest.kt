@@ -17,6 +17,14 @@ class ProfilesTest {
     }
 
     @Test
+    fun madridIsOfferedOnlyOnTheBaseGalaxyS23() {
+        val image = Images.ID_HYPEROS_MADRID
+        assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
+        assertEquals(ImageChoice(image, PackageSets.ID_HYPER_MADRID, tested = false), Profiles.S_8550.choice(image))
+        assertEquals(PackageSets.ID_HYPER_F8U, Profiles.S_8550.choice(Images.ID_HYPEROS_LHASA)?.packageSetId)
+    }
+
+    @Test
     fun twinityIsOfferedOnlyOnTheBaseGalaxyS23() {
         val image = Images.ID_COLOROS17_TWINTY4C
         assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
@@ -279,9 +287,10 @@ class ProfilesTest {
             val original = listOf(xin, ImageChoice(Images.ID_PIXEL_KOMODO, PackageSets.ID_PIXEL9_SULTRA, tested = false), ifx, lineage, hyper,
                 ImageChoice(Images.ID_OXYGEN16, PackageSets.ID_OXYGEN16, tested = false), nothing, origin)
             val popsicle = ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false)
+            val madrid = ImageChoice(Images.ID_HYPEROS_MADRID, PackageSets.ID_HYPER_MADRID, tested = false)
             val twinity = ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false)
-            assertEquals(if (p == s23) original + popsicle + twinity + oneui else original + oneui, p.choices)
-            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == popsicle || it == twinity })
+            assertEquals(if (p == s23) original + popsicle + madrid + twinity + oneui else original + oneui, p.choices)
+            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == popsicle || it == madrid || it == twinity })
             assertEquals(listOf(Profiles.ID_NOTE_EXPECT_NO_START), p.notes.map { it.id })
             assertEquals(Level.WARN, p.notes.single().level)
         }
@@ -307,7 +316,7 @@ class ProfilesTest {
         )
         assertEquals(listOf(Profiles.ID_F8U), offerOrigin.filter { it.choice(Images.ID_ORIGINOS7)!!.tested }.map { it.id })
         for (p in offerOrigin) {
-            val common = p.choices.filterNot { it.imageId == Images.ID_HYPEROS_POPSICLE || it.imageId == Images.ID_COLOROS17_TWINTY4C }
+            val common = p.choices.filterNot { it.imageId == Images.ID_HYPEROS_POPSICLE || it.imageId == Images.ID_HYPEROS_MADRID || it.imageId == Images.ID_COLOROS17_TWINTY4C }
             assertEquals(p.id, listOf(Images.ID_ORIGINOS7, Images.ID_ONEUI95), common.takeLast(2).map { it.imageId })
         }
         assertEquals(

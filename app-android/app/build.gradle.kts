@@ -75,6 +75,7 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     // the signal poll and the image's payloads.
     "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r29") to listOf("tethering_payload.img")),
     "hyper-popsicle" to (File(repoRoot, "out/overlays_hyperos_popsicle_r1") to listOf("tethering_payload.img")),
+    "hyper-madrid" to (File(repoRoot, "out/madrid-overlays") to listOf("tethering_payload.img")),
     // Nothing OS 5.0 (0.4.33), the Z Fold8 Ultra only: its chips need SVE/SME.
     "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r38") to listOf("tethering_payload.img")),
     "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r6") to listOf("tethering_payload.img")),
@@ -107,6 +108,16 @@ val seriesSets: Map<String, Set<String>> = File(packagesDir, "series.txt").readL
 // downloads the files its phone's set needs, by hash. -Poneos.packSets=true packs them as
 // before (a local test build, no download).
 val packSetsInApk: Boolean = (findProperty("oneos.packSets") as String?)?.trim() == "true"
+// Trial APKs may carry individual sets while preserving remote downloads for the rest.
+val selectedLocalSets: Set<String> = providers.gradleProperty("oneos.localSets").orNull.orEmpty()
+    .split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+if (selectedLocalSets.isNotEmpty()) {
+    gradle.taskGraph.whenReady {
+        check(allTasks.none { it.name.contains("Release", ignoreCase = true) }) {
+            "oneos.localSets is for debug builds only."
+        }
+    }
+}
 // 0.4.53: each file's sources, comma-separated: "gh:<tag>" (an asset of that release of fahadalijaved/OneOS-files,
 // named by its sha256) and Drive ids, copies in OneOS/files and OneOS/files2.. (Drive refuses a file once "too
 // many users" downloaded it that day; each copy has its own limit).
@@ -119,13 +130,19 @@ val setRemoteIds: Map<String, String> = File(packagesDir, "remote.txt").takeIf {
             ?: throw GradleException("packages/remote.txt: not a '<sha256> <source>[,<source>...]' line: $l")
         m.groupValues[1] to m.groupValues[2]
     } ?: emptyMap()
-val packedSets: Set<String> = if (seriesId == null) {
+val seriesPackageSets: Set<String> = if (seriesId == null) {
     packageSets.keys
 } else {
     val sets = seriesSets[seriesId] ?: throw GradleException("oneos.series: '$seriesId' is not in packages/series.txt (${seriesSets.keys})")
     (sets - packageSets.keys).takeIf { it.isNotEmpty() }?.let { throw GradleException("packages/series.txt: $seriesId names unknown sets $it") }
     sets
 }
+require(seriesPackageSets.containsAll(selectedLocalSets)) {
+    "oneos.localSets names sets outside this APK: ${selectedLocalSets - seriesPackageSets}"
+}
+// Madrid is available only on debug APKs that explicitly bundle its trial set.
+val availableSets = packageSets.keys.filter { it != "hyper-madrid" || it in selectedLocalSets }.toSet()
+val packedSets = seriesPackageSets.intersect(availableSets)
 // Session scripts copied from switcher/assets at build time (plus the expected
 // installd table). oneos_tunnel.sh (the server tunnel) and 7zz are never shipped.
 val sessionScripts: Map<String, File> = linkedMapOf(
@@ -229,6 +246,9 @@ abstract class OneOsFilesTask : DefaultTask() {
     @get:Input
     abstract val packSets: Property<Boolean>
 
+    @get:Input
+    abstract val localSets: SetProperty<String>
+
     /** sha256 -> its sources, comma-separated: gh:<tag> and Drive file ids (packages/remote.txt). */
     @get:Input
     abstract val remoteIds: MapProperty<String, String>
@@ -278,7 +298,6 @@ abstract class OneOsFilesTask : DefaultTask() {
         val sizes = sortedMapOf<String, Long>()
         val remote = sortedMapOf<String, String>()
         val ids = remoteIds.get()
-        val pack = packSets.get()
         val publishedSizes = File(packages.get().asFile, "sizes.txt").takeIf { it.isFile }?.readLines()
             ?.filter { it.isNotBlank() && !it.startsWith("#") }?.associate { line ->
                 val parts = line.split(' ')
@@ -293,7 +312,7 @@ abstract class OneOsFilesTask : DefaultTask() {
             sizes[sum] = src.length()
         }
         // A set file: in the APK (packSets), else its size and Drive id only.
-        fun putSet(src: File, sum: String, problems: MutableList<String>) {
+        fun putSet(src: File, sum: String, pack: Boolean, problems: MutableList<String>) {
             if (pack) { put(src, sum); return }
             val id = ids[sum]
             if (id == null) { problems += "${src.name} ($sum) is not on Drive: run scripts/release-files.py"; return }
@@ -301,6 +320,7 @@ abstract class OneOsFilesTask : DefaultTask() {
             remote[sum] = id
         }
         for ((id, spec) in sets.get()) {
+            val pack = packSets.get() || id in localSets.get()
             val dir = File(spec.substringBefore('|'))
             val omitted = spec.substringAfter('|').split(',').filter { it.isNotBlank() }.toSet()
             val listFile = File(packages.get().asFile, "$id.sha256")
@@ -325,7 +345,7 @@ abstract class OneOsFilesTask : DefaultTask() {
                     !f.isFile -> problems += "$n is missing from $dir"
                     f.length() > receiveMax -> problems += "$n is ${f.length()} bytes, over root's receive limit ($receiveMax)"
                     sha(f) != sum -> problems += "$n differs from packages/$id.sha256 (a rebuilt overlay?)"
-                    else -> putSet(f, sum, problems)
+                    else -> putSet(f, sum, pack, problems)
                 }
             }
             if (problems.isNotEmpty()) throw GradleException("package set $id:\n  " + problems.joinToString("\n  "))
@@ -387,6 +407,7 @@ val oneosFiles = tasks.register<OneOsFilesTask>("oneosFiles") {
     scripts.set(sessionScripts.mapValues { it.value.path })
     notShipped.set(switcherNotShipped)
     packSets.set(packSetsInApk)
+    localSets.set(selectedLocalSets)
     remoteIds.set(setRemoteIds)
     packages.set(packagesDir)
     outputDir.set(layout.buildDirectory.dir("generated/oneos/assets"))
@@ -553,7 +574,7 @@ android {
             buildConfigField("String", "SCRIPTS_SHA256", "\"${sha256(scriptsList.toByteArray())}\"")
             buildConfigField("String", "SERIES", "\"${seriesId.orEmpty()}\"")
             if (seriesId != null) versionNameSuffix = "-$seriesId"
-            for ((id, _) in packageSets) {
+            for (id in availableSets) {
                 val f = File(packagesDir, "$id.sha256")
                 val list = if (f.isFile) renderShaList(readShaList(f)) else ""
                 buildConfigField("String", "SET_${id.uppercase().replace('-', '_')}_SHA256", "\"${sha256(list.toByteArray())}\"")

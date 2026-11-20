@@ -131,6 +131,7 @@ object Images {
     const val ID_PIXEL_KODIAK = "pixel11pro-kodiak"
     const val ID_HYPEROS_LHASA = "hyperos-lhasa"
     const val ID_HYPEROS_POPSICLE = "hyperos-popsicle"
+    const val ID_HYPEROS_MADRID = "hyperos-madrid"
     const val ID_PIXEL_KOMODO = "pixel9proxl-komodo"
     const val ID_INFINITYX = "infinityx41-findx9u"
     const val ID_NOTHING_METROID = "nothingos5-metroid"
@@ -436,6 +437,32 @@ object Images {
         mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/tag/images",
     )
 
+    /** Xiaomi 18 Pro Max China OS4.0.30.0.XEOCNXM, the base Galaxy S23 trial. */
+    val HYPEROS_MADRID = ImageRef(
+        id = ID_HYPEROS_MADRID,
+        label = "HyperOS 4, Xiaomi 18 Pro Max China build",
+        shortName = "Xiaomi 18 Pro Max",
+        name = "HyperOS 4",
+        variant = "Xiaomi 18 Pro Max China",
+        blurb = "Xiaomi's HyperOS OS4.0.30.0.XEOCNXM on the base Galaxy S23. Untested.",
+        downloadUrl = null,
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_HyperOS4_Madrid.zip",
+        gzBytes = 4_479_942_793L,
+        gzSha256 = "c4598e28013122112f7dcb2736723362cb3bff3058f5b0f8166f0acaeb3a669b",
+        rawBytes = 7_818_280_960L,
+        rawSha256 = "ad674d33986b18bfc1d5c3d4d4878573e32b6241c2e66815deb9d4a6d86163e3",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = true,
+        presentsGms = true,
+        family = SystemFamily.HYPEROS,
+        zipEntryName = "system.img",
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/actions/runs/44753230951",
+    )
+
     /**
      * ColorOS 17 China, the OnePlus 13T "TWNTY4.0c" build for the Poco F5
      * (MARBLE) ported to the base Galaxy S23 (0.5.19 trial). Android 17
@@ -666,7 +693,7 @@ object Images {
      */
     val DATA_UPGRADES: Map<String, String> = mapOf(ID_FIND_X9U_IN to ID_FIND_X9U_IN_1105)
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 

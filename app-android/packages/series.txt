@@ -3,4 +3,4 @@
 # sets, every set its phones' systems use (ApkSeriesTest).
 fold n6-global-f8 hyper-f8u infinityx lineage n6-f8u nothing-f8u oneui95 originos pixel-f8 pixel-f8u
 s26 hyper-f8u infinityx lineage nothing-f8u oneui95 originos pixel-sultra x9u-in-1105-sultra
-s25 hyper-f8u hyper-popsicle infinityx lineage nothing-a nothing-f8u oneui95 originos oxygen16 pixel9-sultra twinity-s23 x9u-in-1105-sultra
+s25 hyper-f8u hyper-madrid hyper-popsicle infinityx lineage nothing-a nothing-f8u oneui95 originos oxygen16 pixel9-sultra twinity-s23 x9u-in-1105-sultra

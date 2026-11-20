@@ -40,6 +40,19 @@ class ImagesTest {
     }
 
     @Test
+    fun madridImportTakesTheInnerZipOnGalaxyS23() {
+        val madrid = Images.HYPEROS_MADRID
+        val inner = ImageFileCheck(madrid.gzName, madrid.gzBytes, madrid.gzSha256, madrid.gzBytes)
+        assertEquals("system.img", madrid.zipEntryName)
+        assertEquals(ImageState.VERIFIED, ImageIdentifier.identify(inner, Profiles.S_8550).state)
+        assertEquals(ImageState.WRONG_FOR_PHONE, ImageIdentifier.identify(inner, Profiles.S_PLUS_8550).state)
+        assertEquals(ImageState.UNCOMPRESSED, ImageIdentifier.identify(ImageFileCheck("system.img", madrid.rawBytes), Profiles.S_8550).state)
+        assertTrue(madrid.presentsGms)
+        assertFalse(madrid.gmsHideable)
+        assertNull(madrid.testedOn)
+    }
+
+    @Test
     fun twinityImportTakesTheInnerZipOnGalaxyS23() {
         val twinity = Images.COLOROS17_TWINTY4C
         val inner = ImageFileCheck(twinity.gzName, twinity.gzBytes, twinity.gzSha256, twinity.gzBytes)
@@ -97,7 +110,7 @@ class ImagesTest {
         // (Nothing's are product/priv-app GmsCore, Phonesky, GooglePartnerSetup, GoogleRestore, ConfigUpdater
         // and system_ext/priv-app GoogleServicesFramework: six folders guest_prepare.sh's patterns cover).
         assertEquals(
-            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_POPSICLE, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16, Images.ORIGINOS7, Images.LINEAGE24, Images.ONEUI95),
+            listOf(n6, xin, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_POPSICLE, Images.HYPEROS_MADRID, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16, Images.ORIGINOS7, Images.LINEAGE24, Images.ONEUI95),
             Images.ALL.filter { it.googleServices },
         )
         // 0.5.06: LineageOS 24 has none of its own: its Google apps are One UI's, laid over the guest at session time
@@ -134,11 +147,11 @@ class ImagesTest {
         assertFalse(oneui.gmsHideable)
         assertEquals(SystemFamily.ONEUI, oneui.family)
         // 0.4.73: OriginOS 7 presents the Play services of its own gmssystem payload, as the Pixel images.
-        assertEquals(listOf(pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_POPSICLE, Images.NOTHING_ASTEROIDS, Images.ORIGINOS7, Images.ONEUI95), Images.ALL.filter { it.presentsGms })
+        assertEquals(listOf(pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_POPSICLE, Images.HYPEROS_MADRID, Images.NOTHING_ASTEROIDS, Images.ORIGINOS7, Images.ONEUI95), Images.ALL.filter { it.presentsGms })
         assertEquals(listOf(n6, xin, Images.NOTHING_METROID, Images.OXYGEN16, Images.LINEAGE24), Images.ALL.filter { it.gmsHideable })
         assertTrue(pixel.copy(presentsGms = false).gmsHideable)
         assertEquals(
-            listOf(n6, xin, Images.COLOROS17_TWINTY4C, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.HYPEROS_POPSICLE, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
+            listOf(n6, xin, Images.COLOROS17_TWINTY4C, pixel, Images.PIXEL_KODIAK, Images.PIXEL_KOMODO, Images.INFINITYX, Images.HYPEROS_LHASA, Images.HYPEROS_POPSICLE, Images.HYPEROS_MADRID, Images.NOTHING_METROID, Images.NOTHING_ASTEROIDS, Images.OXYGEN16,
                 Images.ORIGINOS7, Images.LINEAGE24, Images.ONEUI95),
             Images.ALL,
         )
@@ -205,7 +218,7 @@ class ImagesTest {
             listOf(
                 SystemFamily.COLOROS, SystemFamily.COLOROS, SystemFamily.COLOROS,
                 SystemFamily.PIXEL, SystemFamily.PIXEL, SystemFamily.PIXEL,
-                SystemFamily.INFINITYX, SystemFamily.HYPEROS, SystemFamily.HYPEROS, SystemFamily.NOTHING, SystemFamily.NOTHING, SystemFamily.OXYGENOS, SystemFamily.ORIGINOS, SystemFamily.LINEAGE, SystemFamily.ONEUI,
+                SystemFamily.INFINITYX, SystemFamily.HYPEROS, SystemFamily.HYPEROS, SystemFamily.HYPEROS, SystemFamily.NOTHING, SystemFamily.NOTHING, SystemFamily.OXYGENOS, SystemFamily.ORIGINOS, SystemFamily.LINEAGE, SystemFamily.ONEUI,
             ),
             Images.ALL.map { it.family },
         )
@@ -343,7 +356,7 @@ class ImagesTest {
             Profiles.FOLD8 to listOf(n6, pixel, ifx, lineage, hyper, nothing, origin, Images.ONEUI95),
             Profiles.S_8850 to listOf(xin, Images.PIXEL_KODIAK, ifx, lineage, hyper, nothing, origin, Images.ONEUI95),
             Profiles.S_ULTRA_8650 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin, Images.ONEUI95), // 0.4.82
-            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin, Images.HYPEROS_POPSICLE, Images.COLOROS17_TWINTY4C, Images.ONEUI95),
+            Profiles.S_8550 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.OXYGEN16, nothing, origin, Images.HYPEROS_POPSICLE, Images.HYPEROS_MADRID, Images.COLOROS17_TWINTY4C, Images.ONEUI95),
             Profiles.S_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin, Images.ONEUI95), // 0.4.83
             Profiles.S_PLUS_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, nothing, origin, Images.ONEUI95), // 0.4.83
             Profiles.S_FE_9945 to listOf(xin, Images.PIXEL_KOMODO, ifx, lineage, hyper, Images.ONEUI95),

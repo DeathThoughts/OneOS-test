@@ -447,6 +447,7 @@ profile_set() {
         "s-8550 oneui95-s948b") echo oneui95 ;;
         "s-8550 hyperos-lhasa") echo hyper-f8u ;;
         "s-8550 hyperos-popsicle") echo hyper-popsicle ;;
+        "s-8550 hyperos-madrid") echo hyper-madrid ;;
         "s-8550 coloros17-twinity4c") echo twinity-s23 ;;
         "s-plus-8550 infinityx41-findx9u") echo infinityx ;;
         "s-plus-8550 lineage24-infiniti") echo lineage ;;
@@ -696,6 +697,7 @@ image_raw() {
         pixel11pro-kodiak) echo "6529871872 ac661a520263fa73a2b9996f19763350457b1558863d1dc15326a365ce1784c6" ;;
         hyperos-lhasa) echo "7749939200 269309b8869d4de41c5c852d230b4b7075b8ff733d9244f4fb868ec7109baeac" ;;
         hyperos-popsicle) echo "7203971072 a0d622cff955e907b89bf7691d6d12102587bf9333ad89e92aebee0fe57b12ba" ;;
+        hyperos-madrid) echo "7818280960 ad674d33986b18bfc1d5c3d4d4878573e32b6241c2e66815deb9d4a6d86163e3" ;;
         coloros17-twinity4c) echo "10238496768 3d918b88d7ab4cf8f49854414d872f8c959d13d0a62e3f2691a5f5c9c0a57189" ;;
         nothingos5-metroid) echo "6067867648 484f0e3a3dd2929f37b3201a57ceaf56aeca98b049a6a1f58558a2139f8a0b7b" ;;
         oneui95-s948b) echo "14259888128 82ddc8561a2687f041c2820a0d910f266b3b71753582a65ebff0cec7e8d0bbe4" ;;
@@ -719,6 +721,7 @@ set_files() {
         pixel-sultra) echo "$SET_PIXEL OneOSPixelSystemUI.apk OneOSPixelLauncher.apk" ;;
         hyper-f8u) echo "$SET_HYPEROS" ;;
         hyper-popsicle) echo "$SET_POPSICLE" ;;
+        hyper-madrid) echo "$SET_POPSICLE" ;;
         twinity-s23) echo "$SET_COMMON framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so oplus-framework_patched.jar samcam_bar.tar" ;;
         nothing-f8u) echo "$SET_NOTHING" ;;
         nothing-a) echo "$SET_NOTHINGA" ;;
@@ -742,6 +745,7 @@ set_image() {
         pixel-sultra) echo pixel11pro-kodiak ;;
         hyper-f8u) echo hyperos-lhasa ;;
         hyper-popsicle) echo hyperos-popsicle ;;
+        hyper-madrid) echo hyperos-madrid ;;
         twinity-s23) echo coloros17-twinity4c ;;
         nothing-f8u) echo nothingos5-metroid ;;
         nothing-a) echo nothingos5-asteroids ;;
@@ -767,7 +771,7 @@ image_family() {
         pixel11fold-yogi|pixel11pro-kodiak|pixel9proxl-komodo) echo pixel ;;
         infinityx41-findx9u) echo infinityx ;;
         lineage24-infiniti) echo lineage ;;
-        hyperos-lhasa|hyperos-popsicle) echo hyperos ;;
+        hyperos-lhasa|hyperos-popsicle|hyperos-madrid) echo hyperos ;;
         nothingos5-metroid|nothingos5-asteroids) echo nothing ;;
         oxygenos16-cph2745) echo oxygenos ;;
         originos7-pd2609ma) echo originos ;;
