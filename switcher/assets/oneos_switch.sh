@@ -478,6 +478,8 @@ echo "=== OneOS guest takeover starting ==="
 echo "Last reset before this session: $(cat /proc/reset_reason 2>/dev/null | tr -d '\000\n' | head -c 40); $(head -c 600 /proc/extra 2>/dev/null | tr -d '\000' | tr '\n' ' ' | head -c 300); boot reasons $(getprop persist.sys.boot.reason.history | head -n 3 | tr '\n' ' '); uptime $(cut -d' ' -f1 /proc/uptime 2>/dev/null) s"
 # One header per session in auto_return.log, which every session appends to:
 # the app's last-session screen reads the outcome of the newest session only.
+# /proc/uptime includes suspend. Capture the header's time for the return report.
+SESSION_START_UPTIME=$(awk '$1 ~ /^[0-9]+[.][0-9]+$/ { print int($1) }' /proc/uptime 2>/dev/null)
 echo "=== OneOS session $(date '+%F %T') epoch $(date +%s) boot $(cat /proc/sys/kernel/random/boot_id 2>/dev/null) app $APP profile ${ONEOS_PROFILE:-none} return max ${ONEOS_RETURN_MAX:-600}s black ${ONEOS_RETURN_BLACK:-150}s keys ${ONEOS_RETURN_KEYS:-1} ===" >> "$STAGE/auto_return.log"
 echo "preflight: switch start $(date +%T)"
 
@@ -919,8 +921,8 @@ echo "preflight: guest baseline done $(date +%T)"
 # guest's boot) after about 26 minutes. The watcher's 90 s round also keeps
 # the files of the boot in $LOGS/head (hard links, below).
 LOGS=/data/local/tmp/oneos_logs
-# Logcat filterspecs for the two captures below (the one this session starts and the
-# one the guest's OneOS app turns on mid-session), defined once so they cannot drift.
+LOGCAT_PROCESS="^(/system/bin/)?logcat .*$LOGS/boot[.]log( |$)"
+# Logcat filterspecs shared by every session capture.
 # Galaxy S25 Ultra, ColorOS 17 guest, sessions 22343aacdd4e1d6c, 161a843fbaddcd7a and
 # f8c0108ef1bea94a (2026-11-18/19): the guest logs 210-420k lines/min at boot and
 # 20-150k/min later, so a 32 MB file lasted 30-60 s, the report (head/, the newest
@@ -934,7 +936,7 @@ LOGS=/data/local/tmp/oneos_logs
 # host perf HAL) and the other Oplus helpers. Nothing used for diagnosis is listed
 # (MediaProvider, StorageManager*, ActivityManager, WindowManager, Keyguard, Biometric,
 # camera, vold, init, OneOS*, audio...): '*:V' keeps every other tag. The specs go after
-# -f/-r/-n so return_to_oneui.sh's pkill '^logcat .*/oneos_logs/boot.log' still matches.
+# -f/-r/-n, as in the unfiltered capture.
 # ONEOS_LOG_FILTER=0 (adb loop only, like ONEOS_GUEST_BOOST) captures everything again.
 # One line once assembled (the backslash-newlines vanish): the value is pasted into the
 # capture command's script text, where the quotes keep '*' from being a glob.
@@ -944,6 +946,24 @@ Blur_WindowBlurSessionImpl:S Blur_ScreenCapture:S BlurApp:S SQLiteLog:S Finsky:S
 SG:S OplusRequestedLayerState:S OplusStartingWindowManager:S OverlayManager:S \
 OplusAppDataMigrateManager:S ULELite:S Region:S HYPER-HAL:S '*:V'"
 if [ "${ONEOS_LOG_FILTER:-1}" = 0 ]; then LOGCAT_FILTER=""; fi
+# Generate the capture even when Full session logs starts off: the guest can turn it on.
+# The S24 FE's PATH could resolve logcat to a different program with subcommands.
+cat > "$STAGE/logcat_capture.sh" <<LOGCAT_CAPTURE
+#!/system/bin/sh
+err="$STAGE/tmp/logcat_capture.\$\$.err"
+run_capture() {
+    /system/bin/logcat -b "\$1" -v threadtime -f "$LOGS/boot.log" -r 32768 -n 24 $LOGCAT_FILTER 2>"\$err"
+    status=\$?
+    echo "\$(date) logcat capture ended: exit \$status (\$(ls "$LOGS" 2>/dev/null | wc -l) files in $LOGS) \$(tail -c 512 "\$err" 2>/dev/null | tail -n 2 | tr '\n' ' ')" >> "$STAGE/auto_return.log"
+    rm -f "\$err"
+}
+run_capture all
+# Status 2 indicates rejected options. Signal exits from normal cleanup must stay stopped.
+if [ "\$status" = 2 ]; then
+    echo "\$(date) logcat capture: again on the main, system, crash, events and radio buffers" >> "$STAGE/auto_return.log"
+    run_capture main,system,crash,events,radio
+fi
+LOGCAT_CAPTURE
 # LOGCAT_HEAD=1 only for a capture this session starts: a capture already
 # running (by hand, or the last session's within the 120 s before
 # return_to_oneui.sh stops it) keeps its head/, which may hold the boot of an
@@ -956,18 +976,18 @@ LOGCAT_HEAD=0
 if [ "${ONEOS_LOGCAT:-1}" = 1 ] && [ "${ONEOS_FULL_LOGS:-1}" != 1 ]; then
     # An earlier session's files move to oneos_logs.prev, as a new capture does, so this
     # session's report never carries them as its own.
-    if ! pgrep -f "^logcat .*$LOGS/boot.log" >/dev/null 2>&1; then
+    if ! pgrep -f "$LOGCAT_PROCESS" >/dev/null 2>&1; then
         rm -rf "$LOGS.prev"; [ -d "$LOGS" ] && mv "$LOGS" "$LOGS.prev"
     fi
     echo "Logcat capture: off (Full session logs off in the app)"
     if [ -d "$STAGE/data/oneos_bootui" ]; then echo 0 > "$FULLLOGS_STATE" && chmod 644 "$FULLLOGS_STATE"; fi
 elif [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
-    # pgrep -f matches the same "^logcat ... boot.log" command line in one
-    # process. The loop it replaces forked tr and grep for each of ~1100 pids:
+    # pgrep -f finds the capture by its command line. The loop it replaces
+    # forked tr and grep for each of ~1100 pids:
     # 1.6 s with One UI idle (measured 22 Oct, pgrep 49 ms), and it runs before
     # the gap splash below, which in run 33 reached ActivityTaskManager 6 s
     # after the switch started (adbd 14:40:51.03, START 14:40:57.03).
-    lp=$(pgrep -f "^logcat .*$LOGS/boot.log" 2>/dev/null | head -1)
+    lp=$(pgrep -f "$LOGCAT_PROCESS" 2>/dev/null | head -1)
     if [ -n "$lp" ]; then
         # The last return stops its capture two minutes after One UI is up
         # (return_to_oneui.sh) unless its token is gone: this session keeps it.
@@ -976,13 +996,6 @@ elif [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
     else
         rm -rf "$LOGS.prev"; [ -d "$LOGS" ] && mv "$LOGS" "$LOGS.prev"
         mkdir -p "$LOGS"
-        # 0.5.20: through a small script that logs the end of the capture with its exit status (several Galaxy
-        # S24+/S24 FE sessions with full logs on had no capture at all, "0 files of the boot kept": the process had
-        # gone and nothing said when or why); the watcher's rounds start it again if it ended early (see there).
-        printf '%s\n' '#!/system/bin/sh' \
-            "logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER" \
-            "echo \"\$(date) logcat capture ended: exit \$? (\$(ls $LOGS 2>/dev/null | wc -l) files in $LOGS)\" >> $STAGE/auto_return.log" \
-            > "$STAGE/logcat_capture.sh"
         $BB setsid sh "$STAGE/logcat_capture.sh" </dev/null >/dev/null 2>&1 &
         LOGCAT_HEAD=1
         echo "Logcat capture: $LOGS/boot.log"
@@ -4986,9 +4999,9 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 # Only with ONEOS_LOGCAT=1, and only once: a capture that runs is left alone.
                 if [ -f $GUEST_FULLLOGS_REQ ] && [ ! -L $GUEST_FULLLOGS_REQ ]; then
                     rm -f $GUEST_FULLLOGS_REQ
-                    if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && ! pgrep -f '^logcat .*$LOGS/boot.log' >/dev/null 2>&1; then
+                    if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && ! pgrep -f '$LOGCAT_PROCESS' >/dev/null 2>&1; then
                         mkdir -p $LOGS
-                        $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER </dev/null >/dev/null 2>&1 &
+                        $BB setsid sh $STAGE/logcat_capture.sh </dev/null >/dev/null 2>&1 &
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\" >> $STAGE/full_logs_mid.log
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\"
                     fi
@@ -5048,7 +5061,14 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
             fi
             if [ -n \"\$req\" ]; then
-                echo \"\$(date) guest requested '\$req' after \${total}s, returning to One UI\"
+                # Report elapsed time from the session header, including suspend.
+                elapsed=\$total
+                session_start='$SESSION_START_UPTIME'
+                current_uptime=\$(awk '\$1 ~ /^[0-9]+[.][0-9]+$/ { print int(\$1) }' /proc/uptime 2>/dev/null)
+                if [ -n \"\$session_start\" ] && [ -n \"\$current_uptime\" ] && [ \"\$current_uptime\" -ge \"\$session_start\" ]; then
+                    elapsed=\$((current_uptime - session_start))
+                fi
+                echo \"\$(date) guest requested '\$req' after \${elapsed}s, returning to One UI\"
                 # Who asked: the guarded ShutdownThread logs under the tag OneOS (run
                 # 31 was Restart in ColorOS's power menu, seen only in the recording).
                 # 0.4.87: the system buffer on its own. Read together with main, a busy
@@ -5130,7 +5150,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # $LOGS/head: hard links, no copy, and no space used until the
             # rotation deletes their first name. This session's capture only.
             # The capture ended early (0.5.20, see where it starts): started again, appending to its file.
-            if [ $LOGCAT_HEAD = 1 ] && [ -n \"\$dname\" ] && [ -f $STAGE/logcat_capture.sh ] && ! pgrep -f \"^logcat .*$LOGS/boot.log\" >/dev/null 2>&1; then
+            if [ $LOGCAT_HEAD = 1 ] && [ -n \"\$dname\" ] && [ -f $STAGE/logcat_capture.sh ] && ! pgrep -f '$LOGCAT_PROCESS' >/dev/null 2>&1; then
                 mkdir -p $LOGS
                 $BB setsid sh $STAGE/logcat_capture.sh </dev/null >/dev/null 2>&1 &
                 echo \"\$(date) logcat capture had ended: started again\"
@@ -5337,6 +5357,14 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # 55af6cc8: compass and camera did not work, and nothing in the logs told why).
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys sensorservice > \$D/sensors.txt 2>&1
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys media.camera > \$D/camera.txt 2>&1
+                        # A software encoder crash can follow a failed Codec2 service call.
+                        # Record the guest's service and encoder list in the last full round.
+                        if [ \"\$dname\" = final ] || { [ \"\$dname\" = 90 ] && [ \"${ONEOS_FULL_LOGS:-1}\" = 1 ]; }; then
+                            timeout 5 nice -n 10 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/sh -c '
+                                /system/bin/service list 2>&1 | grep -iE \"c2|codec|failed|error\"
+                                grep -hoE \"c2[.][a-zA-Z0-9_.-]+[.]encoder\" /vendor/etc/media_codecs*.xml | sort -u
+                            ' 2>&1 | head -c 12000 > \$D/codecs.txt
+                        fi
                         # WebView and the zygote sockets (S24 Ultra, IN build, session 77e7789e: the
                         # WebView zygote start found no zygote socket file).
                         { timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys webviewupdate
