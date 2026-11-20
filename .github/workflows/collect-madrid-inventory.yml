@@ -1,0 +1,110 @@
+name: Collect HyperOS Madrid inventory
+
+on:
+  push:
+    branches: [test/hyperos-madrid-inventory]
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  MADRID_BUILD_RUN: "44753230951"
+
+jobs:
+  inventory:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/test/hyperos-madrid-inventory'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Verify source Madrid build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MADRID_BUILD_RUN")
+          if ! jq -e '
+            .status == "completed" and .conclusion == "success" and
+            .head_sha == "2127ecf0adac7d62a24935a064f84e6655ce1ba3" and
+            .head_branch == "test/hyperos-madrid" and .name == "Build HyperOS Madrid image"
+          ' <<< "$run" > /dev/null; then
+            echo "Madrid build $MADRID_BUILD_RUN does not match the pinned successful source run" >&2
+            jq '{status, conclusion, head_sha, head_branch, name}' <<< "$run" >&2
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: madrid-system
+          path: madrid-system
+          github-token: ${{ github.token }}
+          run-id: ${{ env.MADRID_BUILD_RUN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: madrid-overlays
+          path: madrid-overlays
+          github-token: ${{ github.token }}
+          run-id: ${{ env.MADRID_BUILD_RUN }}
+
+      - name: Verify and report artifact inventory
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import zipfile
+
+          system = Path("madrid-system")
+          inventory = json.loads((system / "inventory.json").read_text())
+          package = system / "OneOS_HyperOS4_Madrid.zip"
+          zip_pin = inventory["zip"]
+          if package.name != zip_pin["name"] or package.stat().st_size != zip_pin["size"]:
+              raise SystemExit("Madrid ZIP name or size differs from the build inventory")
+          with package.open("rb") as stream:
+              if hashlib.file_digest(stream, "sha256").hexdigest() != zip_pin["sha256"]:
+                  raise SystemExit("Madrid ZIP SHA-256 differs from the build inventory")
+          image = inventory["image"]
+          with zipfile.ZipFile(package) as archive:
+              entries = archive.infolist()
+              if len(entries) != 1 or entries[0].filename != "system.img":
+                  raise SystemExit("Madrid ZIP must contain exactly one system.img")
+              if entries[0].filename != image["name"] or entries[0].file_size != image["size"]:
+                  raise SystemExit("Madrid system.img name or size differs from the build inventory")
+              with archive.open(entries[0]) as stream:
+                  if hashlib.file_digest(stream, "sha256").hexdigest() != image["sha256"]:
+                      raise SystemExit("Madrid system.img SHA-256 differs from the build inventory")
+          PY
+
+          mkdir -p madrid-inventory
+          cp madrid-system/inventory.json madrid-inventory/inventory.json
+          (
+            cd madrid-overlays
+            sha256sum --strict --check SHA256SUMS
+            sha256sum --strict --check guards.txt
+            cmp <(sort SHA256SUMS) \
+              <(find . -type f ! -path './SHA256SUMS' -print0 | xargs -0r sha256sum | sort)
+            cp SHA256SUMS ../madrid-inventory/SHA256SUMS
+            cp guards.txt ../madrid-inventory/guards.txt
+            find . -type f -printf '%s\t%P\n' |
+              sort -t "$(printf '\t')" -k2,2 > ../madrid-inventory/overlay-sizes.tsv
+          )
+
+          {
+            echo "# Madrid inventory for build $MADRID_BUILD_RUN"
+            for file in inventory.json SHA256SUMS guards.txt overlay-sizes.tsv; do
+              printf '\n## %s\n\n' "$file"
+              echo '~~~text'
+              cat "madrid-inventory/$file"
+              echo '~~~'
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: madrid-inventory
+          path: madrid-inventory/
+          if-no-files-found: error
+          retention-days: 14
