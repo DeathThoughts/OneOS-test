@@ -65,7 +65,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - name: Check the published image pin
+        id: existing-image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          asset="repos/$GITHUB_REPOSITORY/releases/tags/$PYB110_RELEASE"
+          if gh api "$asset" | jq -e '
+            any(.assets[]; .name == "OneOS_ColorOS17_OnePlus16.img.gz" and .size == 1880903860 and
+              .digest == "sha256:5b2d6f876e65321dc0dc6cfc523c71f77ef7009c41e643482dd523c753f72e0d" and .state == "uploaded")
+          ' >/dev/null; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v4
+        if: steps.existing-image.outputs.valid != 'true'
         with:
           name: pyb110-guest-untested
           github-token: ${{ github.token }}
@@ -73,6 +88,7 @@ jobs:
           path: out/pyb110-image
 
       - name: Publish the verified image
+        if: steps.existing-image.outputs.valid != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -192,7 +208,8 @@ jobs:
           ./gradlew --console=plain :core:model:test \
             --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest' --tests '*ProfilesTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
-                    --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
+                    --tests '*StageScriptTest.pyb110StagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23' \
+            --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
           ./gradlew --console=plain :app:assembleFullDebug
 
       - name: Verify OnePlus 16 download metadata and root staging registry

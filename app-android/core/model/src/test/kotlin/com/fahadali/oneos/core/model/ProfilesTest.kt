@@ -34,6 +34,13 @@ class ProfilesTest {
     }
 
     @Test
+    fun pyb110IsOfferedOnlyOnTheBaseGalaxyS23() {
+        val image = Images.ID_COLOROS17_PYB110
+        assertEquals(listOf(Profiles.S_8550), Profiles.BUILT_IN.filter { it.choice(image) != null })
+        assertEquals(ImageChoice(image, PackageSets.ID_PYB110_S23, tested = false), Profiles.S_8550.choice(image))
+    }
+
+    @Test
     fun theFourBundlesResolveToTheirProfiles() {
         assertEquals(Profiles.F8U, Profiles.resolve(Bundles.F8U.facts).profile)
         assertEquals(Profiles.S_ULTRA_8850, Profiles.resolve(Bundles.S26U.facts).profile)
@@ -320,7 +327,11 @@ class ProfilesTest {
         )
         assertEquals(listOf(Profiles.ID_F8U), offerOrigin.filter { it.choice(Images.ID_ORIGINOS7)!!.tested }.map { it.id })
         for (p in offerOrigin) {
-            val common = p.choices.filterNot { it.imageId == Images.ID_HYPEROS_POPSICLE || it.imageId == Images.ID_HYPEROS_MADRID || it.imageId == Images.ID_COLOROS17_TWINTY4C }
+            val trials = setOf(
+                Images.ID_HYPEROS_POPSICLE, Images.ID_HYPEROS_MADRID,
+                Images.ID_COLOROS17_TWINTY4C, Images.ID_COLOROS17_PYB110,
+            )
+            val common = p.choices.filterNot { it.imageId in trials }
             assertEquals(p.id, listOf(Images.ID_ORIGINOS7, Images.ID_ONEUI95), common.takeLast(2).map { it.imageId })
         }
         assertEquals(
@@ -653,11 +664,11 @@ class ProfilesTest {
     }
 
     @Test
-    fun galaxyS26FeOffersEveryAndroid17ImageOnBarSettings() {
+    fun galaxyS26FeOffersAndroid17ImagesEligibleForThisProfile() {
         val profile = Profiles.S26_FE
         assertEquals(profile, Profiles.resolve("SM-S741U", "r14s", "s5e9955").profile)
         assertEquals(FormFactor.BAR, profile.form)
-        val android17 = Images.ALL.filter { it.sdk == 37 }.map { it.id }.toSet()
+        val android17 = Images.ALL.filter { it.sdk == 37 && it.id != Images.ID_COLOROS17_PYB110 }.map { it.id }.toSet()
         assertEquals(android17, profile.choices.map { it.imageId }.toSet())
         assertEquals(android17.size, profile.choices.size)
         assertEquals(Images.ID_FIND_X9U_IN_1105, profile.recommended?.imageId)
@@ -667,6 +678,7 @@ class ProfilesTest {
         assertEquals(PackageSets.ID_N6_F8U, profile.choice(Images.ID_FIND_N6)?.packageSetId)
         assertEquals(PackageSets.ID_PIXEL_F8, profile.choice(Images.ID_PIXEL_YOGI)?.packageSetId)
         assertNull(profile.choice(Images.ID_OXYGEN16))
+        assertNull(profile.choice(Images.ID_COLOROS17_PYB110))
         assertFalse(profile.testedWithAnyImage)
         assertEquals(listOf(Profiles.ID_NOTE_EXYNOS, Profiles.ID_NOTE_OLDER_VENDOR), profile.notes.map { it.id })
         assertNull(Profiles.resolve("SM-S741U", "b7s", "s5e9955").profile)

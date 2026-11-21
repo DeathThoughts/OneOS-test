@@ -1244,7 +1244,7 @@ class StageScriptTest {
         fr.props["ro.product.device"] = profile.codename
         fr.props["ro.soc.model"] = profile.socModel
         fr.writeProps()
-        for (image in Images.ALL.filter { it.sdk == 37 }) {
+        for (image in Images.ALL.filter { it.sdk == 37 && it.id != Images.ID_COLOROS17_PYB110 }) {
             val stager = Stager(fr, profile, image.id)
             stager.ok(stager.begin("keep"))
             refused(stager.begin("keep", PackageSets.ID_OXYGEN16), "is not the file set")
@@ -1846,6 +1846,29 @@ class StageScriptTest {
         fr.writeProps()
         val s = Stager(fr, profile, image.id)
         for (other in listOf(Profiles.S_PLUS_8550, Profiles.S_ULTRA_8550, Profiles.S_8550_JP)) {
+            refused(fr.run(RootScript.Verb.BEGIN, "new", other.id, image.id, set.id, s.code), "does not run")
+        }
+        refused(s.begin(setId = PackageSets.ID_X9U_IN_1105_SULTRA), "is not the file set")
+        s.prepare()
+        val marker = StageMarker.parse(File(fr.stage, StageMarker.FILE_NAME).readText())
+        assertEquals(image.id, marker?.imageId)
+        assertEquals(set.id, marker?.setId)
+        assertEquals((RootScript.SCRIPTS + set.names).toSet(), ShaList.parse(File(fr.stage, "files.sha256").readText()).entries.keys)
+        refused(s.launch(hideGms = "1"), "has no Google services a session may hide")
+        refused(s.launch(), "test root: every launch check passed")
+    }
+
+    @Test
+    fun pyb110StagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+        val profile = Profiles.S_8550
+        val image = Images.COLOROS17_PYB110
+        val set = PackageSets.PYB110_S23
+        fr.props["ro.product.model"] = "SM-S911B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val s = Stager(fr, profile, image.id)
+        for (other in listOf(Profiles.S_PLUS_8550, Profiles.S_ULTRA_8550, Profiles.S_8550_JP, Profiles.S26_FE)) {
             refused(fr.run(RootScript.Verb.BEGIN, "new", other.id, image.id, set.id, s.code), "does not run")
         }
         refused(s.begin(setId = PackageSets.ID_X9U_IN_1105_SULTRA), "is not the file set")
