@@ -11,7 +11,7 @@ class SetDownloaderTest {
 
     @Test fun legacySourcesDoNotBlockValidServerSideCorrections() {
         val sources = listOf(fork, "gh:sets-1", "sf", "1pI-m5yEGgSuqN-BWHtjyM0IckKMBvl-z", fork, pyb)
-        assertEquals(listOf(fork, "gh:sets-1", pyb), SetDownloader.supportedSources(sources, sha))
+        assertEquals(listOf(fork, pyb), SetDownloader.supportedSources(sources, sha))
     }
 
     @Test fun refusesToUseUnsupportedOrExternalDownloadUrls() {
