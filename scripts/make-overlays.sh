@@ -125,6 +125,15 @@ BUILDS = [
         "service.incremental.so": "43ae83091df41f9cd43fa985e7b629e09ba9f581d93336d0efb38dd05de1bab8",
         "crashrecovery-aosp.apex": "a8396ec6bebe9511a701315964314aa8a755bef32d20cf4458293ed319bfdcf1",
     }, [("vold", 0x104e6, NAME), ("vold", 0x78b64, TRY_START), ("service.incremental.so", 0x6536b, NAME)]),
+    # OnePlus 16 China (PYB110): start() loads the string at 0x104e3 via
+    # adrp 0x79174 / add 0x79178. try_start() takes the same no-service
+    # path at 0x78b64. The incremental library and AOSP crashrecovery
+    # APEX are byte-identical to the Find X9 Ultra CN versions above.
+    ("ColorOS 17 OnePlus 16 China (PYB110)", {
+        "vold": "a23ff88cf8b506c8125321f71840376d3da4bb2b961fab7ce30004fb350c1f5f",
+        "service.incremental.so": "43ae83091df41f9cd43fa985e7b629e09ba9f581d93336d0efb38dd05de1bab8",
+        "crashrecovery-aosp.apex": "a8396ec6bebe9511a701315964314aa8a755bef32d20cf4458293ed319bfdcf1",
+    }, [("vold", 0x104e2, NAME), ("vold", 0x78b64, TRY_START), ("service.incremental.so", 0x6536b, NAME)]),
     # The Find X9 Ultra IN (global) build of the same release: its vold is
     # the CN one laid out 0x2000 later (the same instructions; start() takes
     # the string at 0x7b178, try_start's tbz is at +0x68 as in the CN build),
@@ -1334,11 +1343,15 @@ if mtk:
     sys.exit(0)
 if b"IMtkSF_ext" in data:
     sys.exit("surfaceflinger: a MediaTek build with MtkSF_ext this was not written against, not patching")
-# Twinity4c ColorOS 17: the PLT relocations identify AIBinder_getExtension
-# and IQtiComposer3Client::fromBinder on either side of the cbz at 0x470a58.
-if hashlib.sha256(data).hexdigest() == "4c51f07dd84fb8161f9791dd2a3403fce74e6a520784cfe426f60c6058f22445":
-    off = 0x470a58
-else:
+# The Twinity4c and PYB110 PLT relocations identify AIBinder_getExtension
+# and IQtiComposer3Client::fromBinder on either side of each cbz. The PYB110
+# site at 0x472f44 skips to the existing no-extension path at 0x472f90.
+FULL_SHA_SITES = {
+    "4c51f07dd84fb8161f9791dd2a3403fce74e6a520784cfe426f60c6058f22445": 0x470a58,
+    "d9c650d0378f148e76eb18fba54c0f21aa20615fdc6aab328692d3da96ef21b6": 0x472f44,
+}
+off = FULL_SHA_SITES.get(hashlib.sha256(data).hexdigest())
+if off is None:
     off = SITES.get(hashlib.sha1(data).hexdigest()[:12])
 if off is None and b"IQtiComposer3Client" not in data:
     # Google's own build (Pixel image): no QTI composer client to skip.
