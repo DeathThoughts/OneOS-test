@@ -624,14 +624,18 @@ class SystemsFragment : Fragment() {
         v.contentDescription = entry.name
         v.isScreenReaderFocusable = true
         v.findViewById<OsArtworkView>(R.id.systems_artwork).bind(image)
-        v.findViewById<TextView>(R.id.systems_name).text = entry.name
         val badge = v.findViewById<TextView>(R.id.systems_badge)
         val status = getString(when {
             !entry.supported -> R.string.catalog_unsupported
             p?.choice(image?.id.orEmpty())?.tested == true -> R.string.catalog_optimised
             else -> R.string.catalog_experimental
         })
-        badge.text = status
+        val showVariant = image != null && (
+            image.id in setOf(Images.ID_HYPEROS_POPSICLE, Images.ID_HYPEROS_MADRID,
+                Images.ID_COLOROS17_TWINTY4C, Images.ID_COLOROS17_PYB110) ||
+                (p?.id == Profiles.ID_S26_FE && p.images().count { it.family == image.family } > 1)
+            )
+        badge.text = if (showVariant) "${entry.name} · $status" else status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send
