@@ -1025,8 +1025,8 @@ object PackageSets {
         id = ID_PYB110_S23,
         imageId = Images.ID_COLOROS17_PYB110,
         sourceDir = "out/pyb110-overlays",
-        // CN system.img port: no optional in-guest OneOS "Back to One UI" app.
         files = listOf(
+            PackageFile("OneOSGuest.apk", FileRole.GUEST_APP),
             PackageFile("adservices_payload.img", FileRole.APEX_PAYLOAD),
             PackageFile("appsearch_payload.img", FileRole.APEX_PAYLOAD),
             PackageFile("art_payload.img", FileRole.APEX_PAYLOAD),
@@ -1056,8 +1056,8 @@ object PackageSets {
             PackageFile("wifi_payload.img", FileRole.APEX_PAYLOAD),
         ),
         omitted = listOf(TETHERING),
-        approxBytes = 339_818_946L,
-        hasReturnApp = false,
+        approxBytes = 347_290_073L,
+        hasReturnApp = true,
     )
 
     val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_HK, HYPER_POPSICLE, HYPER_MADRID, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE, TWINTY_S23, PYB110_S23, ONEUI95)
