@@ -203,6 +203,7 @@ jobs:
           }
           wanted = set(pyb110.values())
           assert len(pyb110) == len(wanted) and len(wanted) > 20, "Invalid OnePlus 16 overlay manifest"
+          assert "OneOSGuest.apk" not in wanted, "The OnePlus 16 CN port must not download the optional guest app"
           packages = Path("app-android/packages")
 
           def read_index(text):

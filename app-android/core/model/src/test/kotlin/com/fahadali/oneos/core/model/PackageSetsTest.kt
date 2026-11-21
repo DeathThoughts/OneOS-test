@@ -247,6 +247,9 @@ class PackageSetsTest {
             // Back to One UI in the guest exactly when the set stages the in-guest app (guest_prepare.sh installs it).
             assertEquals(s.id, PackageSets.GUEST_APP in s.names, s.hasReturnApp)
         }
+        // This OnePlus 16 CN port deliberately omits the optional in-guest return app.
+        assertFalse(PackageSets.PYB110_S23.hasReturnApp)
+        assertFalse(PackageSets.GUEST_APP in PackageSets.PYB110_S23.names)
         // The ColorOS sets (0.4.8, rebuilt 2026-10-25): both guard jars, the guest vold
         // as gvld (ColorOS 17 CP2A.260605.016) and the in-guest app.
         // 0.4.37: the Find N6 and IN sets with One UI's camera codes too (framework_patched.jar,

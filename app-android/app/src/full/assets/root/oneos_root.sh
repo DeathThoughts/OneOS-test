@@ -796,7 +796,7 @@ set_files() {
         hyper-popsicle) echo "$SET_POPSICLE" ;;
         hyper-madrid) echo "$SET_POPSICLE" ;;
         twinity-s23) echo "$SET_COMMON framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so oplus-framework_patched.jar samcam_bar.tar" ;;
-        pyb110-s23) echo "OneOSGuest.apk adservices_payload.img appsearch_payload.img art_payload.img configinfrastructure_payload.img crashrecovery_payload.img extservices_payload.img framework_patched.jar guards.txt healthfitness_payload.img i18n_payload.img ims-ext-common_patched.jar libcamera_client_patched.so mediaprovider_payload.img ondevicepersonalization_payload.img oplus-framework_patched.jar oplus-services_patched.jar oplus-telephony-common_patched.jar permission_payload.img rkpd_payload.img runtime_payload.img sdkext_payload.img service.incremental_patched.so services_patched.jar surfaceflinger_patched telephony-common_patched.jar vold_patched wifi_payload.img" ;;
+        pyb110-s23) echo "adservices_payload.img appsearch_payload.img art_payload.img configinfrastructure_payload.img crashrecovery_payload.img extservices_payload.img framework_patched.jar guards.txt healthfitness_payload.img i18n_payload.img ims-ext-common_patched.jar libcamera_client_patched.so mediaprovider_payload.img ondevicepersonalization_payload.img oplus-framework_patched.jar oplus-services_patched.jar oplus-telephony-common_patched.jar permission_payload.img rkpd_payload.img runtime_payload.img sdkext_payload.img service.incremental_patched.so services_patched.jar surfaceflinger_patched telephony-common_patched.jar vold_patched wifi_payload.img" ;;
         hyper-hk) echo "$SET_HYPERHK" ;;
         nothing-f8u) echo "$SET_NOTHING" ;;
         nothing-a) echo "$SET_NOTHINGA" ;;
