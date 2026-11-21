@@ -17,6 +17,8 @@ SUBS = [('/system/bin/sh /data/local/tmp/ensure_app_storage.sh', '"$T/ensure.sh"
         ('/data/app_storage.log', '"$T/app_storage.log"'),
         # 0.5.20 (merged from upstream): the one-time full compile two minutes after boot keeps its marker and
         # log in /data and keys on the framework jars; the test points all of them into $T.
+        # This fork runs the compile by default; /data/oneos_dexopt.disable (absent here) turns it off.
+        ('/data/oneos_dexopt.disable', '"$T/dexopt.disable"'),
         ('/data/oneos_dexopt.done', '"$T/dexopt.done"'),
         ('/data/oneos_dexopt.log', '"$T/dexopt.log"'),
         ('/data/oneos_bin/busybox', '"$T/nobusybox"'),

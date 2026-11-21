@@ -123,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         cards.row(apps, getString(R.string.bring_entry_title), getString(R.string.bring_entry_summary)) {
             startActivity(Intent(this, BringAppsActivity::class.java))
         }
+        animLevelCard(list)
         fullLogsCard(list)
         val updates = cards.section(list, getString(R.string.guest_updates_title), getColor(R.color.preboot_card))
         cards.row(updates, getString(R.string.guest_updates_open), getString(R.string.guest_updates_entry)) {
@@ -152,6 +153,28 @@ class MainActivity : AppCompatActivity() {
                     .setMessage(next.error).setPositiveButton(android.R.string.ok,null).show()
             }
         }.isEnabled = state.active
+    }
+
+    /** ColorOS's lighter animation level (0.5.32): only where the session says which level is in effect. */
+    private fun animLevelCard(list: android.widget.LinearLayout) {
+        val level = AnimLevel.current() ?: return
+        val pending = AnimLevel.pending(this)
+        val cards = com.fahadali.oneos.shared.NativeCards
+        val perf = cards.section(list, getString(R.string.anim_title), getColor(R.color.preboot_card))
+        val light = level >= AnimLevel.LIGHT
+        val summary = getString(when {
+            pending -> R.string.anim_applying
+            light -> R.string.anim_light_on
+            else -> R.string.anim_light_off
+        })
+        cards.row(perf, getString(R.string.anim_light_title), summary) {
+            runCatching { AnimLevel.request(this, if (light) AnimLevel.FULL else AnimLevel.LIGHT) }.onFailure { e ->
+                android.widget.Toast.makeText(this, getString(R.string.anim_failed, e.message ?: e.javaClass.simpleName), android.widget.Toast.LENGTH_LONG).show()
+            }
+            // The watcher checks every second, then ColorOS's home screen and status bar restart.
+            list.postDelayed({ if (!isDestroyed) GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) } }, 2500)
+            GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) }
+        }.isEnabled = !pending
     }
 
     /** Record full logs from now (0.5.17): hidden when the session's OneOS is too old to answer. */

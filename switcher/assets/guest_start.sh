@@ -1225,7 +1225,8 @@ export PATH=/system/bin:/system/xbin
 
 # OneOS: /mnt and /storage came in from the host, and its pass_through,
 # installer, androidwritable, runtime and user views are binds of the phone's
-# real /data/media. Drop them in this (private) namespace before anything in
+# real /data/media.
+# Drop them in this (private) namespace before anything in
 # the guest runs; the guest builds its own from its staged /data/media below.
 for m in $(awk '$5 ~ "^/(mnt/(pass_through|installer|androidwritable|runtime|user)|storage)(/|$)" {print $5}' /proc/self/mountinfo | sort -r); do
     $BB umount -l "$m" 2>/dev/null
@@ -1378,6 +1379,11 @@ if [ -f /data/oneos_floating_feature.xml ] && [ -f /vendor/etc/floating_feature.
     chcon u:object_r:vendor_configs_file:s0 /data/oneos_floating_feature.xml 2>/dev/null
     $BB mount --bind /data/oneos_floating_feature.xml /vendor/etc/floating_feature.xml && \
         echo "[Pivoted Root] Floating features: merged list bound over /vendor/etc/floating_feature.xml"
+fi
+if [ -f /data/oneos_system_floating_feature.xml ] && [ -f /system/etc/floating_feature.xml ]; then
+    chcon u:object_r:system_file:s0 /data/oneos_system_floating_feature.xml 2>/dev/null
+    $BB mount --bind /data/oneos_system_floating_feature.xml /system/etc/floating_feature.xml && \
+        echo "[Pivoted Root] Floating features: the image's /system/etc list with the phone's camera lines bound"
 fi
 if [ -d /data/oneos_cameradata ] && [ -d /system/cameradata ]; then
     chcon -R u:object_r:system_file:s0 /data/oneos_cameradata 2>/dev/null
@@ -3426,8 +3432,11 @@ fi
 # from the phone's temperature: without it the amplifier's protection never got a reading, sysfs
 # audio/amp ready -1). The battery temperature stands in for it. Only where the amplifier node
 # exists (a Samsung smart amp); ONEOS_GUEST_SAMSUNG_AUDIO=0 leaves it out. Log: /data/oneos_sec_audio.log.
+# This fork: the Dolby settings stay on, but the amplifier temperature is opt-in (ONEOS_GUEST_AMP_TEMP=1,
+# default off): it replaces the amplifier's own temperature reading on hardware One UI shares, and it was
+# not tried on the owner's phone.
 if [ "${ONEOS_GUEST_SAMSUNG_AUDIO:-1}" = 1 ] && [ -d /sys/devices/virtual/audio/amp ] && [ -f /data/oneos_edm_stub.dex ]; then
-    ONEOS_BB="$BB" $BB sh -c '
+    ONEOS_BB="$BB" ONEOS_AMP_TEMP="${ONEOS_GUEST_AMP_TEMP:-0}" $BB sh -c '
         BB=$ONEOS_BB
         log() { echo "$(date +%T) $*" >> /data/oneos_sec_audio.log; }
         param() { /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "$1" 2>&1 | tail -n 1; }
@@ -3435,6 +3444,7 @@ if [ "${ONEOS_GUEST_SAMSUNG_AUDIO:-1}" = 1 ] && [ -d /sys/devices/virtual/audio/
         while [ "$(getprop service.bootanim.exit)" != 1 ] && [ $i -lt 600 ]; do sleep 1; i=$((i + 1)); done
         sleep 10
         for kv in g_effect_dolby_enable=1 g_effect_dolby_profile=0 g_effect_dolby_volume_leveler=7; do log "$(param $kv)"; done
+        [ "$ONEOS_AMP_TEMP" = 1 ] || { log "amp temperature: left alone (ONEOS_GUEST_AMP_TEMP is not 1)"; exit 0; }
         last=""
         while :; do
             t=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)
@@ -3451,6 +3461,15 @@ if [ "${ONEOS_GUEST_SAMSUNG_AUDIO:-1}" = 1 ] && [ -d /sys/devices/virtual/audio/
     ' </dev/null >/dev/null 2>&1 &
 fi
 DT2W=${ONEOS_GUEST_DT2W:-1}
+# 0.5.32: not in a One UI image. Its own input service (SemInputDeviceManagerService) already writes the panel's
+# display state through Samsung's sysinput HAL, as One UI does (S24+ One UI 9.5 report 34d6923c: enabled@1,0 and
+# @1,1 from the guest at every screen off), so the keeper was a second writer to the same node: Galaxy A17 5G
+# report cea77895, kernel panic "list_add corruption" in sec_input_enable_device from the keeper's busybox write,
+# 17 min into a One UI 9.5 session. ONEOS_GUEST_DT2W=1 still forces it.
+if [ "${ONEOS_GUEST_DT2W:-}" != 1 ] && grep -q '^ro.build.version.oneui=' /system/build.prop 2>/dev/null; then
+    DT2W=0
+    echo "$(date +%T) not started: a One UI image wakes on double tap itself (its input service drives the touch IC)" >> /data/dt2w.log
+fi
 if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/sec/tsp/enabled ] || [ -w /sys/class/sec/tsp1/enabled ]; }; then
     rm -f /data/oneos_dt2w_armed.* /data/oneos_dt2w_*.fifo /data/oneos_dt2w_aod* /data/oneos_dt2w_lid*
     ONEOS_BB="$BB" $BB sh -c '

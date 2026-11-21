@@ -175,6 +175,13 @@ object RootScript {
          * owner's choice of albums, Galaxy S25 Ultra session 92032e7ae892154c).
          */
         ONEUI_MEDIA("oneui-media", Stdin.SCRIPT),
+        /**
+         * Debloater (0.5.32): the apps to hide in the system set up now (its Debloat screen). stdin is
+         * `<package> TAB <folder>` per line ([com.fahadali.oneos.core.model.Debloat.listText]), written as
+         * `$STAGE/debloat.list` for guest_prepare.sh to hide at the next start; empty removes it (Restore all).
+         * Refused while a session runs; the image is never changed.
+         */
+        DEBLOAT("debloat", Stdin.DATA),
     }
 
     /**
@@ -287,7 +294,7 @@ object RootScript {
                 args.getOrNull(13)?.let { if (it != "0" && it != "1") p += "launch: share my files is not 0 or 1" }
             }
             Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.REMOVE_SYSTEM, Verb.RESET_DATA, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
-            Verb.BRING_COLLECT, Verb.BRING_CATALOG -> {
+            Verb.BRING_COLLECT, Verb.BRING_CATALOG, Verb.DEBLOAT -> {
                 need(1)
                 arg(0, DEC, "a size")
             }

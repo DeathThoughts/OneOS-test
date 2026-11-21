@@ -162,7 +162,7 @@ class EndCapture(unittest.TestCase):
 
     def test_source_place(self):
         # In the request branch, after the thermal/battery lines, right before its exec.
-        a = SOURCE.index('echo \\"\\$(date) guest requested \'\\$req\' after \\${t}s, returning to One UI\\"')
+        a = SOURCE.index('echo \\"\\$(date) guest requested \'\\$req\' after \\${total}s, returning to One UI\\"')
         b = SOURCE.index(END_START)
         c = SOURCE.index(END_STOP, b)
         self.assertLess(a, b)

@@ -458,16 +458,17 @@ class SystemsFragment : Fragment() {
         val maintenance = rememberedImage?.let { ImageMaintenance.message(ctx, it, check.result) }
         val pickedId = p?.let { FixActions.pickedImage(ctx, it)?.id }
         val settingUpId = prep.image?.id?.takeIf { prep.busy }
-        fun image(family: com.fahadali.oneos.core.model.SystemFamily, fallback: ImageRef): ImageRef =
-            available.firstOrNull { it.family == family && it.id == setUpId }
-                ?: available.firstOrNull { it.family == family && it.id in st?.oldImages.orEmpty().values }
-                ?: rememberedImage?.takeIf { it.family == family && it.id == setUpId }
-                ?: available.firstOrNull { it.family == family } ?: fallback
-        // The ColorOS card keeps the non-Twinity image; the Twinity trial has its own card.
+        // 0.5.27: HyperOS 4 Global has a card of its own, so the family's card leaves it out (except).
+        fun image(family: com.fahadali.oneos.core.model.SystemFamily, fallback: ImageRef, except: String? = null): ImageRef =
+            available.firstOrNull { it.family == family && it.id != except && it.id == setUpId }
+                ?: available.firstOrNull { it.family == family && it.id != except && it.id in st?.oldImages.orEmpty().values }
+                ?: rememberedImage?.takeIf { it.family == family && it.id != except && it.id == setUpId }
+                ?: available.firstOrNull { it.family == family && it.id != except } ?: fallback
+        val colorTrials = setOf(Images.ID_COLOROS17_TWINTY4C, Images.ID_COLOROS17_PYB110)
         val color = image(com.fahadali.oneos.core.model.SystemFamily.COLOROS, Images.FIND_N6)
-            .takeUnless { it.id == Images.ID_COLOROS17_TWINTY4C }
+            .takeUnless { it.id in colorTrials }
             ?: available.firstOrNull {
-                it.family == com.fahadali.oneos.core.model.SystemFamily.COLOROS && it.id != Images.ID_COLOROS17_TWINTY4C
+                it.family == com.fahadali.oneos.core.model.SystemFamily.COLOROS && it.id !in colorTrials
             }
             ?: Images.FIND_N6
         val pixel = image(com.fahadali.oneos.core.model.SystemFamily.PIXEL, Images.PIXEL_YOGI)
@@ -476,6 +477,8 @@ class SystemsFragment : Fragment() {
         val popsicle = available.firstOrNull { it.id == Images.ID_HYPEROS_POPSICLE }
         val madrid = available.firstOrNull { it.id == Images.ID_HYPEROS_MADRID }
         val twinity = available.firstOrNull { it.id == Images.ID_COLOROS17_TWINTY4C }
+        val pyb110 = available.firstOrNull { it.id == Images.ID_COLOROS17_PYB110 }
+        val hyperGlobal = Images.HYPEROS_HONGKONG
         val nothing = image(com.fahadali.oneos.core.model.SystemFamily.NOTHING, Images.NOTHING_METROID)
         val oxygen = image(com.fahadali.oneos.core.model.SystemFamily.OXYGENOS, Images.OXYGEN16)
         val origin = image(com.fahadali.oneos.core.model.SystemFamily.ORIGINOS, Images.ORIGINOS7)
@@ -483,6 +486,8 @@ class SystemsFragment : Fragment() {
         val oneui = image(com.fahadali.oneos.core.model.SystemFamily.ONEUI, Images.ONEUI95)
         // OxygenOS 16 (Android 16, 0.4.67) only where the phone can take it (One UI 8), and first there.
         val familyEntries = listOfNotNull(
+            // HyperOS 4 Global (0.5.27, tested on the Galaxy A36) first, with its own artwork, on the phones that offer it.
+            CatalogEntry(hyperGlobal.shortName, hyperGlobal, R.drawable.os_hyperos_global, true).takeIf { available.any { it.id == hyperGlobal.id } },
             CatalogEntry(oxygen.name, oxygen, R.drawable.os_oxygenos, true).takeIf { available.any { it.id == oxygen.id } },
             // OriginOS 7 (0.4.73, experimental) only on its phones (the Snapdragon S23 to S26 series, the Exynos S24 and S24+, and Z Fold7/8).
             CatalogEntry(origin.name, origin, R.drawable.os_originos, true).takeIf { available.any { it.id == origin.id } },
@@ -495,6 +500,7 @@ class SystemsFragment : Fragment() {
             popsicle?.let { CatalogEntry(it.name, it, R.drawable.os_hyperos, true) },
             madrid?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_hyperos, true) },
             twinity?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
+            pyb110?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
             CatalogEntry(color.name, color, R.drawable.os_coloros, available.any { it.id == color.id }),
             CatalogEntry(nothing.name, nothing, R.drawable.os_nothing, available.any { it.id == nothing.id }),
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),

@@ -133,6 +133,8 @@ object Images {
     const val ID_HYPEROS_LHASA = "hyperos-lhasa"
     const val ID_HYPEROS_POPSICLE = "hyperos-popsicle"
     const val ID_HYPEROS_MADRID = "hyperos-madrid"
+    /** Starts with "hyper": switcher/assets/boot_status.sh names the boot splash from it. */
+    const val ID_HYPEROS_HONGKONG = "hyperos-hongkong"
     const val ID_PIXEL_KOMODO = "pixel9proxl-komodo"
     const val ID_INFINITYX = "infinityx41-findx9u"
     const val ID_NOTHING_METROID = "nothingos5-metroid"
@@ -496,6 +498,36 @@ object Images {
     )
 
     /**
+     * HyperOS 4 Global (0.5.27, tested on the Galaxy A36): Xiaomi's global build OS4.0.5.0.XFRMIXM
+     * (`CP2A.260605.016`), MysticGSI's HyperOS patch set (`mysticgsi/out/oneos-hyperos-hongkong`). Google
+     * services: GmsCore and the Play Store are ordinary priv-apps in its product partition (as in the Nothing
+     * image), and its set also stages `gmssystem_payload.img`, so sessions present that GmsCore as on the
+     * One UI 9.5 image ([presentsGms]): Google services cannot be hidden for a launch.
+     */
+    val HYPEROS_HONGKONG = ImageRef(
+        id = ID_HYPEROS_HONGKONG,
+        label = "HyperOS 4 Global",
+        shortName = "HyperOS 4 Global",
+        name = "HyperOS 4",
+        variant = null,
+        blurb = "Xiaomi's HyperOS 4 global build. With Google apps.",
+        downloadUrl = SHARED_FOLDER_URL,
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_HyperOS4_Global.img.gz",
+        gzBytes = 5_626_496_228L,
+        gzSha256 = "c9dbf413b8d4cd14387b2cac68b6d5a62a160c920f7b63dc55f07216828258b7",
+        rawBytes = 10_482_176_000L,
+        rawSha256 = "29083fa42c8144637066015d9648f9c927ddf761eefdf78989024e88f13e1721",
+        testedOn = "Galaxy A36",
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = true,
+        presentsGms = true,
+        family = SystemFamily.HYPEROS,
+    )
+
+    /**
      * Nothing OS 5.0 (0.4.33), from the Nothing Archive dump of the A024
      * "Metroid" (nothing_archive, Metroid_C5.0-260924-2115). Android 17 on a
      * Qualcomm qssi_64 system image, like the ColorOS and Infinity-X builds.
@@ -720,7 +752,7 @@ object Images {
         mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/download/pyb110-s23-trial-v1/OneOS_ColorOS17_OnePlus16.img.gz",
     )
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, COLOROS17_PYB110, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, COLOROS17_PYB110, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_HONGKONG, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 

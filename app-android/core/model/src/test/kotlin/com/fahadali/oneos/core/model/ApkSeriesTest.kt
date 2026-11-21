@@ -56,7 +56,7 @@ class ApkSeriesTest {
     @Test
     fun aSeriesDownloadIsMuchSmallerThanTheAllInOne() {
         assertEquals(
-            setOf(PackageSets.ID_INFINITYX, PackageSets.ID_LINEAGE, PackageSets.ID_HYPER_F8U, PackageSets.ID_NOTHING_F8U, PackageSets.ID_ONEUI95, PackageSets.ID_ORIGINOS),
+            setOf(PackageSets.ID_INFINITYX, PackageSets.ID_LINEAGE, PackageSets.ID_HYPER_F8U, PackageSets.ID_HYPER_HK, PackageSets.ID_NOTHING_F8U, PackageSets.ID_ONEUI95, PackageSets.ID_ORIGINOS),
             ApkSeries.FOLD.setIds().intersect(ApkSeries.S25.setIds()),
         )
         assertEquals(

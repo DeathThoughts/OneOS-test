@@ -478,6 +478,8 @@ for pair in $BRIDGES; do
     d=${pair%%:*}
     umnt "/data/$d" || umnt -l "/data/$d" || true
 done
+# HyperOS's status bar threshold (guest_prepare.sh, 0.5.31): only the value OneOS set.
+[ "$(getprop debug.layered.strategy.phone)" = 99 ] && setprop debug.layered.strategy.phone "" 2>/dev/null || true
 # Never touch One UI's files, or start One UI in place, while a bridge is
 # still there: it would act on the guest's staged copy.
 still_bridged=""
