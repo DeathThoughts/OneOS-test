@@ -140,9 +140,6 @@ val seriesPackageSets: Set<String> = if (seriesId == null) {
 require(seriesPackageSets.containsAll(selectedLocalSets)) {
     "oneos.localSets names sets outside this APK: ${selectedLocalSets - seriesPackageSets}"
 }
-// Madrid is available only on debug APKs that explicitly bundle its trial set.
-val availableSets = packageSets.keys.filter { it != "hyper-madrid" || it in selectedLocalSets }.toSet()
-val packedSets = seriesPackageSets.intersect(availableSets)
 // Session scripts copied from switcher/assets at build time (plus the expected
 // installd table). oneos_tunnel.sh (the server tunnel) and 7zz are never shipped.
 val sessionScripts: Map<String, File> = linkedMapOf(
@@ -399,11 +396,11 @@ abstract class OneOsFilesTask : DefaultTask() {
 val oneosFiles = tasks.register<OneOsFilesTask>("oneosFiles") {
     group = "build"
     description = "Packs the OneOS package sets and session scripts into the APK's assets, checked against app-android/packages."
-    for ((dir, _) in packageSets.filterKeys { it in packedSets }.values) sources.from(fileTree(dir))
+    for ((dir, _) in packageSets.filterKeys { it in seriesPackageSets }.values) sources.from(fileTree(dir))
     for (f in sessionScripts.values) sources.from(f)
     sources.from(rootScript)
     sources.from(fileTree(File(repoRoot, "switcher/assets")))
-    sets.set(packageSets.filterKeys { it in packedSets }.mapValues { (_, v) -> "${v.first.path}|${v.second.joinToString(",")}" })
+    sets.set(packageSets.filterKeys { it in seriesPackageSets }.mapValues { (_, v) -> "${v.first.path}|${v.second.joinToString(",")}" })
     scripts.set(sessionScripts.mapValues { it.value.path })
     notShipped.set(switcherNotShipped)
     packSets.set(packSetsInApk)
@@ -574,7 +571,7 @@ android {
             buildConfigField("String", "SCRIPTS_SHA256", "\"${sha256(scriptsList.toByteArray())}\"")
             buildConfigField("String", "SERIES", "\"${seriesId.orEmpty()}\"")
             if (seriesId != null) versionNameSuffix = "-$seriesId"
-            for (id in availableSets) {
+            for (id in seriesPackageSets) {
                 val f = File(packagesDir, "$id.sha256")
                 val list = if (f.isFile) renderShaList(readShaList(f)) else ""
                 buildConfigField("String", "SET_${id.uppercase().replace('-', '_')}_SHA256", "\"${sha256(list.toByteArray())}\"")

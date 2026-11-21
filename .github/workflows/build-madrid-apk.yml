@@ -13,9 +13,14 @@ env:
   MADRID_BUILD_RUN: "44753230951"
 
 jobs:
-  build:
+  publish-payloads:
     if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/test/hyperos-madrid-apk'
-    environment: debug-build
+    permissions:
+      actions: read
+      contents: write
+    concurrency:
+      group: madrid-payloads-v1
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -23,7 +28,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check published Madrid payloads
+        id: payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if python3 scripts/publish-madrid-payloads.py --check; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            [ "$status" -eq 2 ] || exit "$status"
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Verify source Madrid build
+        if: steps.payloads.outputs.missing == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -36,46 +56,32 @@ jobs:
             '
 
       - uses: actions/download-artifact@v4
+        if: steps.payloads.outputs.missing == 'true'
         with:
           name: madrid-overlays
           github-token: ${{ github.token }}
           run-id: ${{ env.MADRID_BUILD_RUN }}
           path: out/madrid-download
 
-      - name: Verify and stage Madrid payloads
+      - name: Verify and publish Madrid payloads
+        if: steps.payloads.outputs.missing == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           (cd out/madrid-download && sha256sum --strict --check SHA256SUMS)
-          python3 - <<'PY'
-          from pathlib import Path
-          import runpy
-          import shutil
+          python3 scripts/publish-madrid-payloads.py --publish out/madrid-download
 
-          fetch = runpy.run_path("scripts/build-popsicle-payloads.py")
-          manifest = {}
-          for line in Path("app-android/packages/hyper-madrid.sha256").read_text().splitlines():
-              if not line or line.startswith("#"):
-                  continue
-              match = fetch["SHA_LINE"].fullmatch(line)
-              if match is None or match[2] in manifest:
-                  raise SystemExit(f"Invalid or duplicate Madrid manifest entry: {line}")
-              manifest[match[2]] = match[1]
-          verified = Path("out/madrid-download")
-          output = Path("out/madrid-overlays")
-          output.mkdir()
-          for name, digest in manifest.items():
-              target = output / name
-              pin = fetch["LEGACY_ASSETS"].get(name)
-              if pin is None:
-                  shutil.copyfile(verified / name, target)
-              else:
-                  if digest != pin.sha:
-                      raise SystemExit(f"{name} differs from its pinned release digest")
-                  url = f"{fetch['RELEASE']}/{fetch['TAG']}/{pin.sha}"
-                  fetch["download"](url, target, pin.size)
-                  fetch["check_pin"](fetch["file_pin"](target), pin, name)
-          PY
-          (cd out/madrid-overlays && sha256sum --strict --check ../../app-android/packages/hyper-madrid.sha256)
+  build:
+    needs: publish-payloads
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/test/hyperos-madrid-apk'
+    environment: debug-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-java@v5
         with:
@@ -162,10 +168,11 @@ jobs:
           ./gradlew --console=plain :core:model:test \
             --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest' --tests '*ProfilesTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
-            --tests '*StageScriptTest.madridStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23'
-          ./gradlew --console=plain -Poneos.localSets=hyper-madrid :app:assembleFullDebug
+            --tests '*StageScriptTest.madridStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23' \
+            --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
+          ./gradlew --console=plain :app:assembleFullDebug
 
-      - name: Verify packaged Madrid files and root staging registry
+      - name: Verify Madrid download metadata and root staging registry
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -179,10 +186,19 @@ jobs:
               (line.split() for line in manifest.splitlines() if line and not line.startswith("#"))
           }
           wanted = set(madrid.values())
+          assert len(madrid) == len(wanted) == 40, "Expected 40 Madrid manifest entries"
+          packages = Path("app-android/packages")
+
+          def read_index(text):
+              return dict(line.split() for line in text.splitlines() if line and not line.startswith("#"))
+
+          expected_sizes = read_index((packages / "sizes.txt").read_text())
+          expected_remote = read_index((packages / "remote.txt").read_text())
           expected_root = Path("app-android/app/src/full/assets/root/oneos_root.sh").read_bytes()
-          assert b'"s-8550 hyperos-madrid") echo hyper-madrid ;;' in expected_root, (
-              "Madrid root registry entry is missing"
-          )
+          for profile in ("s-8550", "s26-fe"):
+              assert f'"{profile} hyperos-madrid") echo hyper-madrid ;;'.encode() in expected_root, (
+                  f"Madrid root registry entry is missing for {profile}"
+              )
           asset_base = "assets/oneos/"
           files = asset_base + "files/"
           with zipfile.ZipFile("app-android/app/build/outputs/apk/full/debug/app-full-debug.apk") as apk:
@@ -194,10 +210,12 @@ jobs:
                   (line.split() for line in apk.read(manifest_asset).decode().splitlines())
               }
               assert embedded_manifest == madrid, "APK Madrid manifest differs from its pins"
+              sizes = read_index(apk.read(files + "index.txt").decode())
+              remote = read_index(apk.read(files + "remote.txt").decode())
               for name, digest in madrid.items():
-                  with apk.open(files + digest) as stream:
-                      assert hashlib.file_digest(stream, "sha256").hexdigest() == digest, name
-              remote = {line.split()[0] for line in apk.read(files + "remote.txt").decode().splitlines()}
+                  assert sizes.get(digest) == expected_sizes[digest], f"Missing or incorrect size: {name}"
+                  assert remote.get(digest) == expected_remote[digest], f"Missing or incorrect source: {name}"
+                  assert files + digest not in entries, f"APK embeds Madrid overlay: {name}"
               scripts = {
                   name: digest for digest, name in
                   (line.split() for line in apk.read(asset_base + "sets/scripts.sha256").decode().splitlines())
@@ -216,7 +234,7 @@ jobs:
                   other.update(line.split()[0] for line in apk.read(path).decode().splitlines())
               assert other, "APK is missing remote package sets"
               exclusive = other - wanted - set(scripts.values())
-              assert exclusive <= remote, "Other set files are missing remote sources"
+              assert exclusive <= remote.keys(), "Other set files are missing remote sources"
               assert all(files + digest not in entries for digest in exclusive), (
                   "APK embeds payloads exclusive to other package sets"
               )

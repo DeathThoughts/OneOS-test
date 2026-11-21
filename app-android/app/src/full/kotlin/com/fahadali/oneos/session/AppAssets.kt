@@ -105,13 +105,18 @@ object AppAssets {
     private fun packed(ctx: Context): Set<String> =
         ctx.applicationContext.assets.list("oneos/files")?.toSet() ?: emptySet()
 
-    /** Madrid is offered only by the APK that carries its trial payloads. */
+    /** Madrid requires a pinned set with a size and a source for every file. */
     fun availableImages(ctx: Context): List<ImageRef> {
-        val madridBundled = runCatching {
+        val madridAvailable = runCatching {
             val trial = list(ctx, PackageSets.ID_HYPER_MADRID)
-            trial.isNotEmpty() && packed(ctx).containsAll(trial.values)
+            val sizes = sizes(ctx)
+            val bundled = packed(ctx)
+            val remote = remoteIds(ctx)
+            trial.isNotEmpty() && trial.values.all { hash ->
+                (sizes[hash] ?: 0) > 0 && (hash in bundled || !remote[hash].isNullOrEmpty())
+            }
         }.getOrDefault(false)
-        return if (madridBundled) Images.ALL else Images.ALL.filterNot { it.id == Images.ID_HYPEROS_MADRID }
+        return if (madridAvailable) Images.ALL else Images.ALL.filterNot { it.id == Images.ID_HYPEROS_MADRID }
     }
 
     /** The files of [files] that are neither in the APK nor downloaded yet, with their sources. */
