@@ -48,6 +48,16 @@ class ImagesTest {
         assertEquals(null, detected.image?.zipEntryName)
         assertEquals(Images.COLOROS17_PYB110.rawSha256, detected.image?.rawSha256)
         assertEquals(Images.COLOROS17_PYB110.rawBytes, detected.image?.rawBytes)
+        val facts = Fixtures.facts(
+            model = "SM-S911B", device = Profiles.S_8550.codename,
+            soc = SocProps(manufacturer = "QTI", model = Profiles.S_8550.socModel),
+        )
+        val report = SwitchGates.evaluate(GatePhase.PREPARE, GateInput(
+            facts = facts, screenLockSet = false, oldSwitcherInstalled = false,
+            installd = null, stage = null, imageFile = archive,
+        ))
+        assertEquals(detected.image, report.image)
+        assertEquals(PackageSets.ID_PYB110_S23, report.set?.id)
         assertEquals(ImageState.DAMAGED, ImageIdentifier.identify(
             archive.copy(sha256 = "0".repeat(64)), Profiles.S_8550,
         ).state)

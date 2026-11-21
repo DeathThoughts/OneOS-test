@@ -267,7 +267,7 @@ jobs:
           badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk")
           package_info=$(printf '%s\n' "$badging" | sed -n '/^package:/p')
           grep -Fq "versionName='0.5.32'" <<< "$package_info"
-          grep -Fq "versionCode='182'" <<< "$package_info"
+          grep -Fq "versionCode='183'" <<< "$package_info"
           host_certs=$("$apksigner" verify --print-certs "$apk")
           guest_certs=$("$apksigner" verify --print-certs switcher/assets/guest_manager.apk)
           signer=$(printf '%s\n' "$host_certs" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' | tr 'A-F' 'a-f')
