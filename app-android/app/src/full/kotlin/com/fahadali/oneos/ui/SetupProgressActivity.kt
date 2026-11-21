@@ -76,7 +76,6 @@ class SetupProgressActivity : EdgeToEdgeActivity() {
 
     override fun onStart() {
         super.onStart()
-        view?.let(DebugNotice::bind)
         if (previewImage != null) return
         unsubscribe = PrepareJob.observe { s ->
             if (s.busy) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -173,6 +172,7 @@ class SetupProgressFragment : Fragment() {
 
     override fun onStart() {
         super.onStart()
+        view?.let(DebugNotice::bind)
         if (previewImage != null) {
             previewResumedAt = android.os.SystemClock.uptimeMillis()
             previewHandler.post(previewTick)
