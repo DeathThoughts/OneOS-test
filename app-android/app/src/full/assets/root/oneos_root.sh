@@ -450,6 +450,7 @@ profile_set() {
         "s-8550 hyperos-popsicle") echo hyper-popsicle ;;
         "s-8550 hyperos-madrid") echo hyper-madrid ;;
         "s-8550 coloros17-twinity4c") echo twinity-s23 ;;
+        "s-8550 coloros17-pyb110") echo pyb110-s23 ;;
         "s-plus-8550 infinityx41-findx9u") echo infinityx ;;
         "s-plus-8550 lineage24-infiniti") echo lineage ;;
         "s-plus-8550 oneui95-s948b") echo oneui95 ;;
@@ -715,6 +716,7 @@ image_raw() {
         hyperos-popsicle) echo "7203971072 a0d622cff955e907b89bf7691d6d12102587bf9333ad89e92aebee0fe57b12ba" ;;
         hyperos-madrid) echo "7818280960 ad674d33986b18bfc1d5c3d4d4878573e32b6241c2e66815deb9d4a6d86163e3" ;;
         coloros17-twinity4c) echo "10238496768 3d918b88d7ab4cf8f49854414d872f8c959d13d0a62e3f2691a5f5c9c0a57189" ;;
+        coloros17-pyb110) echo "3803897856 4dbe6a81d62cf7e9c3e5fb0c18c6530bfbe2ccab68bd7c1b3943ea454b1a2cfa" ;;
         nothingos5-metroid) echo "6067867648 484f0e3a3dd2929f37b3201a57ceaf56aeca98b049a6a1f58558a2139f8a0b7b" ;;
         oneui95-s948b) echo "14259888128 82ddc8561a2687f041c2820a0d910f266b3b71753582a65ebff0cec7e8d0bbe4" ;;
         nothingos5-asteroids) echo "5972463616 d21ded7b8b36b9cd8896e8159e7c274ae160f08de0f270eb17c14c63e66f6de6" ;;
@@ -739,6 +741,7 @@ set_files() {
         hyper-popsicle) echo "$SET_POPSICLE" ;;
         hyper-madrid) echo "$SET_POPSICLE" ;;
         twinity-s23) echo "$SET_COMMON framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so oplus-framework_patched.jar samcam_bar.tar" ;;
+        pyb110-s23) echo "OneOSGuest.apk adservices_payload.img appsearch_payload.img art_payload.img configinfrastructure_payload.img crashrecovery_payload.img extservices_payload.img framework_patched.jar guards.txt healthfitness_payload.img i18n_payload.img ims-ext-common_patched.jar libcamera_client_patched.so mediaprovider_payload.img ondevicepersonalization_payload.img oplus-framework_patched.jar oplus-services_patched.jar oplus-telephony-common_patched.jar permission_payload.img rkpd_payload.img runtime_payload.img sdkext_payload.img service.incremental_patched.so services_patched.jar surfaceflinger_patched telephony-common_patched.jar vold_patched wifi_payload.img" ;;
         nothing-f8u) echo "$SET_NOTHING" ;;
         nothing-a) echo "$SET_NOTHINGA" ;;
         oneui95) echo "$SET_ONEUI" ;;
@@ -763,6 +766,7 @@ set_image() {
         hyper-popsicle) echo hyperos-popsicle ;;
         hyper-madrid) echo hyperos-madrid ;;
         twinity-s23) echo coloros17-twinity4c ;;
+        pyb110-s23) echo coloros17-pyb110 ;;
         nothing-f8u) echo nothingos5-metroid ;;
         nothing-a) echo nothingos5-asteroids ;;
         oneui95) echo oneui95-s948b ;;
@@ -783,7 +787,7 @@ set_image() {
 # (com.miui.) (data_family).
 image_family() {
     case "$1" in
-        coloros17-findn6|coloros17-findx9u|coloros17-findx9u-in|coloros17-findx9u-in-1105|coloros17-twinity4c) echo coloros ;;
+        coloros17-findn6|coloros17-findx9u|coloros17-findx9u-in|coloros17-findx9u-in-1105|coloros17-twinity4c|coloros17-pyb110) echo coloros ;;
         pixel11fold-yogi|pixel11pro-kodiak|pixel9proxl-komodo) echo pixel ;;
         infinityx41-findx9u) echo infinityx ;;
         lineage24-infiniti) echo lineage ;;

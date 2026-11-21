@@ -60,7 +60,7 @@ class ApkSeriesTest {
             ApkSeries.FOLD.setIds().intersect(ApkSeries.S25.setIds()),
         )
         assertEquals(
-            ApkSeries.S25.setIds() - PackageSets.ID_OXYGEN16,
+            ApkSeries.S25.setIds() - setOf(PackageSets.ID_OXYGEN16, PackageSets.ID_PYB110_S23),
             ApkSeries.S26.setIds().intersect(ApkSeries.S25.setIds()),
         )
         assertEquals(

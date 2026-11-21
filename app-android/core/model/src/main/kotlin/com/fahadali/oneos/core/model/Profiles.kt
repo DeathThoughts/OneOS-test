@@ -551,7 +551,8 @@ object Profiles {
         form = FormFactor.BAR,
         choices = S23_CHOICES + ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false) +
             ImageChoice(Images.ID_HYPEROS_MADRID, PackageSets.ID_HYPER_MADRID, tested = false) +
-            ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false) + ONEUI95_CHOICE,
+            ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false) +
+            ImageChoice(Images.ID_COLOROS17_PYB110, PackageSets.ID_PYB110_S23, tested = false) + ONEUI95_CHOICE,
         notes = listOf(EXPECT_NO_START),
     )
 

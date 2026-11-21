@@ -94,6 +94,7 @@ val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
     // ColorOS 17 China Twinity4c (0.5.19 trial), the base Galaxy S23: the set
     // published with the twinity4c image release.
     "twinity-s23" to (File(repoRoot, "out/overlays_twinity4c_r1") to listOf()),
+    "pyb110-s23" to (File(repoRoot, "out/pyb110-overlays") to listOf("tethering_payload.img")),
 )
 // The series downloads (0.4.25): -Poneos.series=<id> packs only the sets that
 // app-android/packages/series.txt lists for it (ApkSeries keeps the same lists,

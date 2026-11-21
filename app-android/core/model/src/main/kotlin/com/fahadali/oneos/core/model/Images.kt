@@ -126,6 +126,7 @@ object Images {
     const val ID_FIND_N6 = "coloros17-findn6"
     const val ID_FIND_X9U_IN = "coloros17-findx9u-in"
     const val ID_FIND_X9U_IN_1105 = "coloros17-findx9u-in-1105"
+    const val ID_COLOROS17_PYB110 = "coloros17-pyb110"
     const val ID_COLOROS17_TWINTY4C = "coloros17-twinity4c"
     const val ID_PIXEL_YOGI = "pixel11fold-yogi"
     const val ID_PIXEL_KODIAK = "pixel11pro-kodiak"
@@ -693,7 +694,33 @@ object Images {
      */
     val DATA_UPGRADES: Map<String, String> = mapOf(ID_FIND_X9U_IN to ID_FIND_X9U_IN_1105)
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
+
+    /** OnePlus 16 China 17.0.1.201(CN01), Android 17, built for an untested base Galaxy S23 trial. */
+    val COLOROS17_PYB110 = ImageRef(
+        id = ID_COLOROS17_PYB110,
+        label = "ColorOS 17, OnePlus 16 China build",
+        shortName = "OnePlus 16",
+        name = "ColorOS 17",
+        variant = "OnePlus 16 China 17.0.1.201",
+        blurb = "OnePlus 16 China ColorOS, for a Galaxy S23 trial. Untested on a phone.",
+        downloadUrl = "https://github.com/DeathThoughts/OneOS-test/releases/download/pyb110-s23-trial-v1/OneOS_ColorOS17_OnePlus16.img.gz",
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_ColorOS17_OnePlus16.img.gz",
+        gzBytes = 1_880_903_860L,
+        gzSha256 = "5b2d6f876e65321dc0dc6cfc523c71f77ef7009c41e643482dd523c753f72e0d",
+        rawBytes = 3_803_897_856L,
+        rawSha256 = "4dbe6a81d62cf7e9c3e5fb0c18c6530bfbe2ccab68bd7c1b3943ea454b1a2cfa",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = false,
+        presentsGms = false,
+        family = SystemFamily.COLOROS,
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/download/pyb110-s23-trial-v1/OneOS_ColorOS17_OnePlus16.img.gz",
+    )
+
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, COLOROS17_PYB110, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 

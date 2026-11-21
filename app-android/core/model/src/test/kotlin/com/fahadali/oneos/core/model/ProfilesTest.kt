@@ -291,8 +291,9 @@ class ProfilesTest {
             val popsicle = ImageChoice(Images.ID_HYPEROS_POPSICLE, PackageSets.ID_HYPER_POPSICLE, tested = false)
             val madrid = ImageChoice(Images.ID_HYPEROS_MADRID, PackageSets.ID_HYPER_MADRID, tested = false)
             val twinity = ImageChoice(Images.ID_COLOROS17_TWINTY4C, PackageSets.ID_TWINTY_S23, tested = false)
-            assertEquals(if (p == s23) original + popsicle + madrid + twinity + oneui else original + oneui, p.choices)
-            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == popsicle || it == madrid || it == twinity })
+            val pyb110 = ImageChoice(Images.ID_COLOROS17_PYB110, PackageSets.ID_PYB110_S23, tested = false)
+            assertEquals(if (p == s23) original + popsicle + madrid + twinity + pyb110 + oneui else original + oneui, p.choices)
+            assertEquals(Profiles.S_ULTRA_8550.choices, p.choices.filterNot { it == popsicle || it == madrid || it == twinity || it == pyb110 })
             assertEquals(listOf(Profiles.ID_NOTE_EXPECT_NO_START), p.notes.map { it.id })
             assertEquals(Level.WARN, p.notes.single().level)
         }

@@ -164,6 +164,7 @@ object PackageSets {
     const val ID_HYPER_POPSICLE = "hyper-popsicle"
     const val ID_HYPER_MADRID = "hyper-madrid"
     const val ID_TWINTY_S23 = "twinity-s23"
+    const val ID_PYB110_S23 = "pyb110-s23"
     const val ID_PIXEL9_SULTRA = "pixel9-sultra"
     const val ID_INFINITYX = "infinityx"
     const val ID_NOTHING_F8U = "nothing-f8u"
@@ -962,7 +963,47 @@ object PackageSets {
         hasReturnApp = true,
     )
 
-    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, HYPER_MADRID, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE, TWINTY_S23, ONEUI95)
+
+    val PYB110_S23 = PackageSet(
+        id = ID_PYB110_S23,
+        imageId = Images.ID_COLOROS17_PYB110,
+        sourceDir = "out/pyb110-overlays",
+        files = listOf(
+            PackageFile("OneOSGuest.apk", FileRole.GUEST_APP),
+            PackageFile("adservices_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("appsearch_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("art_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("configinfrastructure_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("crashrecovery_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("extservices_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("framework_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("guards.txt", FileRole.GUARDS),
+            PackageFile("healthfitness_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("i18n_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("ims-ext-common_patched.jar", FileRole.FRAMEWORK_JAR),
+            PackageFile("libcamera_client_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("mediaprovider_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("ondevicepersonalization_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("oplus-framework_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("oplus-services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("oplus-telephony-common_patched.jar", FileRole.FRAMEWORK_JAR),
+            PackageFile("permission_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("rkpd_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("runtime_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("sdkext_payload.img", FileRole.APEX_PAYLOAD),
+            PackageFile("service.incremental_patched.so", FileRole.GUARD_LIBRARY),
+            PackageFile("services_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("surfaceflinger_patched", FileRole.SURFACEFLINGER),
+            PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR),
+            PackageFile("vold_patched", FileRole.GUARD_EXECUTABLE),
+            PackageFile("wifi_payload.img", FileRole.APEX_PAYLOAD),
+        ),
+        omitted = listOf(TETHERING),
+        approxBytes = 347_290_073L,
+        hasReturnApp = true,
+    )
+
+    val ALL: List<PackageSet> = listOf(N6_GLOBAL_F8, N6_F8U, X9U_IN_1105_SULTRA, PIXEL_F8U, PIXEL_SULTRA, PIXEL_F8, PIXEL9_SULTRA, INFINITYX, HYPER_F8U, HYPER_POPSICLE, HYPER_MADRID, NOTHING_F8U, NOTHING_A, OXYGEN16, ORIGINOS, LINEAGE, TWINTY_S23, PYB110_S23, ONEUI95)
 
     fun byId(id: String, sets: List<PackageSet> = ALL): PackageSet? = sets.firstOrNull { it.id == id }
 }
