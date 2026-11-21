@@ -74,12 +74,14 @@ jobs:
           set -euo pipefail
           {
             mysticgsi/.venv/bin/python scripts/mysticgsi-from-images.py \
-              --drop --no-debloat --type=coloros pyb110 out/pyb110-input
+              --drop --no-debloat --type=coloros pyb110 out/pyb110-input \
+              system,system_ext,product,odm,my_product,my_engineering,my_stock,my_heytap,my_carrier,my_region,my_bigball,my_manifest
             mapfile -t images < <(find mysticgsi/out/pyb110 -maxdepth 1 -name '*.img' -type f)
             [ "${#images[@]}" -eq 1 ]
             mkdir -p out/pyb110-image
             ln "${images[0]}" out/pyb110-image/system.img
             e2fsck -fn out/pyb110-image/system.img
+            python3 scripts/verify-pyb110-guest.py out/pyb110-image/system.img
             stat -c '%s bytes' out/pyb110-image/system.img
             sha256sum out/pyb110-image/system.img
           } 2>&1 | tee out/pyb110-logs/image.log
@@ -124,7 +126,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.overlays.outcome == 'success'
         with:
-          name: pyb110-guest-untested
+          name: pyb110-guest-donor-complete-untested
           compression-level: 0
           retention-days: 7
           if-no-files-found: error
