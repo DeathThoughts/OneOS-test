@@ -18,7 +18,6 @@
         android:paddingEnd="@dimen/oneos_card_inset"
         android:paddingBottom="16dp">
 
-        <include layout="@layout/debug_notice" />
         <include layout="@layout/home_hero" />
 
         <LinearLayout

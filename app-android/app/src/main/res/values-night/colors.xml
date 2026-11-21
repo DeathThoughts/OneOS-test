@@ -4,5 +4,4 @@
     <color name="verdict_warn">#FFA726</color>
     <color name="verdict_block">#EF5350</color>
     <color name="verdict_info">#9E9E9E</color>
-    <color name="debug_notice_background">#31261B</color>
 </resources>

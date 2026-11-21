@@ -83,7 +83,7 @@ internal object ArtworkTransitions {
         artworks(activity.window.decorView).forEach { it.transitionName = null }
         artwork.transitionName = NAME
         val source = WeakReference(artwork)
-        val imageId = artwork.artworkImageId
+        val family = artwork.artworkFamily
         val capture = MaterialContainerTransformSharedElementCallback().apply { setShapeProvider { shape(activity) } }
         activity.setExitSharedElementCallback(object : SharedElementCallback() {
             override fun onCaptureSharedElementSnapshot(view: View, matrix: Matrix, bounds: RectF): Parcelable? =
@@ -91,7 +91,7 @@ internal object ArtworkTransitions {
 
             override fun onMapSharedElements(names: MutableList<String>, sharedElements: MutableMap<String, View>) {
                 val current = source.get()?.takeIf { it.isAttachedToWindow && it.isShown }
-                    ?: artworks(activity.window.decorView).firstOrNull { it.isShown && it.artworkImageId == imageId }
+                    ?: artworks(activity.window.decorView).firstOrNull { it.isShown && it.artworkFamily == family }
                 if (current != null && NAME in names) {
                     current.transitionName = NAME
                     sharedElements[NAME] = current

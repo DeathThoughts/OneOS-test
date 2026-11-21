@@ -487,29 +487,30 @@ class SystemsFragment : Fragment() {
         // OxygenOS 16 (Android 16, 0.4.67) only where the phone can take it (One UI 8), and first there.
         val familyEntries = listOfNotNull(
             // HyperOS 4 Global (0.5.27, tested on the Galaxy A36) first, with its own artwork, on the phones that offer it.
-            CatalogEntry(hyperGlobal.shortName, hyperGlobal, true).takeIf { available.any { it.id == hyperGlobal.id } },
-            CatalogEntry(oxygen.name, oxygen, true).takeIf { available.any { it.id == oxygen.id } },
+            CatalogEntry(hyperGlobal.shortName, hyperGlobal, R.drawable.os_hyperos_global, true).takeIf { available.any { it.id == hyperGlobal.id } },
+            CatalogEntry(oxygen.name, oxygen, R.drawable.os_oxygenos, true).takeIf { available.any { it.id == oxygen.id } },
             // OriginOS 7 (0.4.73, experimental) only on its phones (the Snapdragon S23 to S26 series, the Exynos S24 and S24+, and Z Fold7/8).
-            CatalogEntry(origin.name, origin, true).takeIf { available.any { it.id == origin.id } },
+            CatalogEntry(origin.name, origin, R.drawable.os_originos, true).takeIf { available.any { it.id == origin.id } },
             // LineageOS 24 (0.5.06, experimental) only on the phones that offer it.
-            CatalogEntry(lineage.name, lineage, true).takeIf { available.any { it.id == lineage.id } },
+            CatalogEntry(lineage.name, lineage, R.drawable.os_lineage, true).takeIf { available.any { it.id == lineage.id } },
             // One UI 9.5 (0.5.22, untested) only on the phones on One UI 9 that offer it.
-            CatalogEntry(oneui.name, oneui, true).takeIf { available.any { it.id == oneui.id } },
-            CatalogEntry(infinity.name, infinity, available.any { it.id == infinity.id }),
-            CatalogEntry(hyper.name, hyper, available.any { it.id == hyper.id }),
-            popsicle?.let { CatalogEntry(it.name, it, true) },
-            madrid?.let { CatalogEntry(it.nameWithVariant, it, true) },
-            twinity?.let { CatalogEntry(it.nameWithVariant, it, true) },
-            pyb110?.let { CatalogEntry(it.nameWithVariant, it, true) },
-            CatalogEntry(color.name, color, available.any { it.id == color.id }),
-            CatalogEntry(nothing.name, nothing, available.any { it.id == nothing.id }),
-            CatalogEntry(pixel.name, pixel, available.any { it.id == pixel.id }),
+            CatalogEntry(oneui.name, oneui, R.drawable.os_oneui, true).takeIf { available.any { it.id == oneui.id } },
+            CatalogEntry(infinity.name, infinity, R.drawable.os_infinity, available.any { it.id == infinity.id }),
+            CatalogEntry(hyper.name, hyper, R.drawable.os_hyperos, available.any { it.id == hyper.id }),
+            popsicle?.let { CatalogEntry(it.name, it, R.drawable.os_hyperos, true) },
+            madrid?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_hyperos, true) },
+            twinity?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
+            pyb110?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
+            CatalogEntry(color.name, color, R.drawable.os_coloros, available.any { it.id == color.id }),
+            CatalogEntry(nothing.name, nothing, R.drawable.os_nothing, available.any { it.id == nothing.id }),
+            CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
         )
 
         val entries = if (p?.id == Profiles.ID_S26_FE) {
             val shownIds = familyEntries.mapNotNull { it.image?.id }.toSet()
+            val artByFamily = familyEntries.associate { it.image?.family to it.art }
             val variants = available.filterNot { it.id in shownIds }.map {
-                CatalogEntry(it.nameWithVariant, it, true)
+                CatalogEntry(it.nameWithVariant, it, artByFamily.getValue(it.family), true)
             }
             familyEntries.map { entry ->
                 val ref = entry.image
@@ -600,7 +601,7 @@ class SystemsFragment : Fragment() {
         }
     }
 
-    private data class CatalogEntry(val name: String, val image: ImageRef?, val supported: Boolean)
+    private data class CatalogEntry(val name: String, val image: ImageRef?, val art: Int, val supported: Boolean)
 
     private class CarouselHolder(val box: android.widget.FrameLayout) : androidx.recyclerview.widget.RecyclerView.ViewHolder(box)
 
@@ -623,19 +624,17 @@ class SystemsFragment : Fragment() {
         val image = entry.image
         v.contentDescription = entry.name
         v.isScreenReaderFocusable = true
-        v.findViewById<OsArtworkView>(R.id.systems_artwork).bind(image)
+        v.findViewById<OsArtworkView>(R.id.systems_artwork).apply {
+            if (entry.art != 0) bindArtwork(entry.art) else bind(image)
+        }
         val badge = v.findViewById<TextView>(R.id.systems_badge)
         val status = getString(when {
             !entry.supported -> R.string.catalog_unsupported
             p?.choice(image?.id.orEmpty())?.tested == true -> R.string.catalog_optimised
             else -> R.string.catalog_experimental
         })
-        val showVariant = image != null && (
-            image.id in setOf(Images.ID_HYPEROS_POPSICLE, Images.ID_HYPEROS_MADRID,
-                Images.ID_COLOROS17_TWINTY4C, Images.ID_COLOROS17_PYB110) ||
-                (p?.id == Profiles.ID_S26_FE && p.images().count { it.family == image.family } > 1)
-            )
-        badge.text = if (showVariant) "${entry.name} · $status" else status
+        v.findViewById<TextView>(R.id.systems_name).text = entry.name
+        badge.text = status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send

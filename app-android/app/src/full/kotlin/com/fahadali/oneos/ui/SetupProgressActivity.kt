@@ -162,8 +162,13 @@ class SetupProgressFragment : Fragment() {
                 val hero = view.findViewById<View>(R.id.setup_hero)
                 val viewport = view.height
                 hero.layoutParams = hero.layoutParams.apply {
-                    height = minOf((hero.width * 356f / 392f).toInt(), (viewport * .55f).toInt())
-                        .coerceAtLeast((220 * resources.displayMetrics.density).toInt())
+                    val image = previewImage ?: PrepareJob.state.image
+                    val family = image?.family ?: com.fahadali.oneos.core.model.SystemFamily.COLOROS
+                    val heading = com.fahadali.oneos.core.model.ArtworkFraming.heading(family, true)
+                    val headingHeight = (heading.bottom - heading.top) * 1548 * hero.width / 1050f
+                    val readable = headingHeight + 144 * resources.displayMetrics.density
+                    height = maxOf(minOf((hero.width * 356f / 392f).toInt(), (viewport * .55f).toInt()), readable.toInt())
+                        .coerceAtLeast((180 * resources.displayMetrics.density).toInt())
                 }
             }
         }
@@ -172,7 +177,6 @@ class SetupProgressFragment : Fragment() {
 
     override fun onStart() {
         super.onStart()
-        view?.let(DebugNotice::bind)
         if (previewImage != null) {
             previewResumedAt = android.os.SystemClock.uptimeMillis()
             previewHandler.post(previewTick)

@@ -284,14 +284,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          name=OneOS-0.5.32-OnePlus16-S23-poster-debug.apk
+          name=OneOS-0.5.32-OnePlus16-S23-header-debug.apk
           apk=dist/$name
           cp app-android/app/build/outputs/apk/full/debug/app-full-debug.apk "$apk"
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk")
           package_info=$(printf '%s\n' "$badging" | sed -n '/^package:/p')
           grep -Fq "versionName='0.5.32'" <<< "$package_info"
-          grep -Fq "versionCode='179'" <<< "$package_info"
+          grep -Fq "versionCode='180'" <<< "$package_info"
           host_certs=$("$apksigner" verify --print-certs "$apk")
           guest_certs=$("$apksigner" verify --print-certs switcher/assets/guest_manager.apk)
           signer=$(printf '%s\n' "$host_certs" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' | tr 'A-F' 'a-f')
@@ -322,7 +322,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          apk=dist/OneOS-0.5.32-OnePlus16-S23-poster-debug.apk
+          apk=dist/OneOS-0.5.32-OnePlus16-S23-header-debug.apk
           hash=$(cut -d' ' -f1 "$apk.sha256")
           assets="repos/$GITHUB_REPOSITORY/releases/tags/$PYB110_RELEASE"
           if ! gh api "$assets" --jq '.assets[].name' | grep -Fx "$(basename "$apk")"; then

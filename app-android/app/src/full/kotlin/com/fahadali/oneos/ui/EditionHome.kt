@@ -246,7 +246,6 @@ class StatusHomeFragment : Fragment(R.layout.home_content) {
 
     override fun onResume() {
         super.onResume()
-        view?.let(DebugNotice::bind)
         // Back from Settings (screen lock removed?), from the root app, or a new open: read again.
         Readiness.onResume(requireContext())
         AppUpdater.check(requireContext())
