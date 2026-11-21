@@ -1,0 +1,42 @@
+name: Verify and package OnePlus 16 system image
+on:
+  push:
+    branches: [test/pyb110-system-img]
+    paths: [.github/workflows/package-pyb110-system-img.yml]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'DeathThoughts/OneOS-test'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pyb110-guest-donor-complete-untested
+          github-token: ${{ github.token }}
+          run-id: 44926279431
+          path: source-image
+      - name: Verify the raw image and its contents
+        run: |
+          set -euo pipefail
+          source=source-image/OneOS_ColorOS17_OnePlus16.img.gz
+          test "$(stat -c %s "$source")" = 7437913442
+          printf '%s  %s\n' 11b89e48e57a924fbd3c91f6b3839913514a50273da87cf88f86201532010569 "$source" | sha256sum --strict -c
+          mkdir image
+          gzip -dc "$source" > image/system.img
+          test "$(stat -c %s image/system.img)" = 13810913280
+          printf '%s  %s\n' 1b7057a78c6a0f834e5020832c3ef2f82cafba5570d62559e9cb2d6761d86f4c image/system.img | sha256sum --strict -c
+          e2fsck -fn image/system.img
+          python3 scripts/verify-pyb110-guest.py image/system.img
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyb110-system-img-untested
+          path: image/system.img
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
