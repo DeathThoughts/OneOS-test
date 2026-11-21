@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: pyb110-image-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   image:
@@ -100,20 +100,43 @@ jobs:
               -dname "CN=OneOS PYB110 RRO Debug,O=OneOS,C=US"
             sh scripts/make-overlays.sh out/pyb110-image/system.img out/pyb110-overlays
             cd out/pyb110-overlays
+            for overlay in vold_patched service.incremental_patched.so surfaceflinger_patched; do
+              test -s "$overlay" || { echo "Missing required OnePlus 16 overlay: $overlay" >&2; exit 1; }
+            done
             sha256sum --strict --check guards.txt
-            find . -type f -print0 | sort -z | xargs -0r sha256sum > ../pyb110-overlays.sha256
+            find . -type f -print0 | sort -z | xargs -0r sha256sum > ../pyb110-logs/overlays.sha256
+            cp ../pyb110-logs/overlays.sha256 SHA256SUMS
+            cp guards.txt ../pyb110-logs/guards.txt
+            find . -maxdepth 1 -type f -printf '%s %f\n' | sort > ../pyb110-logs/overlay-sizes.txt
           } 2>&1 | tee out/pyb110-logs/overlays.log
+
+      - name: Package the untested guest image
+        if: steps.overlays.outcome == 'success'
+        run: |
+          set -euo pipefail
+          gzip -1nc out/pyb110-image/system.img > out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+          gzip -t out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+          {
+            stat -c '%s bytes' out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+            sha256sum out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+          } | tee out/pyb110-logs/archive.log
 
       - uses: actions/upload-artifact@v4
         if: steps.overlays.outcome == 'success'
         with:
           name: pyb110-guest-untested
+          compression-level: 0
           retention-days: 7
           if-no-files-found: error
-          path: |
-            out/pyb110-image/system.img
-            out/pyb110-overlays/
-            out/pyb110-overlays.sha256
+          path: out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.overlays.outcome == 'success'
+        with:
+          name: pyb110-overlays
+          retention-days: 7
+          if-no-files-found: error
+          path: out/pyb110-overlays/
 
       - uses: actions/upload-artifact@v4
         if: always()

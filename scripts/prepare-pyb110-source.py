@@ -5,9 +5,11 @@ import argparse
 import hashlib
 import importlib
 import runpy
+import struct
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -15,7 +17,6 @@ ROOT = Path(__file__).resolve().parent.parent
 MYSTIC = ROOT / "mysticgsi"
 MYSTIC_REV = "825b850dd8ddff11fdb8ed024034fc00e94b1451"
 MIRROR = "https://share.deepstorage.dev/1793925203281/6d23ff0b95a248ca94259c990615ac2c_fwatlas.zip"
-MIRROR_SIZE = 10_187_610_434
 MIRROR_PAYLOAD_OFFSET = 86 + 61
 OTA_SIZE = 10_187_609_378
 OTA_PAYLOAD_OFFSET = 61
@@ -36,6 +37,54 @@ def partition_matches(path, size, digest):
         return hashlib.file_digest(image, "sha256").hexdigest() == digest
 
 
+def verify_metadata(metadata):
+    if hashlib.sha256(metadata).hexdigest() != METADATA_SHA256:
+        raise ValueError("payload metadata SHA-256 differs from the supplied PYB110 OTA")
+
+
+def stage_mirrored_payload(payload, fetch, missing, destination):
+    offset = MIRROR_PAYLOAD_OFFSET
+    metadata = fetch(MIRROR, offset, offset + METADATA_SIZE - 1)
+    verify_metadata(metadata)
+    _, version, manifest_size, signature_size = struct.unpack_from(">4sQQI", metadata)
+    if version != 2 or manifest_size + 24 != METADATA_SIZE:
+        raise ValueError("unexpected PYB110 payload header")
+    manifest = payload.pb.DeltaArchiveManifest()
+    manifest.ParseFromString(metadata[24:])
+    data_offset = METADATA_SIZE + signature_size
+    chunks = []
+    for partition in manifest.partitions:
+        if partition.partition_name not in missing:
+            continue
+        operations = [op for op in partition.operations if op.data_length]
+        first = data_offset + min(op.data_offset for op in operations)
+        end = data_offset + max(op.data_offset + op.data_length for op in operations)
+        chunk_size = 64 << 20
+        chunks.extend((start, min(start + chunk_size, end)) for start in range(first, end, chunk_size))
+
+    # Save only the requested operation ranges. The skipped partitions and
+    # unused signature bytes remain holes in the temporary payload.
+    with destination.open("wb") as local:
+        local.write(metadata)
+        local.truncate(max(stop for _, stop in chunks))
+
+    def download(chunk):
+        start, stop = chunk
+        data = fetch(MIRROR, offset + start, offset + stop - 1)
+        with destination.open("r+b") as local:
+            local.seek(start)
+            local.write(data)
+        return stop - start
+
+    total = sum(stop - start for start, stop in chunks)
+    downloaded = 0
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(download, chunk) for chunk in chunks]
+        for future in as_completed(futures):
+            downloaded += future.result()
+            print(f"Donor download: {downloaded:,} / {total:,} bytes", flush=True)
+
+
 def extract(out, ota):
     revision = subprocess.check_output(
         ["git", "-C", MYSTIC, "rev-parse", "HEAD"], text=True
@@ -44,49 +93,39 @@ def extract(out, ota):
         raise ValueError(f"MysticGSI revision {revision} differs from {MYSTIC_REV}")
     sys.path.insert(0, str(MYSTIC))
     payload = importlib.import_module("tools.extractor.formats.payload")
-    stream = runpy.run_path(str(ROOT / "scripts/payload-stream.py"))
+    if payload.pb is None:
+        raise ValueError("MysticGSI requires protobuf for OTA extraction")
 
-    if ota:
-        if ota.stat().st_size != OTA_SIZE:
-            raise ValueError("unexpected size for the original PYB110 OTA ZIP")
-        source, offset = ota.open("rb"), OTA_PAYLOAD_OFFSET
-    else:
-        source = stream["HttpFile"](MIRROR, MIRROR_SIZE)
-        offset = MIRROR_PAYLOAD_OFFSET
+    missing = {
+        name for name, (size, digest) in PARTITIONS.items()
+        if not partition_matches(out / f"{name}.img", size, digest)
+    }
+    if not missing:
+        return
 
-    with source:
-        source.seek(offset)
-        metadata = source.read(METADATA_SIZE)
-        if hashlib.sha256(metadata).hexdigest() != METADATA_SHA256:
-            raise ValueError("payload metadata SHA-256 differs from the supplied PYB110 OTA")
-        missing = {
-            name for name, (size, digest) in PARTITIONS.items()
-            if not partition_matches(out / f"{name}.img", size, digest)
-        }
-        if not missing:
-            return
+    with tempfile.TemporaryDirectory(prefix=".pyb110-", dir=out) as temporary:
+        staging = Path(temporary)
+        if ota is not None:
+            if ota.stat().st_size != OTA_SIZE:
+                raise ValueError("unexpected size for the original PYB110 OTA ZIP")
+            offset = OTA_PAYLOAD_OFFSET
+            with ota.open("rb") as source:
+                source.seek(offset)
+                verify_metadata(source.read(METADATA_SIZE))
+        else:
+            offset = 0
+            ota = staging / "verified-ranges.payload"
+            fetch = runpy.run_path(str(ROOT / "scripts/payload-stream.py"))["fetch"]
+            stage_mirrored_payload(payload, fetch, missing, ota)
 
-        # Use the same random-access extractor for a local ZIP or for the
-        # stored member in the mirror's outer ZIP. Check all outputs before moving them.
-        def open_input(path, mode="r", *args, **kwargs):
-            return source if path == "pyb110-ota" else open(path, mode, *args, **kwargs)
-
-        def is_input(path, start=0):
-            source.seek(start)
-            return path == "pyb110-ota" and source.read(4) == b"CrAU"
-
-        payload.open = open_input
-        payload.is_payload = is_input
-        with tempfile.TemporaryDirectory(prefix=".pyb110-", dir=out) as temporary:
-            staging = Path(temporary)
-            payload.extract_payload("pyb110-ota", temporary, missing, logger=print, offset=offset)
-            for name in sorted(missing):
-                image = staging / f"{name}.img"
-                if not partition_matches(image, *PARTITIONS[name]):
-                    raise ValueError(f"{name} digest or size differs from the OTA manifest")
-            for name in sorted(missing):
-                image = staging / f"{name}.img"
-                image.replace(out / image.name)
+        payload.extract_payload(str(ota), temporary, missing, logger=print, offset=offset)
+        for name in sorted(missing):
+            image = staging / f"{name}.img"
+            if not partition_matches(image, *PARTITIONS[name]):
+                raise ValueError(f"{name} digest or size differs from the OTA manifest")
+        for name in sorted(missing):
+            image = staging / f"{name}.img"
+            image.replace(out / image.name)
 
 
 def main():
