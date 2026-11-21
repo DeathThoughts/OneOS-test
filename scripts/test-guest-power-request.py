@@ -85,7 +85,7 @@ class PowerRequest(unittest.TestCase):
             (r / 'system_log').write_text(SYSTEM_LOG)
             (r / 'thermal').write_text(thermal)
             (r / 'battery').write_text(battery)
-            code = f"req='{req}'; t=590\n" + unquote(RAW, str(r / 'stage'), str(r / 'bb')) + '                echo RETURN\n            fi\n'
+            code = f"req='{req}'; t=590; total=590\n" + unquote(RAW, str(r / 'stage'), str(r / 'bb')) + '                echo RETURN\n            fi\n'
             env = dict(os.environ, R=str(r), PIDS=pids, SLOW=slow, PATH=f'{r}/bin:' + os.environ['PATH'])
             began = time.time()
             out = subprocess.run(['/bin/sh', '-c', code], env=env, capture_output=True, text=True, timeout=60)

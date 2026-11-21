@@ -359,6 +359,23 @@ class GatesTest {
     }
 
     @Test
+    fun anUpdateThatKeepsTheDataNeedsNoRoomForNewData() {
+        // A ColorOS update (0.5.20 report): the stage's system.raw is reused (reclaimBytes) and its data stays, so
+        // the image + files + 1 GB logs + 1 GB margin, not 8 GB of new data on top (27.4 GB asked, 7.8 GB free).
+        val i = input(Bundles.S26U)
+        val raw = Images.FIND_X9U_IN_1105.rawBytes
+        val kept = i.copy(stage = i.stage!!.copy(dataStaged = true), reclaimBytes = raw)
+        val need = SpaceRule.toStage(Images.FIND_X9U_IN_1105, PackageSets.X9U_IN_1105_SULTRA, keepsData = true)
+        assertEquals(raw + PackageSets.X9U_IN_1105_SULTRA.approxBytes + SpaceRule.LAUNCH_STAGED_BYTES, need)
+        assertEquals(Level.OK, eval(GatePhase.PREPARE, kept.copy(freeBytes = need - raw)).level(SwitchGates.ID_SPACE))
+        assertEquals(Level.BLOCK, eval(GatePhase.PREPARE, kept.copy(freeBytes = need - raw - 1)).level(SwitchGates.ID_SPACE))
+        // Kept image but no data yet (set up, never started): the data still needs its room.
+        val noData = i.copy(stage = i.stage!!.copy(dataStaged = false), reclaimBytes = raw)
+        val full = SpaceRule.toStage(Images.FIND_X9U_IN_1105, PackageSets.X9U_IN_1105_SULTRA)
+        assertEquals(Level.BLOCK, eval(GatePhase.PREPARE, noData.copy(freeBytes = full - raw - 1)).level(SwitchGates.ID_SPACE))
+    }
+
+    @Test
     fun freeSpaceFromTheImagesRawSize() {
         val i = input(Bundles.S26U)
         val need = SpaceRule.toStage(Images.FIND_X9U_IN_1105, PackageSets.X9U_IN_1105_SULTRA)
@@ -597,9 +614,9 @@ class GatesTest {
             // 0.4.22: the SM8750 phones the Pixel 9 Pro XL image (no SVE needed).
             val usual = listOf(Images.FIND_X9U_IN_1105)
             // 0.4.27: Infinity-X, on every phone; 0.5.06: LineageOS 24 after it; 0.4.31: HyperOS; then Nothing OS.
-            val last = listOf(Images.NOTHING_METROID, Images.ORIGINOS7) // 0.4.35 the S26 Ultra, 0.4.36 the S25s too; 0.4.73 OriginOS 7
+            val last = listOf(Images.NOTHING_METROID, Images.ORIGINOS7, Images.ONEUI95) // 0.4.35 the S26 Ultra, 0.4.36 the S25s too; 0.4.73 OriginOS 7; 0.5.22 One UI 9.5
             assertEquals(
-                usual + (if (p == Profiles.S_ULTRA_8850) Images.PIXEL_KODIAK else Images.PIXEL_KOMODO) + Images.INFINITYX + Images.LINEAGE24 + Images.HYPEROS_LHASA + last,
+                usual + (if (p == Profiles.S_ULTRA_8850) Images.PIXEL_KODIAK else Images.PIXEL_KOMODO) + Images.INFINITYX + Images.LINEAGE24 + Images.HYPEROS_LHASA + Images.HYPEROS_HONGKONG + last,
                 p.images(),
             )
             for ((image, set) in listOf(Images.FIND_X9U_IN_1105 to PackageSets.X9U_IN_1105_SULTRA)) {

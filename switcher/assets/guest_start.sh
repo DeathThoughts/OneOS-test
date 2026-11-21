@@ -1225,7 +1225,8 @@ export PATH=/system/bin:/system/xbin
 
 # OneOS: /mnt and /storage came in from the host, and its pass_through,
 # installer, androidwritable, runtime and user views are binds of the phone's
-# real /data/media. Drop them in this (private) namespace before anything in
+# real /data/media.
+# Drop them in this (private) namespace before anything in
 # the guest runs; the guest builds its own from its staged /data/media below.
 for m in $(awk '$5 ~ "^/(mnt/(pass_through|installer|androidwritable|runtime|user)|storage)(/|$)" {print $5}' /proc/self/mountinfo | sort -r); do
     $BB umount -l "$m" 2>/dev/null
@@ -1372,6 +1373,49 @@ done
 # The file has to be absent, not empty: an empty <layouts/> enables no display
 # at all and DisplayManagerService times out waiting for a default display. A
 # copy of the directory without it keeps the per-panel display_id_*.xml.
+# One UI images (0.5.22, guest_prepare.sh): the merged floating feature list and the phone's camera
+# configuration, in this namespace only.
+if [ -f /data/oneos_floating_feature.xml ] && [ -f /vendor/etc/floating_feature.xml ]; then
+    chcon u:object_r:vendor_configs_file:s0 /data/oneos_floating_feature.xml 2>/dev/null
+    $BB mount --bind /data/oneos_floating_feature.xml /vendor/etc/floating_feature.xml && \
+        echo "[Pivoted Root] Floating features: merged list bound over /vendor/etc/floating_feature.xml"
+fi
+if [ -f /data/oneos_system_floating_feature.xml ] && [ -f /system/etc/floating_feature.xml ]; then
+    chcon u:object_r:system_file:s0 /data/oneos_system_floating_feature.xml 2>/dev/null
+    $BB mount --bind /data/oneos_system_floating_feature.xml /system/etc/floating_feature.xml && \
+        echo "[Pivoted Root] Floating features: the image's /system/etc list with the phone's camera lines bound"
+fi
+if [ -d /data/oneos_cameradata ] && [ -d /system/cameradata ]; then
+    chcon -R u:object_r:system_file:s0 /data/oneos_cameradata 2>/dev/null
+    $BB mount --bind /data/oneos_cameradata /system/cameradata && \
+        echo "[Pivoted Root] Camera: the phone's cameradata bound over /system/cameradata"
+fi
+# Video recording on Exynos phones (11-19 report 2991b714, A56 on Nothing OS: rear video froze
+# after 2 s, "couldn't save"): the guest recorded with its own software encoder
+# c2.android.avc.encoder, which faulted reading the camera's 1080p buffer
+# (SIGSEGV SEGV_ACCERR in CopyRow_NEON <- NV12ToI420 <- C2SoftAvcEnc::setEncodeArgs), three
+# times; the phone's Exynos Codec2 service logged nothing, it was never asked. Rank the software
+# video encoders after every other one in this namespace only, so MediaCodecList offers the
+# phone's hardware encoders first; the software ones stay for anything only they can do.
+# Only where the phone's own lists name an Exynos video encoder. ONEOS_GUEST_SW_VENC=keep: as is.
+VPERF=/vendor/etc/media_codecs_performance.xml
+if [ "${ONEOS_GUEST_SW_VENC:-last}" != keep ] && [ -f "$VPERF" ] && grep -q '</MediaCodecs>' "$VPERF" && \
+   cat /vendor/etc/media_codecs*.xml 2>/dev/null | grep -qE 'name="c2\.exynos\.(h264|avc|hevc|h265)\.encoder"'; then
+    VADD=''
+    for c in avc:video/avc hevc:video/hevc; do
+        VADD="$VADD    <MediaCodec name=\"c2.android.${c%%:*}.encoder\" type=\"${c#*:}\" update=\"true\" rank=\"4096\" />\n"
+    done
+    if $BB awk -v add="$VADD" '{ l[NR] = $0 } /<\/MediaCodecs>/ { last = NR }
+            END { for (i = 1; i <= NR; i++) { if (i == last) printf "  <Encoders>\n%s  </Encoders>\n", add; print l[i] } }' \
+            "$VPERF" > /data/oneos_media_codecs_performance.xml && grep -q 'c2.android.avc.encoder" type="video/avc" update="true" rank="4096"' /data/oneos_media_codecs_performance.xml; then
+        chmod 644 /data/oneos_media_codecs_performance.xml
+        chcon u:object_r:vendor_configs_file:s0 /data/oneos_media_codecs_performance.xml 2>/dev/null
+        $BB mount --bind /data/oneos_media_codecs_performance.xml "$VPERF" && \
+            echo "[Pivoted Root] Video encoders: the guest's software AVC/HEVC encoders ranked after the phone's Exynos ones"
+    else
+        echo "[Pivoted Root] Video encoders: $VPERF not rewritten, left as it is"
+    fi
+fi
 DISPLAYCONFIG=/vendor/etc/displayconfig
 LAYOUT_HIDDEN=0
 rm -f /data/oneos_fold_mode /data/oneos_inner_display
@@ -3381,6 +3425,41 @@ fi
 # and every guest sleep arms the IC in use, panel lit or not, as on a vivo
 # image. On a fold a panel is off by its dpms alone, and the lid switch tells
 # which panel is in use after a fold made with the screen off.
+# Samsung's audio settings that One UI's sound service sends and no other system knows (0.5.21; A36
+# ColorOS 11-18: the speaker "70 % of One UI" with them, quieter and duller without): Samsung's Dolby
+# on with the Auto profile and its volume leveler (g_effect_dolby_*, as One UI sends them), and the
+# speaker amplifier's temperature every 10 s (g_hw_speaker_amp_temp_spk/_rcv; One UI sends 28-37 C
+# from the phone's temperature: without it the amplifier's protection never got a reading, sysfs
+# audio/amp ready -1). The battery temperature stands in for it. Only where the amplifier node
+# exists (a Samsung smart amp); ONEOS_GUEST_SAMSUNG_AUDIO=0 leaves it out. Log: /data/oneos_sec_audio.log.
+# This fork: the Dolby settings stay on, but the amplifier temperature is opt-in (ONEOS_GUEST_AMP_TEMP=1,
+# default off): it replaces the amplifier's own temperature reading on hardware One UI shares, and it was
+# not tried on the owner's phone.
+if [ "${ONEOS_GUEST_SAMSUNG_AUDIO:-1}" = 1 ] && [ -d /sys/devices/virtual/audio/amp ] && [ -f /data/oneos_edm_stub.dex ]; then
+    ONEOS_BB="$BB" ONEOS_AMP_TEMP="${ONEOS_GUEST_AMP_TEMP:-0}" $BB sh -c '
+        BB=$ONEOS_BB
+        log() { echo "$(date +%T) $*" >> /data/oneos_sec_audio.log; }
+        param() { /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "$1" 2>&1 | tail -n 1; }
+        i=0
+        while [ "$(getprop service.bootanim.exit)" != 1 ] && [ $i -lt 600 ]; do sleep 1; i=$((i + 1)); done
+        sleep 10
+        for kv in g_effect_dolby_enable=1 g_effect_dolby_profile=0 g_effect_dolby_volume_leveler=7; do log "$(param $kv)"; done
+        [ "$ONEOS_AMP_TEMP" = 1 ] || { log "amp temperature: left alone (ONEOS_GUEST_AMP_TEMP is not 1)"; exit 0; }
+        last=""
+        while :; do
+            t=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)
+            case "$t" in ""|*[!0-9-]*) t=300 ;; esac
+            t=$((t / 10))
+            [ $t -ge 10 ] && [ $t -le 70 ] || t=30
+            if [ "$t" != "$last" ]; then
+                r1=$(param g_hw_speaker_amp_temp_spk=$t); param g_hw_speaker_amp_temp_rcv=$t >/dev/null
+                [ -n "$last" ] || log "amp temperature: $r1"
+                last=$t
+            fi
+            sleep 10
+        done
+    ' </dev/null >/dev/null 2>&1 &
+fi
 DT2W=${ONEOS_GUEST_DT2W:-1}
 if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/sec/tsp/enabled ] || [ -w /sys/class/sec/tsp1/enabled ]; }; then
     rm -f /data/oneos_dt2w_armed.* /data/oneos_dt2w_*.fifo /data/oneos_dt2w_aod* /data/oneos_dt2w_lid*
