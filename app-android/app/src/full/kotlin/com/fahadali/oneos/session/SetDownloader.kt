@@ -42,6 +42,15 @@ object SetDownloader {
     fun cached(ctx: Context, f: AppAssets.Staged): File? =
         File(dir(ctx), f.sha256).takeIf { it.isFile && it.length() == f.bytes }
 
+    /**
+     * Only recognized GitHub Release entries are usable. Some migrated package lists
+     * still contain legacy Drive/SourceForge identifiers after a valid gh: entry;
+     * rejecting the entire list would prevent downloading an otherwise valid set.
+     * Keep the strict URL validation for every source actually requested.
+     */
+    internal fun supportedSources(sources: List<String>, sha256: String): List<String> =
+        sources.distinct().filter { runCatching { url(it, sha256) }.isSuccess }
+
     /** Resumes an interrupted download, retaining a file only after the pinned size and hash match. */
     fun fetch(
         ctx: Context, f: AppAssets.Staged, sources: List<String>, cancelled: () -> Boolean,
@@ -51,9 +60,9 @@ object SetDownloader {
         if (sources.isEmpty()) throw Failed("${f.name} has no download source")
         val part = File(dir(ctx), "${f.sha256}.part")
         if (part.length() > f.bytes) part.delete()
-        val order = sources.distinct()
-        // Reject stale external sources before any request or partial-file write.
-        order.forEach { url(it, f.sha256) }
+        val order = supportedSources(sources, f.sha256)
+        if (order.isEmpty()) throw Failed("${f.name} has no supported GitHub Release source")
+        // Legacy entries are ignored; every requested URL still passes url()'s strict validation.
         var last: Exception? = null
         var refused = 0
         for (source in order) {

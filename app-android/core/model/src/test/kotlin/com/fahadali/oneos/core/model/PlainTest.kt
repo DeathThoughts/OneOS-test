@@ -100,6 +100,17 @@ class PlainTest {
     }
 
     @Test
+    fun patchDownloadFailureIsNotReportedAsAnUnknownSetupFailure() {
+        val failed = Plain.setupFailed(
+            "Downloading this system's OneOS files: OneOSGuest.apk has no supported GitHub Release source",
+            false, Images.FIND_N6,
+        )
+        assertEquals("Couldn't download OneOS corrections", failed.title)
+        assertTrue(failed.line.contains("GitHub"))
+        assertEquals(FixAction.SEND_REPORT, failed.action)
+    }
+
+    @Test
     fun theActionsFitTheProblem() {
         fun of(id: String, reason: String, image: ImageRef? = Images.FIND_N6, pf: PlainFacts = PlainFacts()) =
             Plain.of(Finding(id, Level.BLOCK, "", "", reason), image, Profiles.F8U, pf)

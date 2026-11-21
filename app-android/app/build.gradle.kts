@@ -844,4 +844,5 @@ dependencies {
         exclude(group = "com.google.mlkit", module = "barcode-scanning-common")
     }
     implementation(libs.oneui.icons)
+    testImplementation(libs.junit)
 }
