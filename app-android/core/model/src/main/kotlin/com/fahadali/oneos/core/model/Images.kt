@@ -753,6 +753,15 @@ object Images {
         mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/actions/runs/44932670737/artifacts/14718423839",
     )
 
+    // The first Actions artifact wrapped this gzip in a ZIP. Import the gzip
+    // itself with its own download pin and the same verified raw image pin.
+    private val pyb110Gzip = COLOROS17_PYB110.copy(
+        gzName = "OneOS_ColorOS17_OnePlus16.img.gz",
+        gzBytes = 7_437_913_442L,
+        gzSha256 = "11b89e48e57a924fbd3c91f6b3839913514a50273da87cf88f86201532010569",
+        zipEntryName = null,
+    )
+
     val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, COLOROS17_PYB110, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_HONGKONG, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
@@ -775,8 +784,18 @@ object Images {
     fun shortName(id: String, images: List<ImageRef> = ALL, retired: List<RetiredImage> = RETIRED): String =
         byId(id, images)?.shortName ?: retired.firstOrNull { it.id == id }?.shortName ?: id
 
-    /** The image whose .gz has exactly this size (`OpenableColumns.SIZE`). */
-    fun byGzSize(bytes: Long, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.gzBytes == bytes }
+    /** The image whose archive has exactly this size (`OpenableColumns.SIZE`). */
+    fun byGzSize(bytes: Long, images: List<ImageRef> = ALL): ImageRef? =
+        archivesBySize(bytes, images).firstOrNull()
+
+    internal fun archivesBySize(bytes: Long, images: List<ImageRef>): List<ImageRef> =
+        images.mapNotNull { image ->
+            when {
+                image.gzBytes == bytes -> image
+                bytes == pyb110Gzip.gzBytes && image == COLOROS17_PYB110 -> pyb110Gzip
+                else -> null
+            }
+        }
 
     fun byRawSize(bytes: Long, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.rawBytes == bytes }
 
@@ -891,7 +910,7 @@ object ImageIdentifier {
                 block("Image size unknown", "$name has no size. Tap Check file to read it; $wantText.", R_SIZE_UNKNOWN),
             )
         }
-        val bySize = images.filter { it.gzBytes == size }
+        val bySize = Images.archivesBySize(size, images)
         if (bySize.isEmpty()) {
             val raw = Images.byRawSize(size, images)
             val retired = retiredImages.firstOrNull { it.gzBytes == size }

@@ -37,6 +37,27 @@ class ImagesTest {
     }
 
     @Test
+    fun rebuiltOnePlus16GzipUsesTheSameRawPinAndChecksItsOwnArchive() {
+        val archive = ImageFileCheck(
+            "OneOS_ColorOS17_OnePlus16.img.gz", 7_437_913_442L,
+            "11b89e48e57a924fbd3c91f6b3839913514a50273da87cf88f86201532010569", 7_437_913_442L,
+        )
+        val detected = ImageIdentifier.identify(archive, Profiles.S_8550)
+        assertEquals(ImageState.VERIFIED, detected.state)
+        assertEquals(Images.ID_COLOROS17_PYB110, detected.image?.id)
+        assertEquals(null, detected.image?.zipEntryName)
+        assertEquals(Images.COLOROS17_PYB110.rawSha256, detected.image?.rawSha256)
+        assertEquals(Images.COLOROS17_PYB110.rawBytes, detected.image?.rawBytes)
+        assertEquals(ImageState.DAMAGED, ImageIdentifier.identify(
+            archive.copy(sha256 = "0".repeat(64)), Profiles.S_8550,
+        ).state)
+        assertEquals(ImageState.UNKNOWN, ImageIdentifier.identify(
+            ImageFileCheck("pyb110-guest-donor-complete-untested.zip", 7_437_913_732L), Profiles.S_8550,
+        ).state)
+        assertEquals(ImageState.WRONG_FOR_PHONE, ImageIdentifier.identify(archive, Profiles.S_PLUS_8550).state)
+    }
+
+    @Test
     fun popsicleImportTakesTheInnerZipOnGalaxyS23() {
         val popsicle = Images.HYPEROS_POPSICLE
         val inner = ImageFileCheck(popsicle.gzName, popsicle.gzBytes, popsicle.gzSha256, popsicle.gzBytes)
