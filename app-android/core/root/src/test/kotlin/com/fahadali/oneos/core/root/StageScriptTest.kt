@@ -1859,6 +1859,15 @@ class StageScriptTest {
     }
 
     @Test
+    fun onePlusCnPortDoesNotInjectOneOsGuestManager() {
+        val prepare = File(Shipped.switcherAssets, "guest_prepare.sh").readText()
+        assertTrue(prepare.contains("grep -Fxq '  \"image\": \"coloros17-pyb110\",' \"$STAGE/.oneos_stage\""))
+        assertTrue(prepare.contains("ONEOS_GUEST_APP=0"))
+        assertTrue(prepare.contains("if [ \"${ONEOS_GUEST_APP:-1}\" = 1 ]; then"))
+        assertTrue(prepare.contains("[ \"${ONEOS_GUEST_APP:-1}\" != 1 ] || SE_LIST"))
+    }
+
+    @Test
     fun pyb110StagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
         val profile = Profiles.S_8550
         val image = Images.COLOROS17_PYB110

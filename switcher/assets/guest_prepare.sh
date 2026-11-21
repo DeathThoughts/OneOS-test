@@ -1,6 +1,13 @@
 #!/system/bin/sh
 STAGE="/data/local/tmp/oneos"
 ROOTFS="$STAGE/rootfs"
+# The OnePlus 16 CN port uses only its pinned system.img and corrections.
+# Never inject OneOS's optional in-ROM manager app, even when a signed
+# guest_manager.apk is available as a host-side staging script.
+if [ -r "$STAGE/.oneos_stage" ] &&
+        grep -Fxq '  "image": "coloros17-pyb110",' "$STAGE/.oneos_stage"; then
+    ONEOS_GUEST_APP=0
+fi
 # OneOS: init's mount namespace only (oneos_switch.sh's preflight makes
 # sure of it). The bridges below are for One UI's installd and artd, which run
 # there; made in any other namespace they would not reach them (run 25).
@@ -1480,7 +1487,8 @@ if { [ -d /system_ext/apex ] && [ -d "$GUEST_SYSTEM_EXT" ]; } || [ $INJ = 1 ] ||
         # user held Volume Up+Down after 26 min). The same system_ext folders for a One UI guest.
         if { [ -f "$ROOTFS/system/framework/vivo-services.jar" ] || grep -q '^ro.build.version.oneui=' "$ROOTFS/system/build.prop" 2>/dev/null; } &&
                 [ "${ONEOS_GUEST_VIVO_SYSEXT:-1}" = 1 ]; then
-            SE_LIST="app/OneOSGuest:OneOSGuest.apk"
+            SE_LIST=""
+            [ "${ONEOS_GUEST_APP:-1}" != 1 ] || SE_LIST="app/OneOSGuest:OneOSGuest.apk"
             [ -f "$ROOTFS/system/framework/vivo-services.jar" ] && SE_LIST="$SE_LIST overlay/OneOSFoldCutout:OneOSFoldCutout.apk"
             for n in $SE_LIST; do
                 d=${n%%:*}; f=${n#*:}

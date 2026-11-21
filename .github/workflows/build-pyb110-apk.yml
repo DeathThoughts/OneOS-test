@@ -183,6 +183,7 @@ jobs:
             --tests '*SingleImageZipInputStreamTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
                     --tests '*StageScriptTest.pyb110StagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23' \
+                    --tests '*StageScriptTest.onePlusCnPortDoesNotInjectOneOsGuestManager' \
             --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
           ./gradlew --console=plain :app:testFullDebugUnitTest --tests '*SetDownloaderTest'
           ./gradlew --console=plain :app:assembleFullDebug
