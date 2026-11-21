@@ -187,5 +187,6 @@
     <string name="github_report_copied">Detalhes copiados. Cole na issue e anexe o ZIP salvo dos logs.</string>
     <string name="github_report_prepare_failed">Não foi possível preparar o relato. Abra a prévia dos logs para salvar ou compartilhar o ZIP.</string>
     <string name="unofficial_debug_title">Versão de depuração não oficial</string>
-    <string name="unofficial_debug_message">Esta é uma versão de depuração de um fork não oficial do OneOS. Envie todos os relatos de bugs diretamente para @death_s2 no Telegram.</string>
+    <string name="unofficial_debug_message">Relate problemas com este fork do OneOS para @death_s2 no Telegram.</string>
+    <string name="unofficial_debug_dismiss">Dispensar aviso da versão de depuração</string>
 </resources>

@@ -1,86 +1,63 @@
 package com.fahadali.oneos.ui
 
 import android.content.Context
-import android.graphics.Matrix
-import android.graphics.drawable.BitmapDrawable
 import android.util.AttributeSet
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.appcompat.widget.AppCompatImageView
 import com.fahadali.oneos.R
-import com.fahadali.oneos.core.model.ArtworkFraming
 import com.fahadali.oneos.core.model.ImageRef
+import com.fahadali.oneos.core.model.Images
 import com.fahadali.oneos.core.model.SystemFamily
 
-/** The original exports, with ordinary full-bleed image cropping and per-OS focus points. */
+/** Full-bleed artwork shared by each system's catalog, home and setup screens. */
 class OsArtworkView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatImageView(context, attrs) {
     private var artwork = 0
-    private var rendered = 0
-    private var family = SystemFamily.COLOROS
-    private var hyperOsGlobal = false
-    internal val artworkFamily: SystemFamily get() = family
+    internal var artworkImageId: String? = null
+        private set
+
     init {
         scaleType = ScaleType.CENTER_CROP
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         setBackgroundResource(R.drawable.catalog_card_bg)
-        foreground = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, R.drawable.catalog_card_outline)
+        foreground = AppCompatResources.getDrawable(context, R.drawable.catalog_card_outline)
         clipToOutline = true
     }
-    // 0.5.27: HyperOS 4 Global has its own artwork ("Global" on it), apart from the Xiaomi 18 Fold build's.
-    fun bind(image: ImageRef?) = bindArtwork(if (image?.id == com.fahadali.oneos.core.model.Images.ID_HYPEROS_HONGKONG) R.drawable.os_hyperos_global else when (image?.family) {
-        SystemFamily.PIXEL -> R.drawable.os_pixel
-        SystemFamily.HYPEROS -> R.drawable.os_hyperos
-        SystemFamily.NOTHING -> R.drawable.os_nothing
-        SystemFamily.INFINITYX -> R.drawable.os_infinity
-        SystemFamily.OXYGENOS -> R.drawable.os_oxygenos
-        SystemFamily.ORIGINOS -> R.drawable.os_originos
-        SystemFamily.LINEAGE -> R.drawable.os_lineage
-        SystemFamily.ONEUI -> R.drawable.os_oneui
-        else -> R.drawable.os_coloros
-    })
-    fun bindArtwork(resource: Int) {
+
+    fun bind(image: ImageRef?) {
+        artworkImageId = image?.id
+        val resource = when (image?.id) {
+            Images.ID_FIND_N6 -> R.drawable.banner_coloros_find_n6
+            Images.ID_FIND_X9U_IN, Images.ID_FIND_X9U_IN_1105 -> R.drawable.banner_coloros_find_x9u
+            Images.ID_COLOROS17_TWINTY4C -> R.drawable.banner_coloros_twinity
+            Images.ID_COLOROS17_PYB110 -> R.drawable.banner_coloros_pyb110
+            Images.ID_HYPEROS_LHASA -> R.drawable.banner_hyperos_lhasa
+            Images.ID_HYPEROS_HONGKONG -> R.drawable.banner_hyperos_hongkong
+            Images.ID_HYPEROS_POPSICLE -> R.drawable.banner_hyperos_popsicle
+            Images.ID_HYPEROS_MADRID -> R.drawable.banner_hyperos_madrid
+            Images.ID_PIXEL_YOGI -> R.drawable.banner_pixel_yogi
+            Images.ID_PIXEL_KODIAK -> R.drawable.banner_pixel_kodiak
+            Images.ID_PIXEL_KOMODO -> R.drawable.banner_pixel_komodo
+            Images.ID_NOTHING_METROID -> R.drawable.banner_nothing_metroid
+            Images.ID_NOTHING_ASTEROIDS -> R.drawable.banner_nothing_asteroids
+            Images.ID_INFINITYX -> R.drawable.banner_infinityx
+            Images.ID_OXYGEN16 -> R.drawable.banner_oxygenos
+            Images.ID_ORIGINOS7 -> R.drawable.banner_originos
+            Images.ID_LINEAGE -> R.drawable.banner_lineage
+            Images.ID_ONEUI95 -> R.drawable.banner_oneui
+            else -> when (image?.family) {
+                SystemFamily.HYPEROS -> R.drawable.banner_hyperos_lhasa
+                SystemFamily.PIXEL -> R.drawable.banner_pixel_yogi
+                SystemFamily.NOTHING -> R.drawable.banner_nothing_metroid
+                SystemFamily.INFINITYX -> R.drawable.banner_infinityx
+                SystemFamily.OXYGENOS -> R.drawable.banner_oxygenos
+                SystemFamily.ORIGINOS -> R.drawable.banner_originos
+                SystemFamily.LINEAGE -> R.drawable.banner_lineage
+                SystemFamily.ONEUI -> R.drawable.banner_oneui
+                else -> R.drawable.banner_coloros_find_n6
+            }
+        }
         if (artwork == resource) return
         artwork = resource
-        hyperOsGlobal = resource == R.drawable.os_hyperos_global
-        family = when (resource) {
-            R.drawable.os_hyperos, R.drawable.os_hyperos_global -> SystemFamily.HYPEROS
-            R.drawable.os_nothing -> SystemFamily.NOTHING
-            R.drawable.os_infinity -> SystemFamily.INFINITYX
-            R.drawable.os_pixel -> SystemFamily.PIXEL
-            R.drawable.os_oxygenos -> SystemFamily.OXYGENOS
-            R.drawable.os_originos -> SystemFamily.ORIGINOS
-            R.drawable.os_lineage -> SystemFamily.LINEAGE
-            R.drawable.os_oneui -> SystemFamily.ONEUI
-            else -> SystemFamily.COLOROS
-        }
-        frame()
-    }
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { super.onSizeChanged(w, h, oldw, oldh); frame() }
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        super.onConfigurationChanged(newConfig)
-        // Thin/wide qualifiers share the same resource ID. Reload its drawable
-        // after a display change even if this view survives the configuration.
-        rendered = 0
-        frame()
-    }
-    private fun frame() {
-        if (artwork == 0) return
-        val header = tag?.toString()?.startsWith("heading") == true && height > 0 && width.toFloat() / height > .8f
-        val resource = if (!header) artwork else if (hyperOsGlobal) R.drawable.os_hyperos_global_header else when (family) {
-            SystemFamily.HYPEROS -> R.drawable.os_hyperos_header
-            SystemFamily.NOTHING -> R.drawable.os_nothing_header
-            SystemFamily.INFINITYX -> R.drawable.os_infinity_header
-            SystemFamily.PIXEL -> R.drawable.os_pixel_header
-            SystemFamily.OXYGENOS -> R.drawable.os_oxygenos_header
-            SystemFamily.ORIGINOS -> R.drawable.os_originos_header
-            SystemFamily.LINEAGE -> R.drawable.os_lineage_header
-            SystemFamily.ONEUI -> R.drawable.os_oneui_header
-            else -> R.drawable.os_coloros_header
-        }
-        if (rendered != resource) { rendered = resource; setImageResource(resource) }
-        if (!header) { scaleType = ScaleType.CENTER_CROP; return }
-        val bitmap = (drawable as? BitmapDrawable)?.bitmap ?: return
-        scaleType = ScaleType.MATRIX
-        val bottom = if (tag == "heading_progress") minOf(112 * resources.displayMetrics.density, height * .30f) else 0f
-        val crop = ArtworkFraming.transform(family, bitmap.width, bitmap.height, width, height, bottom, hyperOsGlobal)
-        imageMatrix = Matrix().apply { setScale(crop.scale, crop.scale); postTranslate(crop.x, crop.y) }
+        setImageResource(resource)
     }
 }
