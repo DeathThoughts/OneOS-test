@@ -148,7 +148,7 @@ class PackageSetsTest {
         assertEquals(Images.ID_HYPEROS_LHASA, hyper.imageId)
         assertEquals("out/overlays_hyperos_r29", hyper.sourceDir)
         assertEquals(40, hyper.files.size) // 0.5.13 (fork r29): + miui-framework_patched.jar; 0.4.38: + libsurfaceflinger_patched.so; 0.4.59: + telephony, two cameras; 0.4.70: + xiaomi-opt-telephony_patched.jar
-        assertEquals(listOf("socket_exec", "libaudiohal_aidl_patched.so", "MiWallpaper_patched.apk", "samcam.tar", "samcam_bar.tar"),
+        assertEquals(listOf("libsurfaceflinger_patched.so", "socket_exec", "libaudiohal_aidl_patched.so", "MiWallpaper_patched.apk", "samcam.tar", "samcam_bar.tar"),
             hyper.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
         assertEquals(
             listOf("services_patched.jar", "miui-services_patched.jar", "miui-framework_patched.jar", "apprecovery.proinstaller_patched.jar", "framework_patched.jar",
