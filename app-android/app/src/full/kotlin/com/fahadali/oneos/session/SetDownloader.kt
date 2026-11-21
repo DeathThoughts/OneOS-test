@@ -49,7 +49,11 @@ object SetDownloader {
      * Keep the strict URL validation for every source actually requested.
      */
     internal fun supportedSources(sources: List<String>, sha256: String): List<String> =
-        sources.distinct().filter { runCatching { url(it, sha256) }.isSuccess }
+        sources.distinct().filter { source ->
+            // A migrated fork entry must name its repository explicitly.
+            // Short "gh:sets-1" entries are leftovers from the upstream feed.
+            source.count { it == ':' } == 2 && runCatching { url(source, sha256) }.isSuccess
+        }
 
     /** Resumes an interrupted download, retaining a file only after the pinned size and hash match. */
     fun fetch(
