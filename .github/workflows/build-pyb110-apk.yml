@@ -10,8 +10,8 @@ permissions:
   packages: read
 
 env:
-  PYB110_BUILD_RUN: "44858332632"
-  PYB110_RELEASE: pyb110-s23-trial-v1
+  PYB110_BUILD_RUN: "44926279431"
+  PYB110_IMAGE_RUN: "44932670737"
 
 jobs:
   publish-payloads:
@@ -20,7 +20,7 @@ jobs:
       actions: read
       contents: write
     concurrency:
-      group: pyb110-payloads-v1
+      group: pyb110-payloads-v2
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -37,7 +37,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PYB110_BUILD_RUN" |
             jq -e '
               .status == "completed" and .conclusion == "success" and
-              .head_sha == "89383cb77de63ee31d4ca2ec774d9b1000a00851" and
+              .head_sha == "8f43e862df23d199fdca8586d33c676c811eb406" and
               .head_branch == "port/coloros17-pyb110" and .name == "Build OnePlus 16 ColorOS guest"
             '
 
@@ -56,63 +56,63 @@ jobs:
           (cd out/pyb110-download && sha256sum --strict --check SHA256SUMS)
           python3 scripts/publish-pyb110-payloads.py out/pyb110-download
 
-  publish-image:
+  verify-image:
     if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/port/coloros17-pyb110-apk'
-    needs: publish-payloads
-    permissions:
-      actions: read
-      contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 35
     steps:
-      - name: Check the published image pin
-        id: existing-image
+      - name: Verify the prepared ZIP artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          asset="repos/$GITHUB_REPOSITORY/releases/tags/$PYB110_RELEASE"
-          if gh api "$asset" | jq -e '
-            any(.assets[]; .name == "OneOS_ColorOS17_OnePlus16.img.gz" and .size == 1880903860 and
-              .digest == "sha256:5b2d6f876e65321dc0dc6cfc523c71f77ef7009c41e643482dd523c753f72e0d" and .state == "uploaded")
-          ' >/dev/null; then
-            echo "valid=true" >> "$GITHUB_OUTPUT"
-          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PYB110_IMAGE_RUN" | jq -e '
+            .status == "completed" and .conclusion == "success" and
+            .head_sha == "1eac93f83406f6fdbe9ebc2af0f2dbca3df7c276"
+          '
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14718423839" | jq -e '
+            .workflow_run.id == ($ENV.PYB110_IMAGE_RUN | tonumber) and
+            .name == "pyb110-system-img-untested" and .expired == false and
+            .size_in_bytes == 7508245938 and .digest == "sha256:14eafb346a6a97ad94fc840d5e319af87aace20956f30eeb40aaa3aac9306c59"
+          '
 
-      - uses: actions/download-artifact@v4
-        if: steps.existing-image.outputs.valid != 'true'
-        with:
-          name: pyb110-guest-untested
-          github-token: ${{ github.token }}
-          run-id: ${{ env.PYB110_BUILD_RUN }}
-          path: out/pyb110-image
-
-      - name: Publish the verified image
-        if: steps.existing-image.outputs.valid != 'true'
+      - name: Read the exact download with Java's ZIP reader
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          image=out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
-          hash=5b2d6f876e65321dc0dc6cfc523c71f77ef7009c41e643482dd523c753f72e0d
-          [ "$(stat -c %s "$image")" -eq 1880903860 ]
-          printf '%s  %s\n' "$hash" "$image" | sha256sum --strict --check
-          if ! gh release view "$PYB110_RELEASE" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$PYB110_RELEASE" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --prerelease --latest=false --title "OnePlus 16 ColorOS 17 Galaxy S23 trial" \
-              --notes "OneOS guest from OnePlus 16 China 17.0.1.201(CN01), for the base Galaxy S23 on Android 17. The image and overlays passed build checks. Phone boot and return to One UI are untested. Use the matching debug APK. Original OneOS by Fahad Ali Javed."
-          fi
-          assets="repos/$GITHUB_REPOSITORY/releases/tags/$PYB110_RELEASE"
-          if ! gh api "$assets" --jq '.assets[].name' | grep -Fx "$(basename "$image")"; then
-            gh release upload "$PYB110_RELEASE" "$image" --repo "$GITHUB_REPOSITORY"
-          fi
-          gh api "$assets" | jq -e --arg file "$(basename "$image")" --arg digest "sha256:$hash" \
-            'any(.assets[]; .name == $file and .size == 1880903860 and .digest == $digest and .state == "uploaded")'
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/14718423839/zip" > image.zip
+          printf '%s  %s\n' 14eafb346a6a97ad94fc840d5e319af87aace20956f30eeb40aaa3aac9306c59 image.zip | sha256sum --strict -c
+          cat > VerifyImage.java <<'JAVA'
+          import java.nio.file.*;
+          import java.security.*;
+          import java.util.*;
+          import java.util.zip.*;
+
+          class VerifyImage {
+              public static void main(String[] args) throws Exception {
+                  var digest = MessageDigest.getInstance("SHA-256");
+                  try (var zip = new ZipInputStream(Files.newInputStream(Path.of(args[0])))) {
+                      var entry = zip.getNextEntry();
+                      if (entry == null || entry.isDirectory() || !entry.getName().equals("system.img")) {
+                          throw new IllegalStateException("Expected system.img as the first entry");
+                      }
+                      long size = new DigestInputStream(zip, digest).transferTo(java.io.OutputStream.nullOutputStream());
+                      String hash = HexFormat.of().formatHex(digest.digest());
+                      if (zip.getNextEntry() != null || size != 13810913280L ||
+                          !hash.equals("1b7057a78c6a0f834e5020832c3ef2f82cafba5570d62559e9cb2d6761d86f4c")) {
+                          throw new IllegalStateException("ZIP contents differ from the verified image");
+                      }
+                      System.out.printf("Verified only system.img, %d bytes, SHA-256 %s%n", size, hash);
+                  }
+              }
+          }
+          JAVA
+          java VerifyImage.java image.zip
 
   build:
-    needs: [publish-payloads, publish-image]
+    needs: publish-payloads
     permissions:
-      contents: write
+      contents: read
       packages: read
     if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/port/coloros17-pyb110-apk'
     environment: debug-build
@@ -206,7 +206,8 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew --console=plain :core:model:test \
-            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest' --tests '*ProfilesTest'
+            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest' --tests '*ProfilesTest' \
+            --tests '*SingleImageZipInputStreamTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
                     --tests '*StageScriptTest.pyb110StagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23' \
             --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
@@ -235,6 +236,8 @@ jobs:
           expected_sizes = read_index((packages / "sizes.txt").read_text())
           expected_remote = read_index((packages / "remote.txt").read_text())
           expected_root = Path("app-android/app/src/full/assets/root/oneos_root.sh").read_bytes()
+          raw_pin = b'13810913280 1b7057a78c6a0f834e5020832c3ef2f82cafba5570d62559e9cb2d6761d86f4c'
+          assert b'coloros17-pyb110) echo "' + raw_pin + b'"' in expected_root
           for profile in ("s-8550",):
               assert f'"{profile} coloros17-pyb110") echo pyb110-s23 ;;'.encode() in expected_root, (
                   f"OnePlus 16 root registry entry is missing for {profile}"
@@ -284,14 +287,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          name=OneOS-0.5.32-OnePlus16-S23-header-debug.apk
+          name=OneOS-0.5.32-OnePlus16-S23-rebuilt-debug.apk
           apk=dist/$name
           cp app-android/app/build/outputs/apk/full/debug/app-full-debug.apk "$apk"
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk")
           package_info=$(printf '%s\n' "$badging" | sed -n '/^package:/p')
           grep -Fq "versionName='0.5.32'" <<< "$package_info"
-          grep -Fq "versionCode='180'" <<< "$package_info"
+          grep -Fq "versionCode='181'" <<< "$package_info"
           host_certs=$("$apksigner" verify --print-certs "$apk")
           guest_certs=$("$apksigner" verify --print-certs switcher/assets/guest_manager.apk)
           signer=$(printf '%s\n' "$host_certs" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' | tr 'A-F' 'a-f')
@@ -316,17 +319,3 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
-
-      - name: Publish the verified debug APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          apk=dist/OneOS-0.5.32-OnePlus16-S23-header-debug.apk
-          hash=$(cut -d' ' -f1 "$apk.sha256")
-          assets="repos/$GITHUB_REPOSITORY/releases/tags/$PYB110_RELEASE"
-          if ! gh api "$assets" --jq '.assets[].name' | grep -Fx "$(basename "$apk")"; then
-            gh release upload "$PYB110_RELEASE" "$apk" "$apk.sha256" --repo "$GITHUB_REPOSITORY"
-          fi
-          gh api "$assets" | jq -e --arg file "$(basename "$apk")" --arg digest "sha256:$hash" \
-            'any(.assets[]; .name == $file and .digest == $digest and .state == "uploaded")'

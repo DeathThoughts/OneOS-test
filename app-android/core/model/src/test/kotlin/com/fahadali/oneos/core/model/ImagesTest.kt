@@ -21,6 +21,22 @@ class ImagesTest {
     )
 
     @Test
+    fun rebuiltOnePlus16ArchiveIsRecognizedOnBaseGalaxyS23() {
+        val image = Images.COLOROS17_PYB110
+        val archive = ImageFileCheck(
+            "pyb110-system-img-untested.zip", 7_508_245_938L,
+            "14eafb346a6a97ad94fc840d5e319af87aace20956f30eeb40aaa3aac9306c59", 7_508_245_938L,
+        )
+        assertEquals(ImageState.VERIFIED, ImageIdentifier.identify(archive, Profiles.S_8550).state)
+        assertEquals(ImageState.WRONG_FOR_PHONE, ImageIdentifier.identify(archive, Profiles.S_PLUS_8550).state)
+        assertEquals("system.img", image.zipEntryName)
+        assertTrue(image.rawMatches(13_810_913_280L, "1b7057a78c6a0f834e5020832c3ef2f82cafba5570d62559e9cb2d6761d86f4c"))
+        assertEquals(ImageState.UNKNOWN, ImageIdentifier.identify(
+            ImageFileCheck("OneOS_ColorOS17_OnePlus16.img.gz", 1_880_903_860L), Profiles.S_8550,
+        ).state)
+    }
+
+    @Test
     fun popsicleImportTakesTheInnerZipOnGalaxyS23() {
         val popsicle = Images.HYPEROS_POPSICLE
         val inner = ImageFileCheck(popsicle.gzName, popsicle.gzBytes, popsicle.gzSha256, popsicle.gzBytes)

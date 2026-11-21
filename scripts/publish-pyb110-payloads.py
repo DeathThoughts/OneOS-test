@@ -13,7 +13,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "DeathThoughts/OneOS-test"
 BRANCH = "refs/heads/port/coloros17-pyb110-apk"
-TAG = "pyb110-payloads-v1"
+TAG = "pyb110-payloads-v2"
 DESTINATION = f"gh:{REPO}:{TAG}"
 MIGRATION = runpy.run_path(str(ROOT / "scripts/migrate-patch-payloads.py"))
 
