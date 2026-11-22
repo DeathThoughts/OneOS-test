@@ -281,6 +281,18 @@ mv "$TASK/stat.next" "$TASK/stat"
         (duplicate / 'comm').write_text('hwuiTask0\n')
         self.assert_refused('more than one launcher hwuiTask0', '--run', '1', 'launcher-worker0')
 
+    def test_launcher_main_trial_changes_only_the_process_leader(self):
+        workers = self.configure_launcher()
+        leader = self.create_thread(200, -10, 204)
+        (leader / 'comm').write_text('ndroid.launcher\n')
+        self.env['TASK'] = str(leader)
+        result = self.run_trial('--run', '1', 'launcher-main')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('launcher main thread PID=200 TID=200', result.stdout)
+        self.assertEqual(self.log.read_text().splitlines(), ['-2 200', '2 200'])
+        self.assertEqual((leader / 'stat').read_text().split()[18], '-10')
+        self.assertEqual([(worker / 'stat').read_text().split()[18] for worker in workers], ['-2', '-2'])
+
     def test_does_not_overwrite_a_later_policy_change(self):
         self.stub('sleep', """awk '{$19 = -8; print}' "$TASK/stat" > "$TASK/stat.next"
 mv "$TASK/stat.next" "$TASK/stat"
