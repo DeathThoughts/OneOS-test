@@ -175,6 +175,48 @@ class MainActivity : AppCompatActivity() {
             list.postDelayed({ if (!isDestroyed) GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) } }, 2500)
             GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) }
         }.isEnabled = !pending
+        if (BuildConfig.DEBUG) schedulerTrialRow(perf)
+    }
+
+    private fun schedulerTrialRow(perf: android.widget.LinearLayout) {
+        SchedulerTrial.current() ?: return
+        val cards = com.fahadali.oneos.shared.NativeCards
+        val row = cards.row(perf, getString(R.string.scheduler_trial_title))
+        val refresh = object : Runnable {
+            override fun run() {
+                val state = SchedulerTrial.current()
+                if (state == null) {
+                    row.visibility = View.GONE
+                    return
+                }
+                val pending = SchedulerTrial.pending(this@MainActivity, state.token)
+                val full = AnimLevel.current() == AnimLevel.FULL
+                val target = state.target?.let { getString(it.label) }.orEmpty()
+                row.summary = when {
+                    pending || state.phase == SchedulerTrial.Phase.STARTING -> getString(R.string.scheduler_trial_starting)
+                    state.phase == SchedulerTrial.Phase.RUNNING -> getString(R.string.scheduler_trial_running, target)
+                    !full -> getString(R.string.scheduler_trial_full_only)
+                    state.phase == SchedulerTrial.Phase.RESTORED -> getString(R.string.scheduler_trial_restored, target)
+                    state.phase == SchedulerTrial.Phase.FAILED -> getString(R.string.scheduler_trial_failed, target)
+                    else -> getString(R.string.scheduler_trial_off)
+                }
+                row.isEnabled = full && !pending && !state.busy
+                if ((pending || state.busy) && row.isAttachedToWindow && !isDestroyed) row.postDelayed(this, 1000)
+            }
+        }
+        row.setOnClickListener {
+            val options = SchedulerTrial.Target.entries
+            AlertDialog.Builder(this).setTitle(R.string.scheduler_trial_title)
+                .setItems(options.map { getString(it.label) }.toTypedArray()) { _, choice ->
+                    runCatching { SchedulerTrial.request(this, options[choice]) }.onFailure {
+                        android.widget.Toast.makeText(this, R.string.scheduler_trial_request_failed, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    row.removeCallbacks(refresh)
+                    refresh.run()
+                }
+                .setNegativeButton(android.R.string.cancel, null).show()
+        }
+        row.post(refresh)
     }
 
     /** Record full logs from now (0.5.17): hidden when the session's OneOS is too old to answer. */

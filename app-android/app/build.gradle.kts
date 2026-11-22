@@ -159,6 +159,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "guest_vector.bundle" to File(repoRoot, "switcher/assets/guest_vector.bundle"),
     "guest_manager.apk" to File(repoRoot, "switcher/assets/guest_manager.apk"),
     "oneos_switch.sh" to File(repoRoot, "switcher/assets/oneos_switch.sh"),
+    "pyb110-scheduler-trial.sh" to File(repoRoot, "scripts/pyb110-scheduler-trial.sh"),
     "boot_status.sh" to File(repoRoot, "switcher/assets/boot_status.sh"),
     "OneOSBootStatus.dex" to File(repoRoot, "switcher/assets/OneOSBootStatus.dex"),
     "oneos_boot_icon.png" to File(repoRoot, "switcher/assets/oneos_boot_icon.png"),

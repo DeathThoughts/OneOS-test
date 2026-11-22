@@ -579,6 +579,10 @@ FULLLOGS_STATE="$STAGE/data/oneos_bootui/full_logs"
 # (guest_props.sh) and answers in /data/oneos_bootui/anim_level.
 GUEST_ANIM_REQ="$STAGE/data/user/0/com.fahadali.oneos.guest/files/oneos_anim_level"
 ANIM_STATE="$STAGE/data/oneos_bootui/anim_level"
+GUEST_SCHED_REQ="$STAGE/data/user/0/com.fahadali.oneos.guest/files/oneos_scheduler_trial"
+SCHED_SCRIPT="$STAGE/pyb110-scheduler-trial.sh"
+SCHED_DIR="$STAGE/data/oneos_bootui"
+SCHED_TOKEN=''
 rm -f "$GUEST_RETURN_REQ" "$GUEST_RESTART_REQ" "$GUEST_FULLLOGS_REQ" "$GUEST_ANIM_REQ"
 # An earlier session's mark (it would make this session's report look like full logs were on).
 rm -f "$STAGE/full_logs_mid.log"
@@ -1800,6 +1804,30 @@ if [ "${ONEOS_PREPARE_ONLY:-0}" = "1" ]; then
     /system/bin/sh "$STAGE/return_to_oneui.sh"
     /system/bin/sh "$STAGE/check_host_apex.sh" after-return
     exit 0
+fi
+
+# Each debug PYB110 session gets a new request token. A request left behind
+# by an earlier session cannot start a trial. Clear stale status on every boot.
+if (
+    cd -P "$SCHED_DIR" && [ "$PWD" = "$SCHED_DIR" ] && root_only . &&
+        rm -f ./scheduler_trial
+) 2>/dev/null && [ "$APP" = 1 ] && [ "${ONEOS_PYB110_SCHEDULER_TRIAL:-0}" = 1 ] &&
+   [ "$(getprop ro.product.model)" = SM-S911B ] &&
+   grep -qx '  "image": "coloros17-pyb110",' "$STAGE/.oneos_stage" &&
+   [ -f "$SCHED_SCRIPT" ] && [ ! -L "$SCHED_SCRIPT" ] && root_only "$SCHED_SCRIPT" &&
+   awk '$2 == "pyb110-scheduler-trial.sh" { found = 1 } END { exit !found }' "$SUMS"; then
+    SCHED_TOKEN=$(cat /proc/sys/kernel/random/uuid 2>/dev/null)
+    case "$SCHED_TOKEN" in ''|*[!0-9a-f-]*) SCHED_TOKEN='' ;; esac
+    if [ -n "$SCHED_TOKEN" ] && ! (
+        cd -P "$SCHED_DIR" && [ "$PWD" = "$SCHED_DIR" ] && root_only . || exit 1
+        pending=$(mktemp .scheduler.XXXXXX) || exit 1
+        printf '%s idle\n' "$SCHED_TOKEN" > "$pending" && chmod 644 "$pending" &&
+            "$BB" mv -Tf "$pending" ./scheduler_trial && exit 0
+        rm -f "$pending"
+        exit 1
+    ); then
+        SCHED_TOKEN=''
+    fi
 fi
 
 # OneOS: keep the network usable while the guest boots. With One UI's
@@ -5127,6 +5155,78 @@ if [ "$RETURN_MAX" -gt 0 ]; then
         echo -1000 > /proc/\$\$/oom_score_adj 2>/dev/null
         t=0; total=0; dead=0; sfgone=0; prev_failed=0; homebase=0; wmbase=0; wmseen=0; sui=0
         trial_gen=''
+        sched_pid=''
+        sched_target=''
+        sched_running=0
+        sched_output=$STAGE/tmp/scheduler-$SCHED_TOKEN.log
+        scheduler_status() (
+            cd -P $SCHED_DIR && [ \"\$PWD\" = $SCHED_DIR ] || exit 1
+            case \"\$(stat -c '%u %A' . 2>/dev/null)\" in
+                \"0 \"?????w*|\"0 \"????????w*) exit 1 ;;
+                \"0 \"*) ;;
+                *) exit 1 ;;
+            esac
+            [ -f ./scheduler_trial ] && [ ! -L ./scheduler_trial ] || exit 1
+            read -r token rest < ./scheduler_trial || exit 1
+            [ \"\$token\" = $SCHED_TOKEN ] || exit 1
+            pending=\$(mktemp .scheduler.XXXXXX) || exit 1
+            printf '%s %s %s\n' $SCHED_TOKEN \"\$1\" \"\$sched_target\" > \"\$pending\" &&
+                chmod 644 \"\$pending\" && $BB mv -Tf \"\$pending\" ./scheduler_trial && exit 0
+            rm -f \"\$pending\"
+            exit 1
+        )
+        scheduler_tick() {
+            if [ -n \"\$sched_pid\" ]; then
+                if kill -0 \"\$sched_pid\" 2>/dev/null; then
+                    if [ \"\$sched_running\" = 0 ] && grep -q '^Trial active for ' \"\$sched_output\"; then
+                        scheduler_status running
+                        sched_running=1
+                    fi
+                    return
+                fi
+                if wait \"\$sched_pid\"; then
+                    scheduler_status restored
+                else
+                    scheduler_status failed
+                fi
+                cat \"\$sched_output\"
+                rm -f \"\$sched_output\"
+                sched_pid=''
+            fi
+            [ -f $GUEST_SCHED_REQ ] && [ ! -L $GUEST_SCHED_REQ ] || return
+            [ -d $STAGE/tmp ] && [ ! -L $STAGE/tmp ] || return
+            claim=\$(mktemp $STAGE/tmp/scheduler-request.XXXXXX) || return
+            # Pin the physical app directory, and claim the leaf before reading
+            # it. A symlink swapped in during the rename is rejected after it.
+            if (
+                cd -P ${GUEST_SCHED_REQ%/*} && [ \"\$PWD\" = ${GUEST_SCHED_REQ%/*} ] &&
+                    timeout 2 $BB mv -Tf ./oneos_scheduler_trial \"\$claim\"
+            ) && [ -f \"\$claim\" ] && [ ! -L \"\$claim\" ]; then
+                request_size=\$(stat -c %s \"\$claim\" 2>/dev/null)
+                case \"\$request_size\" in
+                    [1-9]|[1-7][0-9]|80) request=\$(timeout 2 head -c 80 \"\$claim\") ;;
+                    *) request=''; request_size=0 ;;
+                esac
+            else
+                request=''
+                request_size=0
+            fi
+            rm -f \"\$claim\"
+            [ \"\$request_size\" -eq \"\${#request}\" ] || return
+            case \"\$request\" in
+                \"$SCHED_TOKEN render\") sched_target=render ;;
+                \"$SCHED_TOKEN main\") sched_target=main ;;
+                \"$SCHED_TOKEN unirender-engine\") sched_target=unirender-engine ;;
+                \"$SCHED_TOKEN launcher-worker0\") sched_target=launcher-worker0 ;;
+                \"$SCHED_TOKEN launcher-worker1\") sched_target=launcher-worker1 ;;
+                \"$SCHED_TOKEN launcher-main\") sched_target=launcher-main ;;
+                *) return ;;
+            esac
+            scheduler_status starting || return
+            /system/bin/sh $SCHED_SCRIPT --run 60 \"\$sched_target\" </dev/null > \"\$sched_output\" 2>&1 &
+            sched_pid=\$!
+            sched_running=0
+        }
         restart_guest() {
             kind=base
             if [ -f $STAGE/tmp/guest-patch-session/scope ]; then
@@ -5225,7 +5325,8 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     fi
                     if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && [ -d $STAGE/data/oneos_bootui ]; then echo 1 > $FULLLOGS_STATE && chmod 644 $FULLLOGS_STATE; fi
                 fi
-                if [ -f $GUEST_ANIM_REQ ] && [ ! -L $GUEST_ANIM_REQ ]; then
+                if [ -n '$SCHED_TOKEN' ]; then scheduler_tick; fi
+                if [ -z \"\$sched_pid\" ] && [ -f $GUEST_ANIM_REQ ] && [ ! -L $GUEST_ANIM_REQ ]; then
                     al=\$(timeout 2 head -c 4 $GUEST_ANIM_REQ 2>/dev/null | tr -dc 0-9)
                     rm -f $GUEST_ANIM_REQ
                     case \"\$al\" in

@@ -25,14 +25,15 @@
 #   env <bytes>                       stdin: session.env
 #   finish <profile> <image> <set> <versionCode>
 #   launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub>
-#          [verboseBoot [fullLogs [patchAuto [guestVulkan [shareFiles]]]]]
+#          [verboseBoot [fullLogs [batMinPercent [batMaxTenthsC [patchAuto [guestVulkan [shareFiles [schedulerTrials]]]]]]]]
 #                                     (0|1 each; defaults 0, 1, 0, 0 and 0: fullLogs
 #                                     is ONEOS_FULL_LOGS, the session's whole logcat
 #                                     capture; patchAuto is ONEOS_PATCH_AUTO, the
 #                                     signed guest_start.sh downloads; guestVulkan
 #                                     is ONEOS_GUEST_VULKAN for the S23 experiment;
 #                                     shareFiles is ONEOS_SHARE_FILES, One UI's
-#                                     DCIM, Pictures... shown in the guest)
+#                                     DCIM, Pictures... shown in the guest;
+#                                     schedulerTrials enables the debug PYB110 A/B control)
 #                                     secIms 0|1: this launch's
 #                                     ONEOS_GUEST_SEC_IMS (this phone's
 #                                     Samsung IMS app in the guest)
@@ -184,7 +185,7 @@ INSTALLD_OK_36="a7c17883707d9b0b85e3f75f6d83cb4522ba1d120026d29308b69da968945977
 INSTALLD_SHA_95=86a30991dbd5d91aeda1726ec860b12a2d057dd7b9ca3872f32376478078a23c
 RUNTIME_CODES="# installd and IOemNetd codes read on the phone at runtime (OneOSInstalldCodes, OneOSOemNetdCodes): One UI 9.0 and 9.5 phones"
 # Session scripts from switcher/assets plus the expected installd table.
-SCRIPTS="guest_runtime.sh guest_root guest_zygiskd guest_zygisk_ptrace guest_zygisk.so guest_vector.bundle guest_manager.apk oneos_switch.sh boot_status.sh OneOSBootStatus.dex oneos_boot_icon.png guest_prepare.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh check_host_apex.sh bridges.sh fold8_coloros.sh OneOSFold8Geometry.dex fold8_pixel.sh guest_google.sh zygote_exec OneOSEdmStub.dex oneos_btaudio oneos_essential_key OneOSOverlayDimen.dex host_installd.txt"
+SCRIPTS="guest_runtime.sh guest_root guest_zygiskd guest_zygisk_ptrace guest_zygisk.so guest_vector.bundle guest_manager.apk oneos_switch.sh pyb110-scheduler-trial.sh boot_status.sh OneOSBootStatus.dex oneos_boot_icon.png guest_prepare.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh check_host_apex.sh bridges.sh fold8_coloros.sh OneOSFold8Geometry.dex fold8_pixel.sh guest_google.sh zygote_exec OneOSEdmStub.dex oneos_btaudio oneos_essential_key OneOSOverlayDimen.dex host_installd.txt"
 SET_COMMON="services_patched.jar oplus-services_patched.jar vold_patched service.incremental_patched.so OneOSGuest.apk ims-ext-common_patched.jar oplus-telephony-common_patched.jar surfaceflinger_patched guards.txt art_payload.img i18n_payload.img runtime_payload.img sdkext_payload.img crashrecovery_payload.img extservices_payload.img permission_payload.img wifi_payload.img appsearch_payload.img mediaprovider_payload.img adservices_payload.img rkpd_payload.img healthfitness_payload.img ondevicepersonalization_payload.img configinfrastructure_payload.img"
 # The Pixel sets (the Fold's 0.3.7, the S26 Ultra's 0.4.10, the Pixel 9 Pro XL's 0.4.22): services.jar with the guest vold as gvld, the signal
 # poll, Pixel's status bar RRO, the in-guest OneOS app and its own payloads.
@@ -1502,8 +1503,8 @@ switch_verdict() {
 }
 
 do_launch() {
-    [ $# -ge 7 ] && [ $# -le 14 ] || usage "launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub> [verboseBoot [fullLogs [batMinPercent [batMaxTenthsC [patchAuto [guestVulkan [shareFiles]]]]]]]"
-    mode=$1 code=$2 sid=$3 gms=$4 heat=$5 secims=$6 edmstub=$7 verbose=${8:-0} fulllogs=${9:-1} batmin=${10:-30} batmaxt=${11:-420} patchauto=${12:-0} guestvulkan=${13:-0} sharefiles=${14:-0}
+    [ $# -ge 7 ] && [ $# -le 15 ] || usage "launch <session|dry> <versionCode> <sessionId> <hideGms> <heatCap> <secIms> <edmStub> [verboseBoot [fullLogs [batMinPercent [batMaxTenthsC [patchAuto [guestVulkan [shareFiles [schedulerTrials]]]]]]]]"
+    mode=$1 code=$2 sid=$3 gms=$4 heat=$5 secims=$6 edmstub=$7 verbose=${8:-0} fulllogs=${9:-1} batmin=${10:-30} batmaxt=${11:-420} patchauto=${12:-0} guestvulkan=${13:-0} sharefiles=${14:-0} schedulertrials=${15:-0}
     case "$mode" in session|dry) ;; *) usage "launch mode $mode" ;; esac
     is_dec "$code" || usage "launch versionCode $code"
     case "$sid" in *[!0-9a-f]*|'') usage "launch session id" ;; esac
@@ -1520,6 +1521,7 @@ do_launch() {
     case "$patchauto" in 0|1) ;; *) usage "launch patchAuto $patchauto" ;; esac
     case "$guestvulkan" in 0|1) ;; *) usage "launch guestVulkan $guestvulkan" ;; esac
     case "$sharefiles" in 0|1) ;; *) usage "launch shareFiles $sharefiles" ;; esac
+    case "$schedulertrials" in 0|1) ;; *) usage "launch schedulerTrials $schedulertrials" ;; esac
     [ -n "$T" ] || [ "$(id -u)" = 0 ] || refuse "not root"
     step "checks"
     [ ! -e "$STAGE/.oneos_update" ] || refuse "the installed system update did not finish: retry the update"
@@ -1539,6 +1541,9 @@ do_launch() {
     set -- $pinfo
     form=$4
     model=$(getprop ro.product.model)
+    if [ "$schedulertrials" = 1 ] && [ "$mode:$M_PROFILE:$M_IMAGE:$model" != session:s-8550:coloros17-pyb110:SM-S911B ]; then
+        refuse "scheduler trials require a PYB110 session on SM-S911B"
+    fi
     case "$model" in "$1"*) ;; *) refuse "this phone ($model) is not a $1" ;; esac
     [ "$(getprop ro.product.device)" = "$2" ] || refuse "codename $(getprop ro.product.device), profile $M_PROFILE is $2"
     [ "$(getprop ro.soc.model)" = "$3" ] || refuse "chip $(getprop ro.soc.model), profile $M_PROFILE is $3"
@@ -1629,7 +1634,7 @@ do_launch() {
     for v in $(env | sed -n 's/^\(ONEOS_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
     [ "$mode" = dry ] && export ONEOS_PREPARE_ONLY=1
     "$BB" nsenter -t 1 -m -- "$BB" setsid /system/bin/sh -c \
-        'set -a; . "$1/session.env"; set +a; export ONEOS_PATCH_AUTO="$2" ONEOS_GUEST_VULKAN="$3"; exec /system/bin/sh "$1/oneos_switch.sh"' oneos-session "$STAGE" "$patchauto" "$guestvulkan" \
+        'set -a; . "$1/session.env"; set +a; export ONEOS_PATCH_AUTO="$2" ONEOS_GUEST_VULKAN="$3" ONEOS_PYB110_SCHEDULER_TRIAL="$4"; exec /system/bin/sh "$1/oneos_switch.sh"' oneos-session "$STAGE" "$patchauto" "$guestvulkan" "$schedulertrials" \
         </dev/null >>"$STAGE/takeover_app.log" 2>&1 &
     # The switch checks once more by itself before it changes anything and can
     # still refuse there, with its reason only in takeover_app.log. Up to 0.4.95
