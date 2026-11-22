@@ -280,7 +280,14 @@ jobs:
 
 
   publish:
-    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'release' && inputs.publish
+    # Also when only the debug leg failed: the app's release channel reads update-release.json from
+    # the latest (non-prerelease) release only, and the debug channel reads the oneos-debug release,
+    # which publish-debug-updates writes from the debug branch. A debug branch that does not contain
+    # this release yet (its leg fails "Check debug branch is based on this release") therefore no
+    # longer holds back a release publish (owner, 11-22: publish 0.5.34 in release, not debug).
+    # The release APKs stay required: the step below fails without them.
+    if: >-
+      !cancelled() && github.event_name == 'workflow_dispatch' && github.ref_name == 'release' && inputs.publish
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -300,15 +307,24 @@ jobs:
         run: |
           set -eu
           tag="oneos-build-$BUILD_ID"
-          for variant in debug release; do
+          notes='Release is for normal use (30% battery or charging, below 42 °C). Debug is for testing (5% battery or charging, below 50 °C).'
+          for variant in release debug; do
             if [ ! -s "dist/update-$variant.json" ] || [ ! -s "dist/guest-update-$variant.json" ]; then
+              if [ "$variant" = debug ]; then
+                # The debug leg failed (usually: the debug branch does not contain this release yet).
+                # Publish the release APKs alone; nothing of the debug leg goes on the page.
+                echo "::warning::No debug APKs from this run; publishing the release APKs only."
+                rm -f dist/*-debug.apk dist/*-debug.apk.sha256 dist/*update-debug.json
+                notes='Release is for normal use (30% battery or charging, below 42 °C). This build has no debug APK.'
+                continue
+              fi
               echo "::error::Missing verified $variant update metadata. Check the APK signing secrets."
               exit 1
             fi
             (cd dist && sha256sum -c "OneOS-$variant.apk.sha256" && sha256sum -c "OneOSGuest-$variant.apk.sha256")
           done
           gh release create "$tag" --target "$RELEASE_SHA" --title "OneOS build $BUILD_ID" \
-            --notes 'Release is for normal use (30% battery or charging, below 42 °C). Debug is for testing (5% battery or charging, below 50 °C).' \
+            --notes "$notes" \
             dist/*.apk dist/*.sha256 dist/*update-*.json
 
   publish-debug-updates:
