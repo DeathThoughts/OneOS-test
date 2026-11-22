@@ -2,7 +2,7 @@ name: Build OnePlus 16 ColorOS debug APK
 
 on:
   push:
-    branches: [port/coloros17-pyb110-apk]
+    branches: [port/coloros17-pyb110-apk, review/pyb110-scheduler-apk]
 
 permissions:
   actions: read
@@ -87,7 +87,10 @@ jobs:
     permissions:
       contents: read
       packages: read
-    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/port/coloros17-pyb110-apk'
+    if: >-
+      !cancelled() && github.repository == 'DeathThoughts/OneOS-test' &&
+      ((github.ref_name == 'port/coloros17-pyb110-apk' && needs.publish-payloads.result == 'success' && needs.verify-image.result == 'success') ||
+       (github.ref_name == 'review/pyb110-scheduler-apk' && needs.publish-payloads.result == 'skipped' && needs.verify-image.result == 'skipped'))
     environment: debug-build
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -127,6 +130,10 @@ jobs:
         run: |
           set -eu
           if [ -z "${DEBUG_KEYSTORE_B64:-}" ]; then
+            if [ "$GITHUB_REF_NAME" = review/pyb110-scheduler-apk ]; then
+              echo "::error::The scheduler review APK needs the existing debug signing key for an in-place update."
+              exit 1
+            fi
             msg="DEBUG_KEYSTORE_B64 not set: this APK is signed with a one-off key and cannot be installed over an earlier build"
             echo "::warning::$msg"
             echo "> $msg" >> "$GITHUB_STEP_SUMMARY"
@@ -170,6 +177,10 @@ jobs:
           GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: sh scripts/build-guest-manager.sh debug
+
+      - name: Test scheduler trials
+        if: github.ref_name == 'review/pyb110-scheduler-apk'
+        run: python3 scripts/test-pyb110-scheduler-trial.py
 
       - name: Test OnePlus 16 staging and build host APK
         working-directory: app-android
@@ -269,6 +280,9 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           name=OneOS-0.5.32-OnePlus16-S23-gzip-debug.apk
+          if [ "$GITHUB_REF_NAME" = review/pyb110-scheduler-apk ]; then
+            name=OneOS-0.5.32-PYB110-Scheduler-Trials-debug.apk
+          fi
           apk=dist/$name
           cp app-android/app/build/outputs/apk/full/debug/app-full-debug.apk "$apk"
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
@@ -296,7 +310,7 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: oneos-pyb110-s23-debug
+          name: ${{ github.ref_name == 'review/pyb110-scheduler-apk' && 'oneos-pyb110-scheduler-trials-debug' || 'oneos-pyb110-s23-debug' }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
