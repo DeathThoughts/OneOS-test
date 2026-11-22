@@ -42,7 +42,13 @@ case "$target" in
         thread_label='SurfaceFlinger UniRenderEngine'
         BASELINE_NICE=-10
         TRIAL_NICE=-12 ;;
-    *) fail 'target must be render, main or unirender-engine' ;;
+    launcher-worker0|launcher-worker1)
+        process_name=com.android.launcher
+        thread_name=hwuiTask${target#launcher-worker}
+        thread_label="launcher $thread_name"
+        BASELINE_NICE=-2
+        TRIAL_NICE=-4 ;;
+    *) fail 'target must be render, main, unirender-engine, launcher-worker0 or launcher-worker1' ;;
 esac
 
 [ "$(id -u)" = 0 ] || fail 'run as root'

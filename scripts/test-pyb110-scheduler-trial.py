@@ -247,6 +247,40 @@ mv "$TASK/stat.next" "$TASK/stat"
         self.assertIn('thread changed or disappeared', result.stderr)
         self.assertEqual(self.log.read_text().splitlines(), ['-2 201'])
 
+    def configure_launcher(self):
+        (self.guest / 'cmdline').write_bytes(b'com.android.launcher\0')
+        workers = []
+        for index in (0, 1):
+            tid = 202 + index
+            worker = self.create_thread(tid, -2, 421 + index)
+            (worker / 'comm').write_text(f'hwuiTask{index}\n')
+            workers.append(worker)
+        return workers
+
+    def test_launcher_trials_select_one_named_worker(self):
+        workers = self.configure_launcher()
+        for index, worker in enumerate(workers):
+            with self.subTest(index=index):
+                self.env['TASK'] = str(worker)
+                result = self.run_trial('--run', '1', f'launcher-worker{index}')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'launcher hwuiTask{index} PID=200 TID={worker.name}', result.stdout)
+                self.assertEqual(self.log.read_text().splitlines(), [f'-2 {worker.name}', f'2 {worker.name}'])
+                self.assertEqual((workers[1 - index] / 'stat').read_text().split()[18], '-2')
+                self.assertEqual((self.task / 'stat').read_text().split()[18], '-4')
+                self.log.unlink()
+
+    def test_launcher_trial_requires_the_exact_package(self):
+        self.configure_launcher()
+        (self.guest / 'cmdline').write_bytes(b'com.android.launcher:tools\0')
+        self.assert_refused('no com.android.launcher', '--run', '1', 'launcher-worker0')
+
+    def test_launcher_trial_refuses_duplicate_matching_workers(self):
+        self.configure_launcher()
+        duplicate = self.create_thread(205, -2, 424)
+        (duplicate / 'comm').write_text('hwuiTask0\n')
+        self.assert_refused('more than one launcher hwuiTask0', '--run', '1', 'launcher-worker0')
+
     def test_does_not_overwrite_a_later_policy_change(self):
         self.stub('sleep', """awk '{$19 = -8; print}' "$TASK/stat" > "$TASK/stat.next"
 mv "$TASK/stat.next" "$TASK/stat"
