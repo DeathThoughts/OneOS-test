@@ -1,12 +1,13 @@
 #!/system/bin/sh
-# Manual A/B for ColorOS 17 PYB110 on SM-S911B. Run as root in init's mount
-# namespace while the guest is active. Keep both arms at animation level 1.
+# Manual A/B for ColorOS 17 PYB110 on SM-S911B. Run as root in the live guest
+# or from the verified host session. Keep both arms at animation level 1.
 # Return to One UI normally if the trial is interrupted by SIGKILL. Returning
 # ends the guest task, and the change was only to that task's nice value.
 PATH=/system/bin
 export PATH
 
 STAGE=/data/local/tmp/oneos
+PYB110_SYSTEM_EXT_SHA=615b41e1ada996ed8f042c54d8b3bfb4ab0119fb5b44ce5015f5ad9c62e6f16e
 process_name=com.android.systemui
 executable=
 TRIAL_NICE=-10
@@ -58,28 +59,58 @@ case "$target" in
 esac
 
 [ "$(id -u)" = 0 ] || fail 'run as root'
-host_ns=$(readlink /proc/1/ns/mnt) || fail 'cannot read init mount namespace'
-[ -n "$host_ns" ] && [ "$(readlink /proc/self/ns/mnt)" = "$host_ns" ] ||
-    fail "run in init's mount namespace"
+self_ns=$(readlink /proc/self/ns/mnt) || fail 'cannot read current mount namespace'
+[ -n "$self_ns" ] || fail 'empty current mount namespace'
+host_ns=$(readlink /proc/1/ns/mnt 2>/dev/null) || host_ns=
 [ "$(getprop ro.product.model)" = SM-S911B ] ||
     fail 'this trial targets the SM-S911B'
 
-[ -d "$STAGE" ] && [ ! -L "$STAGE" ] && [ "$(stat -c %u "$STAGE")" = 0 ] ||
-    fail 'missing root-owned OneOS stage'
-marker=$STAGE/.oneos_stage
-record=$STAGE/guest_mntns
-[ -f "$marker" ] && [ ! -L "$marker" ] &&
-    grep -qx '  "image": "coloros17-pyb110",' "$marker" ||
-    fail 'PYB110 is not staged'
-[ -f "$record" ] && [ ! -L "$record" ] || fail 'missing active guest namespace'
-guest_ns=$(cat "$record") || fail 'cannot read active guest namespace'
-case "$guest_ns" in
-    'mnt:['[0-9]*']') ;;
-    *) fail 'invalid active guest namespace' ;;
-esac
-[ "$guest_ns" != "$host_ns" ] || fail 'guest namespace matches the host'
-guest_root=$(stat -Lc '%d:%i' "$STAGE/rootfs") || fail 'cannot read staged guest root'
-[ -n "$guest_root" ] || fail 'empty staged guest root identity'
+guest_marker_valid() {
+    [ -d /data/oneos_bootui ] && [ ! -L /data/oneos_bootui ] &&
+        [ -f "$marker" ] && [ ! -L "$marker" ] &&
+        [ "$(stat -c %u "$marker" 2>/dev/null)" = 0 ]
+}
+
+if [ "$self_ns" = "$host_ns" ]; then
+    [ -d "$STAGE" ] && [ ! -L "$STAGE" ] && [ "$(stat -c %u "$STAGE")" = 0 ] ||
+        fail 'missing root-owned OneOS stage'
+    marker=$STAGE/.oneos_stage
+    record=$STAGE/guest_mntns
+    [ -f "$marker" ] && [ ! -L "$marker" ] &&
+        grep -qx '  "image": "coloros17-pyb110",' "$marker" ||
+        fail 'PYB110 is not staged'
+    [ -f "$record" ] && [ ! -L "$record" ] || fail 'missing active guest namespace'
+    guest_ns=$(cat "$record") || fail 'cannot read active guest namespace'
+    case "$guest_ns" in
+        'mnt:['[0-9]*']') ;;
+        *) fail 'invalid active guest namespace' ;;
+    esac
+    [ "$guest_ns" != "$host_ns" ] || fail 'guest namespace matches the host'
+    root_path=$STAGE/rootfs
+else
+    # Guest root can authenticate its own image and control file even when
+    # init's namespace link is unreadable from this context.
+    record=
+    marker=/data/oneos_bootui/anim_level
+    guest_marker_valid || fail 'missing root-owned OneOS guest animation marker'
+    marker_size=$(stat -c %s "$marker" 2>/dev/null) || fail 'cannot read guest animation marker'
+    case "$marker_size" in 1|2) ;; *) fail 'invalid OneOS guest animation marker' ;; esac
+    case "$(head -c 2 "$marker")" in 1|2|3|4) ;; *) fail 'invalid OneOS guest animation marker' ;; esac
+    digest=$(sha256sum /system_ext/etc/build.prop 2>/dev/null) || fail 'cannot read PYB110 image fingerprint'
+    [ "${digest%% *}" = "$PYB110_SYSTEM_EXT_SHA" ] || fail 'unexpected PYB110 image fingerprint'
+    root_path=/
+fi
+guest_root=$(stat -Lc '%d:%i' "$root_path") || fail 'cannot read guest root'
+[ -n "$guest_root" ] || fail 'empty guest root identity'
+
+same_guest_session() {
+    [ "$(stat -Lc '%d:%i' "$root_path" 2>/dev/null)" = "$guest_root" ] || return 1
+    if [ -n "$record" ]; then
+        [ -f "$record" ] && [ ! -L "$record" ] && [ "$(cat "$record" 2>/dev/null)" = "$guest_ns" ]
+    else
+        [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" = "$self_ns" ] && guest_marker_valid
+    fi
+}
 
 guest_process_namespace() {
     ns=$(readlink "$1/ns/mnt" 2>/dev/null) || return 1
@@ -150,9 +181,7 @@ same_target_thread() {
 }
 
 current_info() {
-    [ -f "$record" ] && [ ! -L "$record" ] &&
-        [ "$(cat "$record" 2>/dev/null)" = "$guest_ns" ] &&
-        [ "$(stat -Lc '%d:%i' "$STAGE/rootfs" 2>/dev/null)" = "$guest_root" ] &&
+    same_guest_session &&
         [ "$(guest_process_namespace "$process")" = "$process_ns" ] &&
         [ "$(readlink "$task/ns/mnt" 2>/dev/null)" = "$process_ns" ] &&
         same_target_thread || return 1

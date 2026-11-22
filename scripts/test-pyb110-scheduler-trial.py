@@ -20,6 +20,12 @@ class SchedulerTrialTest(unittest.TestCase):
         self.stage.mkdir()
         self.guest_root = self.stage / 'rootfs'
         self.guest_root.mkdir()
+        self.guest_bootui = self.guest_root / 'data/oneos_bootui'
+        self.guest_bootui.mkdir(parents=True)
+        self.guest_marker = self.guest_bootui / 'anim_level'
+        self.build_prop = self.guest_root / 'system_ext/etc/build.prop'
+        self.build_prop.parent.mkdir(parents=True)
+        self.build_prop.touch()
         self.host_root = self.root / 'host'
         self.host_root.mkdir()
         self.marker = self.stage / '.oneos_stage'
@@ -28,7 +34,16 @@ class SchedulerTrialTest(unittest.TestCase):
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.stub('id', 'echo 0')
-        self.stub('stat', 'if [ "$1:$2" = -c:%u ]; then echo 0; else exec /usr/bin/stat "$@"; fi')
+        self.stub('stat', '''if [ "$1:$2" = -c:%u ]; then
+    echo 0
+elif [ "$3" = / ]; then
+    exec /usr/bin/stat "$1" "$2" "$GUEST_ROOT"
+else
+    exec /usr/bin/stat "$@"
+fi''')
+        self.stub('sha256sum', '''[ "$1" = "$BUILD_PROP" ] || exit 42
+printf '%s  %s\n' "$SYSTEM_EXT_SHA" "$1"
+''')
         self.level = self.root / 'anim_level'
         self.level.write_text('1\n')
         self.stub('getprop', '''case "$1" in
@@ -56,11 +71,15 @@ mv "$TASK/stat.next" "$TASK/stat"
             SOURCE.replace('PATH=/system/bin', 'PATH=' + shlex.quote(f'{self.bin}:/usr/bin:/bin'))
             .replace('/system/bin/toybox ', shlex.quote(str(self.bin / 'toybox')) + ' ')
             .replace('/data/local/tmp/oneos', str(self.stage))
+            .replace('/data/oneos_bootui', str(self.guest_bootui))
+            .replace('/system_ext/etc/build.prop', str(self.build_prop))
             .replace('/proc/', f'{self.proc}/')
         )
         self.env = {
             **os.environ, 'LOG': str(self.log), 'TASK': str(self.task),
             'LEVEL': str(self.level), 'HOST_ROOT': str(self.host_root), 'GUEST_ROOT': str(self.guest_root),
+            'BUILD_PROP': str(self.build_prop),
+            'SYSTEM_EXT_SHA': '615b41e1ada996ed8f042c54d8b3bfb4ab0119fb5b44ce5015f5ad9c62e6f16e',
         }
 
     def stub(self, name, source):
@@ -120,9 +139,53 @@ mv "$TASK/stat.next" "$TASK/stat"
         self.assertEqual((self.task / 'stat').read_text().split()[18], '-4')
         self.assertIn('Restored', result.stdout)
 
-    def test_refuses_non_init_namespace(self):
+    def test_refuses_non_init_namespace_without_guest_marker(self):
         self.ns(self.proc / 'self', 20)
-        self.assert_refused("init's mount namespace", '--run', '1')
+        self.assert_refused('missing root-owned OneOS guest animation marker', '--run', '1')
+
+    def configure_guest_root(self):
+        self.ns(self.proc / 'self', 20)
+        self.guest_marker.write_text('1\n')
+        self.marker.unlink()
+        (self.stage / 'guest_mntns').unlink()
+
+    def test_guest_root_does_not_need_the_host_stage(self):
+        self.configure_guest_root()
+        result = self.run_trial('--run', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log.read_text().splitlines(), ['-6 201', '6 201'])
+
+    def test_guest_root_works_with_unreadable_init_namespace(self):
+        self.configure_guest_root()
+        (self.proc / '1/ns/mnt').unlink()
+        result = self.run_trial('--check')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_guest_root_rejects_a_mismatched_image(self):
+        self.configure_guest_root()
+        self.env['SYSTEM_EXT_SHA'] = '0' * 64
+        self.assert_refused('unexpected PYB110 image fingerprint', '--run', '1')
+
+    def test_guest_root_rejects_a_linked_marker(self):
+        self.configure_guest_root()
+        self.guest_marker.unlink()
+        self.guest_marker.symlink_to(self.level)
+        self.assert_refused('missing root-owned OneOS guest animation marker', '--run', '1')
+
+    def test_guest_root_rejects_host_namespace_and_root(self):
+        self.configure_guest_root()
+        self.ns(self.guest, 10)
+        self.assert_refused('no com.android.systemui', '--run', '1')
+        self.ns(self.guest, 30)
+        (self.guest / 'root').unlink()
+        (self.guest / 'root').symlink_to(self.host_root)
+        self.assert_refused('no com.android.systemui', '--run', '1')
+
+    def test_guest_root_requires_live_full_effects_to_write(self):
+        self.configure_guest_root()
+        self.level.write_text('3\n')
+        self.assert_refused('activate ColorOS animation level 1', '--run', '1')
 
     def test_refuses_mismatched_guest_namespace(self):
         self.ns(self.task, 10)
