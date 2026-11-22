@@ -207,6 +207,46 @@ mv "$TASK/stat.next" "$TASK/stat"
     def test_refuses_multiple_modes(self):
         self.assert_refused('usage:', '--run', '1', 'main', 'render')
 
+    def configure_surfaceflinger(self):
+        for process, root in ((self.host, self.host_root), (self.guest, self.guest_root)):
+            (process / 'cmdline').write_bytes(b'/system/bin/surfaceflinger\0')
+            executable = root / 'system/bin/surfaceflinger'
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            (process / 'exe').symlink_to(executable)
+        (self.task / 'comm').write_text('UniRenderEngine\n')
+        self.statfile(self.task, 201, -10, 420, comm='UniRenderEngine')
+
+    def test_unirender_trial_changes_only_the_engine(self):
+        self.configure_surfaceflinger()
+        worker = self.create_thread(202, 0, 421, policy=1)
+        (worker / 'comm').write_text('UniRenderThread\n')
+        result = self.run_trial('--run', '1', 'unirender-engine')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('SurfaceFlinger UniRenderEngine PID=200 TID=201', result.stdout)
+        self.assertEqual(self.log.read_text().splitlines(), ['-2 201', '2 201'])
+        self.assertEqual((worker / 'stat').read_text().split()[18], '0')
+
+    def test_refuses_surfaceflinger_running_the_wrong_executable(self):
+        self.configure_surfaceflinger()
+        (self.guest / 'exe').unlink()
+        (self.guest / 'exe').symlink_to(self.host_root / 'system/bin/surfaceflinger')
+        self.assert_refused('no surfaceflinger', '--run', '1', 'unirender-engine')
+
+    def test_refuses_surfaceflinger_with_unexpected_argument(self):
+        self.configure_surfaceflinger()
+        (self.guest / 'cmdline').write_bytes(b'/system/bin/surfaceflinger\0--other\0')
+        self.assert_refused('no surfaceflinger', '--run', '1', 'unirender-engine')
+
+    def test_unirender_cleanup_checks_the_current_executable(self):
+        self.configure_surfaceflinger()
+        self.env['GUEST_EXE_LINK'] = str(self.guest / 'exe')
+        self.stub('sleep', 'rm "$GUEST_EXE_LINK" && ln -s "$HOST_ROOT/system/bin/surfaceflinger" "$GUEST_EXE_LINK"')
+        result = self.run_trial('--run', '1', 'unirender-engine')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('thread changed or disappeared', result.stderr)
+        self.assertEqual(self.log.read_text().splitlines(), ['-2 201'])
+
     def test_does_not_overwrite_a_later_policy_change(self):
         self.stub('sleep', """awk '{$19 = -8; print}' "$TASK/stat" > "$TASK/stat.next"
 mv "$TASK/stat.next" "$TASK/stat"
