@@ -8,7 +8,6 @@ export PATH
 
 STAGE=/data/local/tmp/oneos
 PACKAGE=com.android.systemui
-BASELINE_NICE=-4
 TRIAL_NICE=-10
 
 fail() {
@@ -17,13 +16,25 @@ fail() {
 }
 
 case "$#:$1" in
-    1:--check) ;;
-    2:--run)
+    1:--check|2:--check) target=${2-render} ;;
+    2:--run|3:--run)
         case "$2" in
             [1-9]|[1-9][0-9]|1[01][0-9]|120) duration=$2 ;;
             *) fail 'duration must be 1 through 120 seconds' ;;
-        esac ;;
-    *) fail 'usage: pyb110-scheduler-trial.sh --check | --run SECONDS' ;;
+        esac
+        target=${3-render} ;;
+    *) fail 'usage: pyb110-scheduler-trial.sh --check [render|main] | --run SECONDS [render|main]' ;;
+esac
+case "$target" in
+    render)
+        thread_name=RenderThread
+        thread_label='SystemUI RenderThread'
+        BASELINE_NICE=-4 ;;
+    main)
+        thread_name=
+        thread_label='SystemUI main thread'
+        BASELINE_NICE=0 ;;
+    *) fail 'target must be render or main' ;;
 esac
 
 [ "$(id -u)" = 0 ] || fail 'run as root'
@@ -87,19 +98,29 @@ pid=${process##*/}
 process_info=$(task_info "$process" "$pid") || fail 'cannot identify SystemUI'
 process_start=${process_info%%:*}
 
-task=
-for candidate in "$process"/task/*; do
-    [ -r "$candidate/comm" ] || continue
-    [ "$(cat "$candidate/comm" 2>/dev/null)" = RenderThread ] || continue
-    [ -z "$task" ] || fail 'multiple SystemUI RenderThreads'
-    task=$candidate
-done
-[ -n "$task" ] || fail 'no SystemUI RenderThread'
+task=$process/task/$pid
+if [ -n "$thread_name" ]; then
+    task=
+    for candidate in "$process"/task/*; do
+        [ -r "$candidate/comm" ] || continue
+        [ "$(cat "$candidate/comm" 2>/dev/null)" = "$thread_name" ] || continue
+        [ -z "$task" ] || fail "more than one $thread_label"
+        task=$candidate
+    done
+    [ -n "$task" ] || fail "no $thread_label"
+fi
 tid=${task##*/}
-case "$tid" in ''|0|1|*[!0-9]*) fail 'invalid RenderThread TID' ;; esac
-[ "$tid" != "$pid" ] || fail 'RenderThread TID matches the process leader'
-thread_info=$(task_info "$task" "$tid") || fail 'cannot identify RenderThread'
+case "$tid" in ''|0|1|*[!0-9]*) fail "invalid $thread_label TID" ;; esac
+thread_info=$(task_info "$task" "$tid") || fail "cannot identify $thread_label"
 thread_start=${thread_info%%:*}
+
+same_target_thread() {
+    if [ -n "$thread_name" ]; then
+        [ "$tid" != "$pid" ] && [ "$(cat "$task/comm" 2>/dev/null)" = "$thread_name" ]
+    else
+        [ "$tid" = "$pid" ] && [ "$thread_start" = "$process_start" ]
+    fi
+}
 
 current_info() {
     [ -f "$record" ] && [ ! -L "$record" ] &&
@@ -107,7 +128,7 @@ current_info() {
         [ "$(stat -Lc '%d:%i' "$STAGE/rootfs" 2>/dev/null)" = "$guest_root" ] &&
         [ "$(guest_process_namespace "$process")" = "$process_ns" ] &&
         [ "$(readlink "$task/ns/mnt" 2>/dev/null)" = "$process_ns" ] &&
-        [ "$(cat "$task/comm" 2>/dev/null)" = RenderThread ] || return 1
+        same_target_thread || return 1
     current_process=$(task_info "$process" "$pid" 2>/dev/null) || return 1
     [ "${current_process%%:*}" = "$process_start" ] || return 1
     current_task=$(task_info "$task" "$tid" 2>/dev/null) || return 1
@@ -122,7 +143,7 @@ observed=$(current_info) || fail 'guest thread identity changed'
 [ "$observed" = "$baseline" ] ||
     fail "expected SCHED_OTHER and nice $BASELINE_NICE, observed policy:nice $observed"
 anim_level=$(getprop persist.sys.oplus.anim_level)
-echo "Verified guest SystemUI RenderThread PID=$pid TID=$tid nice=$BASELINE_NICE animation_level=${anim_level:-unset}"
+echo "Verified guest $thread_label PID=$pid TID=$tid nice=$BASELINE_NICE animation_level=${anim_level:-unset}"
 [ "$1" = --run ] || exit 0
 [ "$anim_level" = 1 ] || fail 'activate ColorOS animation level 1 for this trial'
 
@@ -140,7 +161,7 @@ restore() {
                 [ "$(current_info)" != "$baseline" ]; then
                 fail 'priority restoration could not be verified. Return to One UI to end the guest task.'
             fi
-            echo "Restored guest SystemUI RenderThread TID=$tid nice=$BASELINE_NICE" ;;
+            echo "Restored guest $thread_label TID=$tid nice=$BASELINE_NICE" ;;
         *) fail 'another policy changed the thread priority during the trial' ;;
     esac
     exit "$status"
@@ -155,6 +176,6 @@ trap restore EXIT
 /system/bin/toybox renice -n "$((TRIAL_NICE - BASELINE_NICE))" -p "$tid" ||
     fail 'could not apply trial priority'
 [ "$(current_info)" = "$trial" ] || fail 'trial priority could not be verified'
-echo "Trial active for $duration seconds with guest SystemUI RenderThread nice=$TRIAL_NICE"
+echo "Trial active for $duration seconds with guest $thread_label nice=$TRIAL_NICE"
 sleep "$duration" </dev/null >/dev/null 2>&1 &
 wait $!

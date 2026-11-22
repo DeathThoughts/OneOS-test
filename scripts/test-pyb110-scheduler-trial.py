@@ -39,7 +39,8 @@ esac''')
         self.stub('pidof', 'echo "100 200"')
         self.stub('sleep', ':')
         self.log = self.root / 'renice.log'
-        self.stub('toybox', """[ "$1" = renice ] && [ "$2" = -n ] && [ "$4" = -p ] && [ "$5" = 201 ] || exit 42
+        self.stub('toybox', """[ "$1" = renice ] && [ "$2" = -n ] && [ "$4" = -p ] &&
+    [ "$5" = "${TASK##*/}" ] || exit 42
 printf '%s\\n' "$3 $5" >> "$LOG"
 awk -v delta="$3" '{$19 += delta; print}' "$TASK/stat" > "$TASK/stat.next"
 mv "$TASK/stat.next" "$TASK/stat"
@@ -150,7 +151,7 @@ mv "$TASK/stat.next" "$TASK/stat"
 
     def test_refuses_ambiguous_renderthreads(self):
         self.create_thread(202, -4, 421)
-        self.assert_refused('multiple SystemUI RenderThreads', '--run', '1')
+        self.assert_refused('more than one SystemUI RenderThread', '--run', '1')
 
     def test_refuses_unbounded_trial(self):
         self.assert_refused('duration must be 1 through 120', '--run', '121')
@@ -183,6 +184,28 @@ mv "$TASK/stat.next" "$TASK/stat"
         result = self.run_trial('--run', '1')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.log.read_text().splitlines(), ['-6 201', '6 201'])
+
+    def test_main_trial_changes_only_the_process_leader(self):
+        leader = self.create_thread(200, 0, 204)
+        (leader / 'comm').write_text('ndroid.systemui\n')
+        self.env['TASK'] = str(leader)
+        result = self.run_trial('--run', '1', 'main')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('SystemUI main thread PID=200 TID=200', result.stdout)
+        self.assertEqual(self.log.read_text().splitlines(), ['-10 200', '10 200'])
+        self.assertEqual((self.task / 'stat').read_text().split()[18], '-4')
+
+    def test_refuses_leader_starttime_mismatch(self):
+        self.create_thread(200, 0, 205)
+        self.assert_refused('identity changed', '--run', '1', 'main')
+
+    def test_refuses_leader_namespace_mismatch(self):
+        leader = self.create_thread(200, 0, 204)
+        self.ns(leader, 10)
+        self.assert_refused('identity changed', '--run', '1', 'main')
+
+    def test_refuses_multiple_modes(self):
+        self.assert_refused('usage:', '--run', '1', 'main', 'render')
 
     def test_does_not_overwrite_a_later_policy_change(self):
         self.stub('sleep', """awk '{$19 = -8; print}' "$TASK/stat" > "$TASK/stat.next"
