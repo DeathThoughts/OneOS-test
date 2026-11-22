@@ -21,7 +21,7 @@ example "mISupplicantXm is null"). The helper class is added to the jar.
 Every getExtension() call in the jar must be such a cast, and their number
 must be the expected one, or nothing is written (fail closed).
 
-Usage: hyperos_hal_ext.py [--hongkong] --expect N <apktool decoded jar directory> <helper class name>
+Usage: hyperos_hal_ext.py [--hongkong|--madrid] --expect N <apktool decoded jar directory> <helper class name>
 Prints the smali_* directories (dex files) it changed.
 """
 import hashlib
@@ -36,16 +36,17 @@ CAST = re.compile(
 CALL = "invoke-interface {"
 EXT = "Landroid/os/IBinder;->getExtension()Landroid/os/IBinder;"
 
-# The sixth cast in the Popsicle Wi-Fi jar checks for null between getExtension
-# and asInterface. Match the audited method before inserting the guard there.
-POPSICLE_WIFI_CLASS = "com/android/server/wifi/WifiOptimizationImpl.smali"
-POPSICLE_WIFI_IFACE = "com/xiaomi/net/ip/IMiuiIpClientExtension"
-POPSICLE_WIFI_METHOD = re.compile(
-    rf"^\.method private getMiuiExtension\(Landroid/os/IBinder;\)L{POPSICLE_WIFI_IFACE};\n"
+# The sixth cast in the Popsicle and Madrid Wi-Fi jars checks for null between
+# getExtension and asInterface. Match the audited method before guarding it.
+IPCLIENT_CLASS = "com/android/server/wifi/WifiOptimizationImpl.smali"
+IPCLIENT_IFACE = "com/xiaomi/net/ip/IMiuiIpClientExtension"
+IPCLIENT_METHOD = re.compile(
+    rf"^\.method private getMiuiExtension\(Landroid/os/IBinder;\)L{IPCLIENT_IFACE};\n"
     r".*?^\.end method(?=\r?$)", re.M | re.S)
 POPSICLE_WIFI_METHOD_SHA256 = "5dad924e68c4d09b68323f22b71ffa54a67030f70c34be4ced6c51c294de73af"
-POPSICLE_WIFI_CAST = (f"    invoke-static {{v2}}, L{POPSICLE_WIFI_IFACE}$Stub;->asInterface"
-                      f"(Landroid/os/IBinder;)L{POPSICLE_WIFI_IFACE};\n")
+MADRID_WIFI_METHOD_SHA256 = "97788a6a22f711673353d201e6636c9a57f68a720164749d4074b43b036644db"
+IPCLIENT_CAST = (f"    invoke-static {{v2}}, L{IPCLIENT_IFACE}$Stub;->asInterface"
+                 f"(Landroid/os/IBinder;)L{IPCLIENT_IFACE};\n")
 
 HELPER_METHOD = """
 .method public static {name}(Landroid/os/IBinder;)Landroid/os/IBinder;
@@ -86,11 +87,16 @@ HELPER_METHOD = """
 
 def main(argv):
     hongkong = argv[:1] == ["--hongkong"]
-    if hongkong:
+    madrid = argv[:1] == ["--madrid"]
+    if hongkong or madrid:
         argv = argv[1:]
     if len(argv) != 4 or argv[0] != "--expect" or not argv[1].isdigit():
         sys.exit(__doc__)
     expect, root, helper = int(argv[1]), argv[2], argv[3]
+    if madrid and expect != 6:
+        sys.exit("hyperos_hal_ext: Madrid requires six extension casts")
+    variant = "Madrid" if madrid else "Popsicle"
+    ipclient_sha = MADRID_WIFI_METHOD_SHA256 if madrid else POPSICLE_WIFI_METHOD_SHA256
     if not re.fullmatch(r"[A-Z]\w*", helper):
         sys.exit(f"hyperos_hal_ext: bad helper class name {helper}")
     helper_cls = f"com/oneos/guest/{helper}"
@@ -106,6 +112,7 @@ def main(argv):
                 if EXT in s:
                     files[p] = (s, raw)
     ifaces, total, out = {}, 0, {}
+    ipclient_guarded = False
 
     def descriptor_check(iface, reg):
         name = ifaces.setdefault(iface, f"ext{len(ifaces)}")
@@ -125,29 +132,34 @@ def main(argv):
         calls = s.count(EXT)
         casts = len(CAST.findall(s))
         relative = os.path.relpath(p, root)
-        popsicle_method = None
+        ipclient_method = None
         if (expect == 6 and calls == casts + 1
-                and relative.partition(os.sep)[2] == POPSICLE_WIFI_CLASS):
-            methods = POPSICLE_WIFI_METHOD.findall(raw)
+                and relative.partition(os.sep)[2] == IPCLIENT_CLASS):
+            methods = IPCLIENT_METHOD.findall(raw)
             if len(methods) != 1:
-                sys.exit(f"hyperos_hal_ext: {relative}: Popsicle getMiuiExtension() not found exactly once")
-            popsicle_method = methods[0]
-            if hashlib.sha256(popsicle_method.encode("utf-8")).hexdigest() != POPSICLE_WIFI_METHOD_SHA256:
-                sys.exit(f"hyperos_hal_ext: {relative}: Popsicle getMiuiExtension() fingerprint mismatch")
-            if popsicle_method.count(EXT) != 1 or popsicle_method.count(POPSICLE_WIFI_CAST) != 1:
-                sys.exit(f"hyperos_hal_ext: {relative}: unexpected Popsicle getMiuiExtension() cast")
+                sys.exit(f"hyperos_hal_ext: {relative}: {variant} getMiuiExtension() not found exactly once")
+            ipclient_method = methods[0]
+            if hashlib.sha256(ipclient_method.encode("utf-8")).hexdigest() != ipclient_sha:
+                sys.exit(f"hyperos_hal_ext: {relative}: {variant} getMiuiExtension() fingerprint mismatch")
+            if ipclient_method.count(EXT) != 1 or ipclient_method.count(IPCLIENT_CAST) != 1:
+                sys.exit(f"hyperos_hal_ext: {relative}: unexpected {variant} getMiuiExtension() cast")
             casts += 1
         if calls != casts:
             sys.exit(f"hyperos_hal_ext: {relative}: {calls} getExtension() calls, {casts} of them casts")
         patched = CAST.sub(sub, s)
-        if popsicle_method is not None:
-            guarded = popsicle_method.replace(
-                POPSICLE_WIFI_CAST, descriptor_check(POPSICLE_WIFI_IFACE, "v2") + "\n" + POPSICLE_WIFI_CAST, 1)
-            patched = patched.replace(popsicle_method, guarded, 1)
+        if ipclient_method is not None:
+            if ipclient_method not in patched:
+                sys.exit(f"hyperos_hal_ext: {relative}: could not locate audited {variant} getMiuiExtension()")
+            guarded = ipclient_method.replace(
+                IPCLIENT_CAST, descriptor_check(IPCLIENT_IFACE, "v2") + "\n" + IPCLIENT_CAST, 1)
+            patched = patched.replace(ipclient_method, guarded, 1)
+            ipclient_guarded = True
         out[p] = patched
         total += calls
     if total != expect:
         sys.exit(f"hyperos_hal_ext: {total} extension casts, expected {expect}")
+    if madrid and not ipclient_guarded:
+        sys.exit("hyperos_hal_ext: Madrid getMiuiExtension() was not guarded")
     helper_path = os.path.join(root, "smali", *helper_cls.split("/")) + ".smali"
     if os.path.exists(helper_path):
         sys.exit(f"hyperos_hal_ext: {helper_cls} already exists")

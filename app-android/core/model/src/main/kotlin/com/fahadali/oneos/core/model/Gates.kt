@@ -334,7 +334,9 @@ object SwitchGates {
         val resolution = Profiles.resolve(f, profiles)
         val profile = resolution.profile
         val (choice, identity) = profile?.let { chosen(phase, input, it, images) } ?: (null to null)
-        val image = choice?.let { Images.byId(it.imageId, images) }
+        val image = choice?.let { selected ->
+            identity?.image?.takeIf { it.id == selected.imageId } ?: Images.byId(selected.imageId, images)
+        }
         val set = choice?.let { PackageSets.byId(it.packageSetId, sets) }
 
         // 0.4.74: no switching on a custom ROM ([CustomRomRule]).

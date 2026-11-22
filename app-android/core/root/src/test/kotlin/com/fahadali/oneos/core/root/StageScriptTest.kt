@@ -1237,6 +1237,31 @@ class StageScriptTest {
         }
     }
 
+    @Test
+    fun galaxyS26FeStagesAndroid17ImagesOnly() = eachShell { fr ->
+        val profile = Profiles.S26_FE
+        fr.props["ro.product.model"] = "SM-S741U"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        for (image in Images.ALL.filter { it.sdk == 37 && it.id != Images.ID_COLOROS17_PYB110 }) {
+            val stager = Stager(fr, profile, image.id)
+            stager.ok(stager.begin("keep"))
+            refused(stager.begin("keep", PackageSets.ID_OXYGEN16), "is not the file set")
+        }
+        refused(
+            fr.run(RootScript.Verb.BEGIN, "keep", profile.id, Images.ID_OXYGEN16, PackageSets.ID_OXYGEN16, "4"),
+            "does not run ${Images.ID_OXYGEN16}",
+        )
+        val stager = Stager(fr, profile, Images.ID_HYPEROS_MADRID)
+        stager.prepare("keep")
+        refused(stager.launch(), "test root: every launch check passed")
+
+        fr.props["ro.build.version.sdk"] = "36"
+        fr.writeProps()
+        refused(stager.launch(), "Android SDK 36, the image is 37")
+    }
+
     /** The CN builds have no Google services: neither env nor launch may hide them, and a refused launch changes nothing.
      *  HyperOS (Xiaomi 18 Fold, CN) since 0.4.51, when the CN Find X9 Ultra build was retired. */
     @Test
@@ -1765,7 +1790,7 @@ class StageScriptTest {
     }
 
     @Test
-    fun popsicleStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+    fun popsicleStagesAndPassesLaunchChecksOnTheBaseGalaxyS23() = eachShell { fr ->
         val profile = Profiles.S_8550
         val image = Images.HYPEROS_POPSICLE
         val set = PackageSets.HYPER_POPSICLE
@@ -1788,7 +1813,30 @@ class StageScriptTest {
     }
 
     @Test
-    fun twinityStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+    fun madridStagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+        val profile = Profiles.S_8550
+        val image = Images.HYPEROS_MADRID
+        val set = PackageSets.HYPER_MADRID
+        fr.props["ro.product.model"] = "SM-S911B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val s = Stager(fr, profile, image.id)
+        for (other in listOf(Profiles.S_PLUS_8550, Profiles.S_ULTRA_8550, Profiles.S_8550_JP)) {
+            refused(fr.run(RootScript.Verb.BEGIN, "new", other.id, image.id, set.id, s.code), "does not run")
+        }
+        refused(s.begin(setId = PackageSets.ID_HYPER_F8U), "is not the file set")
+        s.prepare()
+        val marker = StageMarker.parse(File(fr.stage, StageMarker.FILE_NAME).readText())
+        assertEquals(image.id, marker?.imageId)
+        assertEquals(set.id, marker?.setId)
+        assertEquals((RootScript.SCRIPTS + set.names).toSet(), ShaList.parse(File(fr.stage, "files.sha256").readText()).entries.keys)
+        refused(s.launch(hideGms = "1"), "has no Google services a session may hide")
+        refused(s.launch(), "test root: every launch check passed")
+    }
+
+    @Test
+    fun twinityStagesAndPassesLaunchChecksOnTheBaseGalaxyS23() = eachShell { fr ->
         val profile = Profiles.S_8550
         val image = Images.COLOROS17_TWINTY4C
         val set = PackageSets.TWINTY_S23
@@ -1798,6 +1846,29 @@ class StageScriptTest {
         fr.writeProps()
         val s = Stager(fr, profile, image.id)
         for (other in listOf(Profiles.S_PLUS_8550, Profiles.S_ULTRA_8550, Profiles.S_8550_JP)) {
+            refused(fr.run(RootScript.Verb.BEGIN, "new", other.id, image.id, set.id, s.code), "does not run")
+        }
+        refused(s.begin(setId = PackageSets.ID_X9U_IN_1105_SULTRA), "is not the file set")
+        s.prepare()
+        val marker = StageMarker.parse(File(fr.stage, StageMarker.FILE_NAME).readText())
+        assertEquals(image.id, marker?.imageId)
+        assertEquals(set.id, marker?.setId)
+        assertEquals((RootScript.SCRIPTS + set.names).toSet(), ShaList.parse(File(fr.stage, "files.sha256").readText()).entries.keys)
+        refused(s.launch(hideGms = "1"), "has no Google services a session may hide")
+        refused(s.launch(), "test root: every launch check passed")
+    }
+
+    @Test
+    fun pyb110StagesAndPassesLaunchChecksOnlyOnTheBaseGalaxyS23() = eachShell { fr ->
+        val profile = Profiles.S_8550
+        val image = Images.COLOROS17_PYB110
+        val set = PackageSets.PYB110_S23
+        fr.props["ro.product.model"] = "SM-S911B"
+        fr.props["ro.product.device"] = profile.codename
+        fr.props["ro.soc.model"] = profile.socModel
+        fr.writeProps()
+        val s = Stager(fr, profile, image.id)
+        for (other in listOf(Profiles.S_PLUS_8550, Profiles.S_ULTRA_8550, Profiles.S_8550_JP, Profiles.S26_FE)) {
             refused(fr.run(RootScript.Verb.BEGIN, "new", other.id, image.id, set.id, s.code), "does not run")
         }
         refused(s.begin(setId = PackageSets.ID_X9U_IN_1105_SULTRA), "is not the file set")
@@ -2061,6 +2132,52 @@ class StageScriptTest {
         File(fr.stage, "persist_session.active").writeText("format=2\nboot_id=11111111-2222-3333-4444-555555555555\n")
         refused(fr.run(RootScript.Verb.BRING_FORGET, other), "a session is starting or running")
         assertTrue(File(dir, "$other/apk/base.apk").isFile)
+    }
+
+    /** debloat (0.5.32): a good list is written whole (root's, 0644); an empty one removes it; a bad line writes nothing. */
+    @Test
+    fun debloatWritesTheListOrNothing() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val list = File(fr.stage, "debloat.list")
+        fun send(text: String) = text.toByteArray().let { fr.run(RootScript.Verb.DEBLOAT, it.size.toString(), stdin = it) }
+        val good = "org.example.ads\t/system/app/Ads\norg.example.cloud\t/my_product/apps_extension/X/SimSwitchFirstTime/app/Cloud_v1.2\n"
+        val r = send(good)
+        s.ok(r)
+        assertEquals("debloat 2", r.reply.ok)
+        assertEquals(good, list.readText())
+        assertEquals("644", fr.mode(list))
+        assertFalse(File(fr.stage, "incoming/debloat.part").exists())
+        assertFalse(File(fr.stage, "debloat.new").exists())
+        // Bad lines: nothing is replaced.
+        for (bad in listOf(
+            "org.example.ads\t/product/overlay\n",
+            "org.example.ads\t/my_product/priv-app\n",
+            "org.example.ads\t/system/app/../priv-app/X\n",
+            "org.example.ads\tsystem/app/Ads\n",
+            "notapackage\t/system/app/Ads\n",
+            "org.example.ads /system/app/Ads\n",
+            "org.example.ads\t/system/app/Ads\textra\n",
+            "org.example.ads\t/system/app/Ads\n\norg.example.b\t/system/app/B\n",
+            (1..601).joinToString("") { "org.example.a$it\t/system/app/A$it\n" },
+        )) {
+            val rb = send(bad)
+            assertEquals("expected a refusal for [$bad]:\n$rb", RootScript.EXIT_REFUSED, rb.exit)
+            assertEquals(good, list.readText())
+            assertFalse(File(fr.stage, "incoming/debloat.part").exists())
+        }
+        assertTrue(RootScript.problems(RootScript.Verb.DEBLOAT, listOf("x")).isNotEmpty())
+        assertEquals(RootScript.EXIT_USAGE, fr.run(RootScript.Verb.DEBLOAT, "262145", stdin = ByteArray(0)).exit)
+        // Restore all: an empty list removes the file.
+        val empty = send("")
+        s.ok(empty)
+        assertEquals("debloat 0", empty.reply.ok)
+        assertFalse(list.exists())
+        s.ok(send(good))
+        // A running session refuses it and keeps the list.
+        File(fr.stage, "persist_session.active").writeText("format=2\nboot_id=11111111-2222-3333-4444-555555555555\n")
+        refused(send(""), "a session is starting or running")
+        assertEquals(good, list.readText())
     }
 
     /** bring-catalog: a good catalog is written whole; a bad line writes nothing; a session refuses it. */

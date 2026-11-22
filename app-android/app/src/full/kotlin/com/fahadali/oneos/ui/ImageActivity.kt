@@ -15,6 +15,7 @@ import com.fahadali.oneos.R
 import com.fahadali.oneos.core.device.FactProbe
 import com.fahadali.oneos.core.model.ImageIdentifier
 import com.fahadali.oneos.core.model.ImageIdentity
+import com.fahadali.oneos.core.model.ImageRef
 import com.fahadali.oneos.core.model.ImageState
 import com.fahadali.oneos.core.model.Images
 import com.fahadali.oneos.core.model.Level
@@ -24,6 +25,7 @@ import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.core.root.RootProbe
 import com.fahadali.oneos.core.root.RootScript
+import com.fahadali.oneos.session.AppAssets
 import com.fahadali.oneos.session.ImageCheckJob
 import com.fahadali.oneos.session.SessionPrefs
 import com.fahadali.oneos.session.StageCheck
@@ -139,7 +141,8 @@ class ImageFragment : CardsFragment() {
             return
         }
         val p = profile
-        val images = p?.images().orEmpty()
+        val availableImages = AppAssets.availableImages(ctx)
+        val images = p?.images(availableImages).orEmpty()
         if (p == null || images.isEmpty()) {
             val none = Cards.section(column, getString(R.string.image_no_profile_title), null, Level.BLOCK)
             CardRows.text(none, getString(R.string.image_no_profile_summary))
@@ -156,7 +159,7 @@ class ImageFragment : CardsFragment() {
         }
         var id: ImageIdentity? = null
         if (picked != null) {
-            val pid = ImageIdentifier.identify(picked.check, p)
+            val pid = ImageIdentifier.identify(picked.check, p, availableImages)
             id = pid
             val size = picked.bytes?.let { Units.bytes(it) } ?: getString(R.string.image_size_unknown)
             Cards.row(
@@ -164,7 +167,7 @@ class ImageFragment : CardsFragment() {
                 picked.name ?: getString(R.string.image_picked_unnamed),
                 if (source == SessionPrefs.Source.GZ) size else getString(R.string.image_not_used, size),
             )
-            identity(file, pid, p, onPhone = false)
+            identity(file, pid, p, availableImages, onPhone = false)
             val busy = job.busy && job.uri == picked.uri
             if (busy) {
                 val total = (job.total ?: pid.image?.gzBytes ?: picked.bytes ?: 0L).coerceAtLeast(1)
@@ -205,8 +208,8 @@ class ImageFragment : CardsFragment() {
             ) { confirmLook() }
             st.rawSize == null -> CardRows.status(onPhone, Level.INFO, getString(R.string.image_on_phone_none), null)
             else -> {
-                val sid = ImageIdentifier.identifyStaged(st.stagedRaw, p)
-                identity(onPhone, sid, p, onPhone = true)
+                val sid = ImageIdentifier.identifyStaged(st.stagedRaw, p, availableImages)
+                identity(onPhone, sid, p, availableImages, onPhone = true)
                 // It can be reused only when setup keeps the stage: not when the stage is set aside
                 // (another system's data, an older system's, leftovers OneOS did not prepare).
                 val keepable = RootScript.BeginMode.KEEP in st.beginModes(sid.image?.id)
@@ -237,9 +240,14 @@ class ImageFragment : CardsFragment() {
                 add(getString(if (p.choice(image.id)?.tested == true) R.string.systems_chip_tested else R.string.systems_chip_untested))
                 if (image.googleServices) add(getString(R.string.systems_chip_google))
             }
-            Cards.row(systems, GLYPHS[i % GLYPHS.size], Images.systemName(image, p), notes.joinToString(" · "))
-            if (image.id == Images.ID_HYPEROS_POPSICLE || image.id == Images.ID_COLOROS17_TWINTY4C) {
-                CardRows.text(systems, getString(R.string.image_split_zip_instructions, image.gzName), R.style.OneOS_Text_Caption, inList = true)
+            Cards.row(systems, GLYPHS[i % GLYPHS.size], Images.systemName(image, p, availableImages), notes.joinToString(" · "))
+            val importInstructions = when (image.id) {
+                Images.ID_HYPEROS_MADRID -> R.string.image_madrid_zip_instructions
+                Images.ID_HYPEROS_POPSICLE, Images.ID_COLOROS17_TWINTY4C -> R.string.image_split_zip_instructions
+                else -> null
+            }
+            if (importInstructions != null) {
+                CardRows.text(systems, getString(importInstructions, image.gzName), R.style.OneOS_Text_Caption, inList = true)
             }
         }
 
@@ -256,16 +264,16 @@ class ImageFragment : CardsFragment() {
             id?.let { CardRows.finding(card, it.finding) }
             picked?.sha256?.let { Cards.row(card, 0, getString(R.string.image_details_sha), it) }
             job.message?.takeIf { job.uri == picked?.uri }?.let { Cards.row(card, 0, getString(R.string.setup_details_result), it) }
-            if (st?.rawSize != null) CardRows.finding(card, ImageIdentifier.identifyStaged(st.stagedRaw, p).finding)
+            if (st?.rawSize != null) CardRows.finding(card, ImageIdentifier.identifyStaged(st.stagedRaw, p, availableImages).finding)
             (check.step ?: check.message)?.let { Cards.row(card, 0, getString(R.string.image_details_look), it) }
         }
     }
 
     /** Which system the file (or the system on this phone) is, in plain words; the finding itself is under Details. */
-    private fun identity(card: LinearLayout, id: ImageIdentity, p: PhoneProfile, onPhone: Boolean) {
+    private fun identity(card: LinearLayout, id: ImageIdentity, p: PhoneProfile, availableImages: List<ImageRef>, onPhone: Boolean) {
         val f = id.finding
         if (f.level == Level.OK) {
-            val system = Images.systemName(id.image, p)
+            val system = Images.systemName(id.image, p, availableImages)
             CardRows.status(card, Level.OK, getString(if (onPhone) R.string.image_on_phone_ok else R.string.image_file_ok, system), null)
             return
         }

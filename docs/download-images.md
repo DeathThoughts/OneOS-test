@@ -15,6 +15,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy Z Fold8 (SM-F971, SM8850), not tested yet
   - Galaxy Z Fold6 (SM-F956, SM8650), not tested yet
   - Galaxy Z Fold5 (SM-F946, SM8550), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## ColorOS 17, Find X9 Ultra IN build (November update)
 
@@ -30,7 +31,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S26 (docomo) (SC-51G, SM8850), not tested yet
   - Galaxy S24 Ultra (SM-S928, SM8650), not tested yet
   - Galaxy S24 (SM-S921, SM8650), not tested yet
-  - Galaxy S23 (SM-S911, SM8550), not tested yet
+  - Galaxy S23 (SM-S911, SM8550)
   - Galaxy S23+ (SM-S916, SM8550), not tested yet
   - Galaxy S26+ (SM-S947, SM8850), not tested yet
   - Galaxy S26+ (Exynos) (SM-S947, s5e9965), not tested yet
@@ -45,7 +46,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy Z Flip6 (SM-F741, SM8650), not tested yet
   - Galaxy S24 (Exynos) (SM-S921, s5e9945), not tested yet
   - Galaxy S25 Edge (SM-S937, SM8750), not tested yet
-  - Galaxy S24 FE (SM-S721, s5e9945), not tested yet
+  - Galaxy S24 FE (SM-S721, s5e9945)
   - Galaxy A26 (SM-A266, s5e8835), not tested yet
   - Galaxy A17 (SM-A175, MT6789), not tested yet
   - Galaxy A16 5G (SM-A166, s5e8535), not tested yet
@@ -60,12 +61,22 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy A15 (SM-A155, MT6789), not tested yet
   - Galaxy A34 5G (SM-A346, MT6877), not tested yet
   - Galaxy A55 5G (SM-A556, s5e8845), not tested yet
-  - Galaxy S25 FE (SM-S731, s5e9945), not tested yet
+  - Galaxy S25 FE (SM-S731, s5e9945)
   - Galaxy S24+ (Exynos) (SM-S926, s5e9945), not tested yet
   - Galaxy S23 Ultra (au) (SCG20, SM8550), not tested yet
-  - Galaxy S23 (au) (SCG19, SM8550), not tested yet
+  - Galaxy S23 (au) (SCG19, SM8550)
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
+
+## ColorOS 17, OnePlus 13T China TWNTY4.0c build
+
+- File: `OneOS_ColorOS17_Twinity4c.zip` (5.19 GB)
+- SHA-256: `71ad5919cbb6d813b8815e6dc4b27790c23724ca4f7441eb2a5c1ace08fbdc4e`
+- Download: https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity4c-81fff7581ff4
+- Phones:
+  - Galaxy S23 (SM-S911, SM8550), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Pixel 11 Fold, yogi build
 
@@ -75,6 +86,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
 - Phones:
   - Z Fold (F8U) (SM-F976, SM8850)
   - Galaxy Z Fold8 (SM-F971, SM8850)
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Pixel 11 Pro, kodiak build
 
@@ -89,6 +101,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S26+ (Exynos) (SM-S947, s5e9965), not tested yet
   - Galaxy Z Flip8 (SM-F776, s5e9965), not tested yet
   - Galaxy S26 (Exynos) (SM-S942, s5e9965), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Pixel 9 Pro XL, komodo build
 
@@ -118,6 +131,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 Ultra (au) (SCG20, SM8550), not tested yet
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Infinity-X 4.1, Find X9 Ultra build
 
@@ -174,6 +188,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## HyperOS, Xiaomi 18 Fold build
 
@@ -227,6 +242,77 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
+
+## HyperOS 4, Xiaomi 17 Pro Max build
+
+- File: `Hyperos_popsicle_17_17OS4_0_260909_233731301_QCPECN_S_AB_20260920.zip` (4.00 GB)
+- SHA-256: `1603c41aceb505ae6c51349a51312e127433eb80cd5a297bbb49a6eb7e70caf9`
+- Download: https://github.com/DeathThoughts/OneOS-test/releases/tag/images
+- Phones:
+  - Galaxy S23 (SM-S911, SM8550), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
+
+## HyperOS 4, Xiaomi 18 Pro Max China build
+
+- File: `OneOS_HyperOS4_Madrid.zip` (4.48 GB)
+- SHA-256: `c4598e28013122112f7dcb2736723362cb3bff3058f5b0f8166f0acaeb3a669b`
+- Download: https://github.com/DeathThoughts/OneOS-test/actions/runs/44753230951
+- Phones:
+  - Galaxy S23 (SM-S911, SM8550), not tested yet
+## HyperOS 4 Global
+
+- File: `OneOS_HyperOS4_Global.img.gz` (5.63 GB)
+- SHA-256: `c9dbf413b8d4cd14387b2cac68b6d5a62a160c920f7b63dc55f07216828258b7`
+- Download: https://sourceforge.net/projects/oneos-mirror/files/images/OneOS_HyperOS4_Global.img.gz/download
+- Phones:
+  - Z Fold (F8U) (SM-F976, SM8850), not tested yet
+  - Galaxy S26 Ultra (SM-S948, SM8850), not tested yet
+  - Galaxy S25 Ultra (SM-S938, SM8750), not tested yet
+  - Galaxy S25 (SM-S931, SM8750)
+  - Galaxy Z Fold7 (SM-F966, SM8750), not tested yet
+  - Galaxy S25+ (SM-S936, SM8750), not tested yet
+  - Galaxy Z Fold8 (SM-F971, SM8850), not tested yet
+  - Galaxy S26 (SM-S942, SM8850), not tested yet
+  - Galaxy S26 (docomo) (SC-51G, SM8850), not tested yet
+  - Galaxy S24 Ultra (SM-S928, SM8650), not tested yet
+  - Galaxy S24 (SM-S921, SM8650), not tested yet
+  - Galaxy S23 (SM-S911, SM8550)
+  - Galaxy S23+ (SM-S916, SM8550), not tested yet
+  - Galaxy S26+ (SM-S947, SM8850), not tested yet
+  - Galaxy S26+ (Exynos) (SM-S947, s5e9965), not tested yet
+  - Galaxy Z Flip7 (SM-F766, s5e9955), not tested yet
+  - Galaxy A56 (SM-A566, s5e8855)
+  - Galaxy A57 (SM-A576, s5e8865), not tested yet
+  - Galaxy Z Flip5 (SM-F731, SM8550), not tested yet
+  - Galaxy A07 (SM-A075, MT6789), not tested yet
+  - Galaxy Z Flip8 (SM-F776, s5e9965), not tested yet
+  - Galaxy A36 (SM-A366, SM6475), not tested yet
+  - Galaxy S23 Ultra (SM-S918, SM8550)
+  - Galaxy S24 (Exynos) (SM-S921, s5e9945), not tested yet
+  - Galaxy S25 Edge (SM-S937, SM8750), not tested yet
+  - Galaxy S24 FE (SM-S721, s5e9945)
+  - Galaxy A26 (SM-A266, s5e8835), not tested yet
+  - Galaxy A17 (SM-A175, MT6789), not tested yet
+  - Galaxy A16 5G (SM-A166, s5e8535), not tested yet
+  - Galaxy S26 (Exynos) (SM-S942, s5e9965), not tested yet
+  - Galaxy A16 4G (SM-A165, MT6789), not tested yet
+  - Galaxy A16 5G (SM-S166V) (SM-S166, s5e8535), not tested yet
+  - Galaxy A35 5G (SM-A356, s5e8835), not tested yet
+  - Galaxy A54 5G (SM-A546, s5e8835), not tested yet
+  - Galaxy A27 (SM-A276, SM6475), not tested yet
+  - Galaxy A17 5G (SM-A176, s5e8535), not tested yet
+  - Galaxy Z Flip7 FE (SM-F761, s5e9945), not tested yet
+  - Galaxy A15 (SM-A155, MT6789)
+  - Galaxy A34 5G (SM-A346, MT6877)
+  - Galaxy A55 5G (SM-A556, s5e8845), not tested yet
+  - Galaxy S25 FE (SM-S731, s5e9945)
+  - Galaxy S24+ (Exynos) (SM-S926, s5e9945), not tested yet
+  - Galaxy S23 Ultra (au) (SCG20, SM8550)
+  - Galaxy S23 (au) (SCG19, SM8550)
+  - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
+  - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Nothing OS 5.0, Metroid build
 
@@ -251,14 +337,15 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S26+ (Exynos) (SM-S947, s5e9965), not tested yet
   - Galaxy Z Fold6 (SM-F956, SM8650), not tested yet
   - Galaxy Z Flip8 (SM-F776, s5e9965), not tested yet
-  - Galaxy S23 Ultra (SM-S918, SM8550), not tested yet
+  - Galaxy S23 Ultra (SM-S918, SM8550)
   - Galaxy S24 (Exynos) (SM-S921, s5e9945), not tested yet
   - Galaxy S25 Edge (SM-S937, SM8750), not tested yet
   - Galaxy S26 (Exynos) (SM-S942, s5e9965), not tested yet
   - Galaxy S24+ (Exynos) (SM-S926, s5e9945), not tested yet
-  - Galaxy S23 Ultra (au) (SCG20, SM8550), not tested yet
+  - Galaxy S23 Ultra (au) (SCG20, SM8550)
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## Nothing OS 5.0, A series build
 
@@ -283,6 +370,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy A34 5G (SM-A346, MT6877), not tested yet
   - Galaxy A55 5G (SM-A556, s5e8845), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## OxygenOS 16, OnePlus CPH2745 build
 
@@ -354,6 +442,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 Ultra (au) (SCG20, SM8550), not tested yet
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## LineageOS 24, OnePlus 15 build
 
@@ -410,6 +499,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S23 (au) (SCG19, SM8550), not tested yet
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet
 
 ## One UI 9.5, Galaxy S26 Ultra build
 
@@ -420,7 +510,7 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Z Fold (F8U) (SM-F976, SM8850), not tested yet
   - Galaxy S26 Ultra (SM-S948, SM8850), not tested yet
   - Galaxy S25 Ultra (SM-S938, SM8750), not tested yet
-  - Galaxy S25 (SM-S931, SM8750), not tested yet
+  - Galaxy S25 (SM-S931, SM8750)
   - Galaxy Z Fold7 (SM-F966, SM8750), not tested yet
   - Galaxy S25+ (SM-S936, SM8750), not tested yet
   - Galaxy Z Fold8 (SM-F971, SM8850), not tested yet
@@ -428,29 +518,29 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy S26 (docomo) (SC-51G, SM8850), not tested yet
   - Galaxy S24 Ultra (SM-S928, SM8650), not tested yet
   - Galaxy S24 (SM-S921, SM8650), not tested yet
-  - Galaxy S23 (SM-S911, SM8550), not tested yet
+  - Galaxy S23 (SM-S911, SM8550)
   - Galaxy S23+ (SM-S916, SM8550), not tested yet
   - Galaxy S26+ (SM-S947, SM8850), not tested yet
   - Galaxy S26+ (Exynos) (SM-S947, s5e9965), not tested yet
   - Galaxy Z Flip7 (SM-F766, s5e9955), not tested yet
-  - Galaxy A56 (SM-A566, s5e8855), not tested yet
+  - Galaxy A56 (SM-A566, s5e8855)
   - Galaxy A57 (SM-A576, s5e8865), not tested yet
   - Galaxy Z Flip5 (SM-F731, SM8550), not tested yet
   - Galaxy Z Fold6 (SM-F956, SM8650), not tested yet
-  - Galaxy A07 (SM-A075, MT6789), not tested yet
+  - Galaxy A07 (SM-A075, MT6789)
   - Galaxy Z Flip8 (SM-F776, s5e9965), not tested yet
   - Galaxy A36 (SM-A366, SM6475), not tested yet
   - Galaxy Z Fold5 (SM-F946, SM8550), not tested yet
   - Galaxy S23 Ultra (SM-S918, SM8550), not tested yet
   - Galaxy Z Flip6 (SM-F741, SM8650), not tested yet
-  - Galaxy S24 (Exynos) (SM-S921, s5e9945), not tested yet
+  - Galaxy S24 (Exynos) (SM-S921, s5e9945)
   - Galaxy S25 Edge (SM-S937, SM8750), not tested yet
   - Galaxy S24 FE (SM-S721, s5e9945), not tested yet
   - Galaxy A26 (SM-A266, s5e8835), not tested yet
-  - Galaxy A17 (SM-A175, MT6789), not tested yet
+  - Galaxy A17 (SM-A175, MT6789)
   - Galaxy A16 5G (SM-A166, s5e8535), not tested yet
   - Galaxy S26 (Exynos) (SM-S942, s5e9965), not tested yet
-  - Galaxy A16 4G (SM-A165, MT6789), not tested yet
+  - Galaxy A16 4G (SM-A165, MT6789)
   - Galaxy A16 5G (SM-S166V) (SM-S166, s5e8535), not tested yet
   - Galaxy A35 5G (SM-A356, s5e8835), not tested yet
   - Galaxy A54 5G (SM-A546, s5e8835), not tested yet
@@ -461,8 +551,9 @@ Downloads: each system's own link below (the SourceForge mirror, resumable); all
   - Galaxy A34 5G (SM-A346, MT6877), not tested yet
   - Galaxy A55 5G (SM-A556, s5e8845), not tested yet
   - Galaxy S25 FE (SM-S731, s5e9945), not tested yet
-  - Galaxy S24+ (Exynos) (SM-S926, s5e9945), not tested yet
+  - Galaxy S24+ (Exynos) (SM-S926, s5e9945)
   - Galaxy S23 Ultra (au) (SCG20, SM8550), not tested yet
-  - Galaxy S23 (au) (SCG19, SM8550), not tested yet
+  - Galaxy S23 (au) (SCG19, SM8550)
   - Galaxy M35 5G (SM-M356, s5e8835), not tested yet
   - Galaxy S24+ (SM-S926, SM8650), not tested yet
+  - Galaxy S26 FE (SM-S741, s5e9955), not tested yet

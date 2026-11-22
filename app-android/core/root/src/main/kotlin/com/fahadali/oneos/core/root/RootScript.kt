@@ -33,8 +33,8 @@ import com.fahadali.oneos.core.model.PackageSets
  * that image's on that phone); `launch` carries this launch's
  * `ONEOS_GUEST_HIDE_GMS`, `ONEOS_HEAT_CAP`, `ONEOS_GUEST_SEC_IMS` and (0.4.32)
  * `ONEOS_GUEST_EDM_STUB`, then optionally `ONEOS_VERBOSE_BOOT`, `ONEOS_FULL_LOGS`,
- * `ONEOS_PATCH_AUTO`, `ONEOS_GUEST_VULKAN` and (0.5.20) `ONEOS_SHARE_FILES`
- * (0 or 1 each; default 0, 1, 0, 0 and 0).
+ * `ONEOS_PATCH_AUTO`, `ONEOS_GUEST_VULKAN`, `ONEOS_SHARE_FILES` and
+ * `ONEOS_PYB110_SCHEDULER_TRIAL` (0 or 1 each, full logs defaults to 1).
  */
 object RootScript {
     const val ASSET = "root/oneos_root.sh"
@@ -175,6 +175,13 @@ object RootScript {
          * owner's choice of albums, Galaxy S25 Ultra session 92032e7ae892154c).
          */
         ONEUI_MEDIA("oneui-media", Stdin.SCRIPT),
+        /**
+         * Debloater (0.5.32): the apps to hide in the system set up now (its Debloat screen). stdin is
+         * `<package> TAB <folder>` per line ([com.fahadali.oneos.core.model.Debloat.listText]), written as
+         * `$STAGE/debloat.list` for guest_prepare.sh to hide at the next start; empty removes it (Restore all).
+         * Refused while a session runs; the image is never changed.
+         */
+        DEBLOAT("debloat", Stdin.DATA),
     }
 
     /**
@@ -192,6 +199,7 @@ object RootScript {
     val SCRIPTS: List<String> = listOf(
         "guest_runtime.sh", "guest_root", "guest_zygiskd", "guest_zygisk_ptrace", "guest_zygisk.so", "guest_vector.bundle", "guest_manager.apk",
         "oneos_switch.sh", "boot_status.sh", "OneOSBootStatus.dex", "oneos_boot_icon.png", "guest_prepare.sh", "guest_patch.sh", "guest_start.sh", "guest_props.sh", "return_to_oneui.sh", "libsec-ril-patch.sh",
+        "pyb110-scheduler-trial.sh",
         "check_host_apex.sh", "bridges.sh", "fold8_coloros.sh", "OneOSFold8Geometry.dex", "fold8_pixel.sh", "guest_google.sh", "zygote_exec", "OneOSEdmStub.dex", "oneos_btaudio", "oneos_essential_key", "OneOSOverlayDimen.dex", "host_installd.txt",
     )
 
@@ -269,7 +277,7 @@ object RootScript {
                 arg(3, DEC, "a versionCode")
             }
             Verb.LAUNCH -> {
-                if (args.size !in 7..14) need(14)
+                if (args.size !in 7..15) need(15)
                 args.getOrNull(0)?.let { if (it != "session" && it != "dry") p += "launch: mode '$it'" }
                 arg(1, DEC, "a versionCode")
                 arg(2, HEX16, "a session id")
@@ -285,9 +293,10 @@ object RootScript {
                 args.getOrNull(11)?.let { if (it != "0" && it != "1") p += "launch: automatic patch downloads is not 0 or 1" }
                 args.getOrNull(12)?.let { if (it != "0" && it != "1") p += "launch: guest Vulkan is not 0 or 1" }
                 args.getOrNull(13)?.let { if (it != "0" && it != "1") p += "launch: share my files is not 0 or 1" }
+                args.getOrNull(14)?.let { if (it != "0" && it != "1") p += "launch: PYB110 scheduler trials is not 0 or 1" }
             }
             Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.REMOVE_SYSTEM, Verb.RESET_DATA, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
-            Verb.BRING_COLLECT, Verb.BRING_CATALOG -> {
+            Verb.BRING_COLLECT, Verb.BRING_CATALOG, Verb.DEBLOAT -> {
                 need(1)
                 arg(0, DEC, "a size")
             }

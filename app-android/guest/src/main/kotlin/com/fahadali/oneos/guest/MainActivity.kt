@@ -123,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         cards.row(apps, getString(R.string.bring_entry_title), getString(R.string.bring_entry_summary)) {
             startActivity(Intent(this, BringAppsActivity::class.java))
         }
+        animLevelCard(list)
         fullLogsCard(list)
         val updates = cards.section(list, getString(R.string.guest_updates_title), getColor(R.color.preboot_card))
         cards.row(updates, getString(R.string.guest_updates_open), getString(R.string.guest_updates_entry)) {
@@ -152,6 +153,70 @@ class MainActivity : AppCompatActivity() {
                     .setMessage(next.error).setPositiveButton(android.R.string.ok,null).show()
             }
         }.isEnabled = state.active
+    }
+
+    /** ColorOS's lighter animation level (0.5.32): only where the session says which level is in effect. */
+    private fun animLevelCard(list: android.widget.LinearLayout) {
+        val level = AnimLevel.current() ?: return
+        val pending = AnimLevel.pending(this)
+        val cards = com.fahadali.oneos.shared.NativeCards
+        val perf = cards.section(list, getString(R.string.anim_title), getColor(R.color.preboot_card))
+        val light = level >= AnimLevel.LIGHT
+        val summary = getString(when {
+            pending -> R.string.anim_applying
+            light -> R.string.anim_light_on
+            else -> R.string.anim_light_off
+        })
+        cards.row(perf, getString(R.string.anim_light_title), summary) {
+            runCatching { AnimLevel.request(this, if (light) AnimLevel.FULL else AnimLevel.LIGHT) }.onFailure { e ->
+                android.widget.Toast.makeText(this, getString(R.string.anim_failed, e.message ?: e.javaClass.simpleName), android.widget.Toast.LENGTH_LONG).show()
+            }
+            // The watcher checks every second, then ColorOS's home screen and status bar restart.
+            list.postDelayed({ if (!isDestroyed) GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) } }, 2500)
+            GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) }
+        }.isEnabled = !pending
+        if (BuildConfig.DEBUG) schedulerTrialRow(perf)
+    }
+
+    private fun schedulerTrialRow(perf: android.widget.LinearLayout) {
+        SchedulerTrial.current() ?: return
+        val cards = com.fahadali.oneos.shared.NativeCards
+        val row = cards.row(perf, getString(R.string.scheduler_trial_title))
+        val refresh = object : Runnable {
+            override fun run() {
+                val state = SchedulerTrial.current()
+                if (state == null) {
+                    row.visibility = View.GONE
+                    return
+                }
+                val pending = SchedulerTrial.pending(this@MainActivity, state.token)
+                val full = AnimLevel.current() == AnimLevel.FULL
+                val target = state.target?.let { getString(it.label) }.orEmpty()
+                row.summary = when {
+                    pending || state.phase == SchedulerTrial.Phase.STARTING -> getString(R.string.scheduler_trial_starting)
+                    state.phase == SchedulerTrial.Phase.RUNNING -> getString(R.string.scheduler_trial_running, target)
+                    !full -> getString(R.string.scheduler_trial_full_only)
+                    state.phase == SchedulerTrial.Phase.RESTORED -> getString(R.string.scheduler_trial_restored, target)
+                    state.phase == SchedulerTrial.Phase.FAILED -> getString(R.string.scheduler_trial_failed, target)
+                    else -> getString(R.string.scheduler_trial_off)
+                }
+                row.isEnabled = full && !pending && !state.busy
+                if ((pending || state.busy) && row.isAttachedToWindow && !isDestroyed) row.postDelayed(this, 1000)
+            }
+        }
+        row.setOnClickListener {
+            val options = SchedulerTrial.Target.entries
+            AlertDialog.Builder(this).setTitle(R.string.scheduler_trial_title)
+                .setItems(options.map { getString(it.label) }.toTypedArray()) { _, choice ->
+                    runCatching { SchedulerTrial.request(this, options[choice]) }.onFailure {
+                        android.widget.Toast.makeText(this, R.string.scheduler_trial_request_failed, android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    row.removeCallbacks(refresh)
+                    refresh.run()
+                }
+                .setNegativeButton(android.R.string.cancel, null).show()
+        }
+        row.post(refresh)
     }
 
     /** Record full logs from now (0.5.17): hidden when the session's OneOS is too old to answer. */

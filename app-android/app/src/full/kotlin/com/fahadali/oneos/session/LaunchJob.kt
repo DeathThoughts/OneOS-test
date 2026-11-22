@@ -233,6 +233,12 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
             // The apps One UI offers, for the guest's own Bring apps screen. A failure is only logged: the launch goes on.
             if (!guard.isCancelled()) BringAppsJob.sendCatalog(app)
         }
+        // Debloater (0.5.32): root's list of apps to hide becomes this system's Debloat screen's, for test runs too
+        // (their setup hides the same folders). A refusal is only logged: the start goes on.
+        if (!guard.isCancelled()) {
+            update(state.copy(detail = "Writing the apps to hide…"))
+            Debloater.beforeLaunch(app, image.id)
+        }
         if (!guard.commit()) throw Cancelled()
         update(state.copy(cancellable = false))
         val sid = ByteArray(8).also { SecureRandom().nextBytes(it) }.let(Hashes::hex)
@@ -243,6 +249,8 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
         update(state.copy(detail = "Root is checking everything again and starting the switch…"))
         val guestVulkan = BuildConfig.DEBUG && !dryRun && image.id == Images.ID_FIND_X9U_IN_1105 &&
             (profile.id == Profiles.ID_S_8550 || profile.id == Profiles.ID_A55) && SessionPrefs.guestVulkan(app)
+        val schedulerTrials = BuildConfig.DEBUG && !dryRun && image.id == Images.ID_COLOROS17_PYB110 &&
+            profile.id == Profiles.ID_S_8550
         val reply = RootVerbs.run(
             app, RootScript.Verb.LAUNCH,
             listOf(
@@ -254,6 +262,7 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 if (SessionPrefs.autoGuestPatches(app)) "1" else "0",
                 if (guestVulkan) "1" else "0",
                 if (SessionPrefs.shareFiles(app)) "1" else "0",
+                if (schedulerTrials) "1" else "0",
             ),
             silenceMs = 5 * 60_000L,
         )

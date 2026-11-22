@@ -126,11 +126,15 @@ object Images {
     const val ID_FIND_N6 = "coloros17-findn6"
     const val ID_FIND_X9U_IN = "coloros17-findx9u-in"
     const val ID_FIND_X9U_IN_1105 = "coloros17-findx9u-in-1105"
+    const val ID_COLOROS17_PYB110 = "coloros17-pyb110"
     const val ID_COLOROS17_TWINTY4C = "coloros17-twinity4c"
     const val ID_PIXEL_YOGI = "pixel11fold-yogi"
     const val ID_PIXEL_KODIAK = "pixel11pro-kodiak"
     const val ID_HYPEROS_LHASA = "hyperos-lhasa"
     const val ID_HYPEROS_POPSICLE = "hyperos-popsicle"
+    const val ID_HYPEROS_MADRID = "hyperos-madrid"
+    /** Starts with "hyper": switcher/assets/boot_status.sh names the boot splash from it. */
+    const val ID_HYPEROS_HONGKONG = "hyperos-hongkong"
     const val ID_PIXEL_KOMODO = "pixel9proxl-komodo"
     const val ID_INFINITYX = "infinityx41-findx9u"
     const val ID_NOTHING_METROID = "nothingos5-metroid"
@@ -436,6 +440,32 @@ object Images {
         mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/tag/images",
     )
 
+    /** Xiaomi 18 Pro Max China OS4.0.30.0.XEOCNXM, the base Galaxy S23 trial. */
+    val HYPEROS_MADRID = ImageRef(
+        id = ID_HYPEROS_MADRID,
+        label = "HyperOS 4, Xiaomi 18 Pro Max China build",
+        shortName = "Xiaomi 18 Pro Max",
+        name = "HyperOS 4",
+        variant = "Xiaomi 18 Pro Max China",
+        blurb = "Xiaomi's HyperOS OS4.0.30.0.XEOCNXM on the base Galaxy S23. Untested.",
+        downloadUrl = null,
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_HyperOS4_Madrid.zip",
+        gzBytes = 4_479_942_793L,
+        gzSha256 = "c4598e28013122112f7dcb2736723362cb3bff3058f5b0f8166f0acaeb3a669b",
+        rawBytes = 7_818_280_960L,
+        rawSha256 = "ad674d33986b18bfc1d5c3d4d4878573e32b6241c2e66815deb9d4a6d86163e3",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = true,
+        presentsGms = true,
+        family = SystemFamily.HYPEROS,
+        zipEntryName = "system.img",
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/actions/runs/44753230951",
+    )
+
     /**
      * ColorOS 17 China, the OnePlus 13T "TWNTY4.0c" build for the Poco F5
      * (MARBLE) ported to the base Galaxy S23 (0.5.19 trial). Android 17
@@ -465,6 +495,36 @@ object Images {
         family = SystemFamily.COLOROS,
         zipEntryName = "system.img",
         mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/releases/tag/twinity4c-81fff7581ff4",
+    )
+
+    /**
+     * HyperOS 4 Global (0.5.27, tested on the Galaxy A36): Xiaomi's global build OS4.0.5.0.XFRMIXM
+     * (`CP2A.260605.016`), MysticGSI's HyperOS patch set (`mysticgsi/out/oneos-hyperos-hongkong`). Google
+     * services: GmsCore and the Play Store are ordinary priv-apps in its product partition (as in the Nothing
+     * image), and its set also stages `gmssystem_payload.img`, so sessions present that GmsCore as on the
+     * One UI 9.5 image ([presentsGms]): Google services cannot be hidden for a launch.
+     */
+    val HYPEROS_HONGKONG = ImageRef(
+        id = ID_HYPEROS_HONGKONG,
+        label = "HyperOS 4 Global",
+        shortName = "HyperOS 4 Global",
+        name = "HyperOS 4",
+        variant = null,
+        blurb = "Xiaomi's HyperOS 4 global build. With Google apps.",
+        downloadUrl = SHARED_FOLDER_URL,
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "OneOS_HyperOS4_Global.img.gz",
+        gzBytes = 5_626_496_228L,
+        gzSha256 = "c9dbf413b8d4cd14387b2cac68b6d5a62a160c920f7b63dc55f07216828258b7",
+        rawBytes = 10_482_176_000L,
+        rawSha256 = "29083fa42c8144637066015d9648f9c927ddf761eefdf78989024e88f13e1721",
+        testedOn = "Galaxy A36",
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = true,
+        presentsGms = true,
+        family = SystemFamily.HYPEROS,
     )
 
     /**
@@ -666,7 +726,43 @@ object Images {
      */
     val DATA_UPGRADES: Map<String, String> = mapOf(ID_FIND_X9U_IN to ID_FIND_X9U_IN_1105)
 
-    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_POPSICLE, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
+
+    /** OnePlus 16 China 17.0.1.201(CN01), Android 17, built for an untested base Galaxy S23 trial. */
+    val COLOROS17_PYB110 = ImageRef(
+        id = ID_COLOROS17_PYB110,
+        label = "ColorOS 17, OnePlus 16 China build",
+        shortName = "OnePlus 16",
+        name = "ColorOS 17",
+        variant = "OnePlus 16 China 17.0.1.201",
+        blurb = "OnePlus 16 China ColorOS, for a Galaxy S23 trial. Untested on a phone.",
+        downloadUrl = "https://github.com/DeathThoughts/OneOS-test/actions/runs/44932670737/artifacts/14718423839",
+        sdk = 37,
+        buildId = "CP2A.260605.016",
+        gzName = "pyb110-system-img-untested.zip",
+        gzBytes = 7_508_245_938L,
+        gzSha256 = "14eafb346a6a97ad94fc840d5e319af87aace20956f30eeb40aaa3aac9306c59",
+        rawBytes = 13_810_913_280L,
+        rawSha256 = "1b7057a78c6a0f834e5020832c3ef2f82cafba5570d62559e9cb2d6761d86f4c",
+        testedOn = null,
+        cpuRequired = emptyList(),
+        cpuUsedByApps = emptyList(),
+        googleServices = false,
+        presentsGms = false,
+        family = SystemFamily.COLOROS,
+        zipEntryName = "system.img",
+        mirrorUrlOverride = "https://github.com/DeathThoughts/OneOS-test/actions/runs/44932670737/artifacts/14718423839",
+    )
+
+    // The first Actions artifact wrapped this gzip in a ZIP. Import the gzip
+    // itself with its own download pin and the same verified raw image pin.
+    private val pyb110Gzip = COLOROS17_PYB110.copy(
+        gzName = "OneOS_ColorOS17_OnePlus16.img.gz",
+        gzBytes = 7_437_913_442L,
+        gzSha256 = "11b89e48e57a924fbd3c91f6b3839913514a50273da87cf88f86201532010569",
+        zipEntryName = null,
+    )
+
+    val ALL: List<ImageRef> = listOf(FIND_N6, FIND_X9U_IN_1105, COLOROS17_TWINTY4C, COLOROS17_PYB110, PIXEL_YOGI, PIXEL_KODIAK, PIXEL_KOMODO, INFINITYX, HYPEROS_LHASA, HYPEROS_HONGKONG, HYPEROS_POPSICLE, HYPEROS_MADRID, NOTHING_METROID, NOTHING_ASTEROIDS, OXYGEN16, ORIGINOS7, LINEAGE24, ONEUI95)
 
     fun byId(id: String, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.id == id }
 
@@ -688,8 +784,18 @@ object Images {
     fun shortName(id: String, images: List<ImageRef> = ALL, retired: List<RetiredImage> = RETIRED): String =
         byId(id, images)?.shortName ?: retired.firstOrNull { it.id == id }?.shortName ?: id
 
-    /** The image whose .gz has exactly this size (`OpenableColumns.SIZE`). */
-    fun byGzSize(bytes: Long, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.gzBytes == bytes }
+    /** The image whose archive has exactly this size (`OpenableColumns.SIZE`). */
+    fun byGzSize(bytes: Long, images: List<ImageRef> = ALL): ImageRef? =
+        archivesBySize(bytes, images).firstOrNull()
+
+    internal fun archivesBySize(bytes: Long, images: List<ImageRef>): List<ImageRef> =
+        images.mapNotNull { image ->
+            when {
+                image.gzBytes == bytes -> image
+                bytes == pyb110Gzip.gzBytes && image == COLOROS17_PYB110 -> pyb110Gzip
+                else -> null
+            }
+        }
 
     fun byRawSize(bytes: Long, images: List<ImageRef> = ALL): ImageRef? = images.firstOrNull { it.rawBytes == bytes }
 
@@ -804,7 +910,7 @@ object ImageIdentifier {
                 block("Image size unknown", "$name has no size. Tap Check file to read it; $wantText.", R_SIZE_UNKNOWN),
             )
         }
-        val bySize = images.filter { it.gzBytes == size }
+        val bySize = Images.archivesBySize(size, images)
         if (bySize.isEmpty()) {
             val raw = Images.byRawSize(size, images)
             val retired = retiredImages.firstOrNull { it.gzBytes == size }

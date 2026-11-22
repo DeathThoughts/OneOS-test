@@ -35,6 +35,7 @@ import com.fahadali.oneos.core.model.Plain
 import com.fahadali.oneos.core.model.Profiles
 import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.core.root.RootProbe
+import com.fahadali.oneos.session.AppAssets
 import com.fahadali.oneos.session.LaunchJob
 import com.fahadali.oneos.session.LogJob
 import com.fahadali.oneos.session.OldStagesJob
@@ -98,10 +99,16 @@ open class SystemsActivity : ToolbarActivity() {
 
     /** "I have the file" of [imageId] (null: whichever system it is). */
     fun choose(imageId: String?) {
-        if (imageId == Images.ID_HYPEROS_POPSICLE || imageId == Images.ID_COLOROS17_TWINTY4C) {
+        if (imageId == Images.ID_HYPEROS_MADRID && AppAssets.availableImages(this).none { it.id == imageId }) return
+        val importInstructions = when (imageId) {
+            Images.ID_HYPEROS_MADRID -> R.string.image_madrid_zip_instructions
+            Images.ID_HYPEROS_POPSICLE, Images.ID_COLOROS17_TWINTY4C -> R.string.image_split_zip_instructions
+            else -> null
+        }
+        if (imageId != null && importInstructions != null) {
             val image = requireNotNull(Images.byId(imageId))
             AlertDialog.Builder(this).setTitle(image.nameWithVariant)
-                .setMessage(getString(R.string.image_split_zip_instructions, image.gzName))
+                .setMessage(getString(importInstructions, image.gzName))
                 .setPositiveButton(R.string.image_pick_title) { _, _ -> pickArchive(imageId) }
                 .setNegativeButton(android.R.string.cancel, null).show()
         } else {
@@ -322,7 +329,7 @@ class SystemsFragment : Fragment() {
         val good = FixActions.pickedImage(ctx, p)
         if (good == null) {
             redraw(force = true)
-            badPick(a, p, ImageIdentifier.identify(file.check, p), cardId)
+            badPick(a, p, ImageIdentifier.identify(file.check, p, AppAssets.availableImages(ctx)), cardId)
             return
         }
         if (cardId != null && good.id != cardId) {
@@ -343,7 +350,7 @@ class SystemsFragment : Fragment() {
     }
 
     private fun badPick(a: SystemsActivity, p: PhoneProfile, id: ImageIdentity, cardId: String?) {
-        val card = cardId?.let { cid -> p.images().firstOrNull { it.id == cid } }
+        val card = cardId?.let { cid -> p.images(AppAssets.availableImages(a)).firstOrNull { it.id == cid } }
         val b = AlertDialog.Builder(a)
         if (id.finding.reason == ImageIdentifier.R_SIZE_UNKNOWN) {
             // Only reading the whole file tells what it is: Check file on the file page.
@@ -442,7 +449,7 @@ class SystemsFragment : Fragment() {
 
         updateLine()
         val carousel = root.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.systems_carousel)
-        val available = p?.images().orEmpty()
+        val available = p?.images(AppAssets.availableImages(requireContext())).orEmpty()
         val st = check.result?.status
         val rememberedImage = EnvironmentNavigation.preparedImage(ctx)
         val setUpId = st?.marker?.takeIf { st.ours && it.profileId == p?.id }?.imageId
@@ -451,30 +458,36 @@ class SystemsFragment : Fragment() {
         val maintenance = rememberedImage?.let { ImageMaintenance.message(ctx, it, check.result) }
         val pickedId = p?.let { FixActions.pickedImage(ctx, it)?.id }
         val settingUpId = prep.image?.id?.takeIf { prep.busy }
-        fun image(family: com.fahadali.oneos.core.model.SystemFamily, fallback: ImageRef): ImageRef =
-            available.firstOrNull { it.family == family && it.id == setUpId }
-                ?: available.firstOrNull { it.family == family && it.id in st?.oldImages.orEmpty().values }
-                ?: rememberedImage?.takeIf { it.family == family && it.id == setUpId }
-                ?: available.firstOrNull { it.family == family } ?: fallback
-        // The ColorOS card keeps the non-Twinity image; the Twinity trial has its own card.
+        // 0.5.27: HyperOS 4 Global has a card of its own, so the family's card leaves it out (except).
+        fun image(family: com.fahadali.oneos.core.model.SystemFamily, fallback: ImageRef, except: String? = null): ImageRef =
+            available.firstOrNull { it.family == family && it.id != except && it.id == setUpId }
+                ?: available.firstOrNull { it.family == family && it.id != except && it.id in st?.oldImages.orEmpty().values }
+                ?: rememberedImage?.takeIf { it.family == family && it.id != except && it.id == setUpId }
+                ?: available.firstOrNull { it.family == family && it.id != except } ?: fallback
+        val colorTrials = setOf(Images.ID_COLOROS17_TWINTY4C, Images.ID_COLOROS17_PYB110)
         val color = image(com.fahadali.oneos.core.model.SystemFamily.COLOROS, Images.FIND_N6)
-            .takeUnless { it.id == Images.ID_COLOROS17_TWINTY4C }
+            .takeUnless { it.id in colorTrials }
             ?: available.firstOrNull {
-                it.family == com.fahadali.oneos.core.model.SystemFamily.COLOROS && it.id != Images.ID_COLOROS17_TWINTY4C
+                it.family == com.fahadali.oneos.core.model.SystemFamily.COLOROS && it.id !in colorTrials
             }
             ?: Images.FIND_N6
         val pixel = image(com.fahadali.oneos.core.model.SystemFamily.PIXEL, Images.PIXEL_YOGI)
         val infinity = image(com.fahadali.oneos.core.model.SystemFamily.INFINITYX, Images.INFINITYX)
         val hyper = Images.HYPEROS_LHASA
         val popsicle = available.firstOrNull { it.id == Images.ID_HYPEROS_POPSICLE }
+        val madrid = available.firstOrNull { it.id == Images.ID_HYPEROS_MADRID }
         val twinity = available.firstOrNull { it.id == Images.ID_COLOROS17_TWINTY4C }
+        val pyb110 = available.firstOrNull { it.id == Images.ID_COLOROS17_PYB110 }
+        val hyperGlobal = Images.HYPEROS_HONGKONG
         val nothing = image(com.fahadali.oneos.core.model.SystemFamily.NOTHING, Images.NOTHING_METROID)
         val oxygen = image(com.fahadali.oneos.core.model.SystemFamily.OXYGENOS, Images.OXYGEN16)
         val origin = image(com.fahadali.oneos.core.model.SystemFamily.ORIGINOS, Images.ORIGINOS7)
         val lineage = image(com.fahadali.oneos.core.model.SystemFamily.LINEAGE, Images.LINEAGE24)
         val oneui = image(com.fahadali.oneos.core.model.SystemFamily.ONEUI, Images.ONEUI95)
         // OxygenOS 16 (Android 16, 0.4.67) only where the phone can take it (One UI 8), and first there.
-        val entries = listOfNotNull(
+        val familyEntries = listOfNotNull(
+            // HyperOS 4 Global (0.5.27, tested on the Galaxy A36) first, with its own artwork, on the phones that offer it.
+            CatalogEntry(hyperGlobal.shortName, hyperGlobal, R.drawable.os_hyperos_global, true).takeIf { available.any { it.id == hyperGlobal.id } },
             CatalogEntry(oxygen.name, oxygen, R.drawable.os_oxygenos, true).takeIf { available.any { it.id == oxygen.id } },
             // OriginOS 7 (0.4.73, experimental) only on its phones (the Snapdragon S23 to S26 series, the Exynos S24 and S24+, and Z Fold7/8).
             CatalogEntry(origin.name, origin, R.drawable.os_originos, true).takeIf { available.any { it.id == origin.id } },
@@ -485,12 +498,31 @@ class SystemsFragment : Fragment() {
             CatalogEntry(infinity.name, infinity, R.drawable.os_infinity, available.any { it.id == infinity.id }),
             CatalogEntry(hyper.name, hyper, R.drawable.os_hyperos, available.any { it.id == hyper.id }),
             popsicle?.let { CatalogEntry(it.name, it, R.drawable.os_hyperos, true) },
+            madrid?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_hyperos, true) },
             twinity?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
+            pyb110?.let { CatalogEntry(it.nameWithVariant, it, R.drawable.os_coloros, true) },
             CatalogEntry(color.name, color, R.drawable.os_coloros, available.any { it.id == color.id }),
             CatalogEntry(nothing.name, nothing, R.drawable.os_nothing, available.any { it.id == nothing.id }),
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
         )
 
+        val entries = if (p?.id == Profiles.ID_S26_FE) {
+            val shownIds = familyEntries.mapNotNull { it.image?.id }.toSet()
+            val artByFamily = familyEntries.associate { it.image?.family to it.art }
+            val variants = available.filterNot { it.id in shownIds }.map {
+                CatalogEntry(it.nameWithVariant, it, artByFamily.getValue(it.family), true)
+            }
+            familyEntries.map { entry ->
+                val ref = entry.image
+                if (ref != null && available.count { it.family == ref.family } > 1) {
+                    entry.copy(name = ref.nameWithVariant)
+                } else {
+                    entry
+                }
+            } + variants
+        } else {
+            familyEntries
+        }
 
         currentEntries = entries
         val state = if (revealed) carousel.layoutManager?.onSaveInstanceState() else null
@@ -601,7 +633,8 @@ class SystemsFragment : Fragment() {
             p?.choice(image?.id.orEmpty())?.tested == true -> R.string.catalog_optimised
             else -> R.string.catalog_experimental
         })
-        badge.text = if (image?.id == Images.ID_HYPEROS_POPSICLE || image?.id == Images.ID_COLOROS17_TWINTY4C) "${entry.name} · $status" else status
+        v.findViewById<TextView>(R.id.systems_name).text = entry.name
+        badge.text = status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send

@@ -3,6 +3,7 @@ package com.fahadali.oneos.session
 import android.content.Context
 import com.fahadali.oneos.BuildConfig
 import com.fahadali.oneos.core.model.Hashes
+import com.fahadali.oneos.core.model.ImageRef
 import com.fahadali.oneos.core.model.Images
 import com.fahadali.oneos.core.model.InstalldExpected
 import com.fahadali.oneos.core.model.PackageSet
@@ -103,6 +104,20 @@ object AppAssets {
 
     private fun packed(ctx: Context): Set<String> =
         ctx.applicationContext.assets.list("oneos/files")?.toSet() ?: emptySet()
+
+    /** Madrid requires a pinned set with a size and a source for every file. */
+    fun availableImages(ctx: Context): List<ImageRef> {
+        val madridAvailable = runCatching {
+            val trial = list(ctx, PackageSets.ID_HYPER_MADRID)
+            val sizes = sizes(ctx)
+            val bundled = packed(ctx)
+            val remote = remoteIds(ctx)
+            trial.isNotEmpty() && trial.values.all { hash ->
+                (sizes[hash] ?: 0) > 0 && (hash in bundled || !remote[hash].isNullOrEmpty())
+            }
+        }.getOrDefault(false)
+        return if (madridAvailable) Images.ALL else Images.ALL.filterNot { it.id == Images.ID_HYPEROS_MADRID }
+    }
 
     /** The files of [files] that are neither in the APK nor downloaded yet, with their sources. */
     fun toDownload(ctx: Context, files: List<Staged>): List<Pair<Staged, List<String>>> {

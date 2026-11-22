@@ -40,13 +40,57 @@ root_only() {
 }
 [ "$(id -u 2>/dev/null)" = 0 ] || refuse "not running as root"
 
+# 0.5.29: Android's own logcat, first in PATH for this session and everything it starts (the watcher, the
+# return, the capture). On a Galaxy S24 FE (reports e15e83eb, e3b995a7) the "logcat" root's shell found was
+# another program ("error: unexpected argument '-d' found / Usage: logcat <COMMAND>"): the full session log
+# stayed empty and the watcher's logcat checks (the guest's power-off request among them) saw nothing.
+LOGCAT_BIN=""
+for c in /system/bin/logcat $(command -v logcat 2>/dev/null); do
+    [ -x "$c" ] || continue
+    if timeout 5 "$c" -d -t 1 >/dev/null 2>&1; then LOGCAT_BIN=$c; break; fi
+done
+LC_PATH=$(command -v logcat 2>/dev/null)
+# 0.5.31: S24 FE b1feb4d2: /system/bin/logcat itself was a bind mount of a root tool's file
+# (/data/local/tmp/ksud-s25u-kdp, f2fs). Android's logcat is still under it: a wrapper runs it in a mount
+# namespace of its own (a slave of One UI's, so the unmount stays in it) with that mount taken off. It execs
+# "logcat" by name, so the capture's command line still starts with "logcat " (pgrep '^logcat ...').
+LCW=/data/local/tmp/oneos_logcat_bin
+if [ -z "$LOGCAT_BIN" ] && grep -q -F ' /system/bin/logcat ' /proc/self/mountinfo 2>/dev/null; then
+    mkdir -p "$LCW" && rm -f "$LCW/logcat" &&
+        printf '%s\n' '#!/system/bin/sh' \
+            "exec /system/bin/unshare -m /system/bin/sh -c 'mount -o rslave none / || exit 1; umount -l /system/bin/logcat 2>/dev/null; PATH=/system/bin:/system/xbin; export PATH; exec logcat \"\$@\"' logcat \"\$@\"" \
+            > "$LCW/logcat.new" && chmod 755 "$LCW/logcat.new" &&
+        if timeout 5 "$LCW/logcat.new" -d -t 1 >/dev/null 2>&1; then
+            mv -f "$LCW/logcat.new" "$LCW/logcat" && LOGCAT_BIN="$LCW/logcat"
+            echo "preflight: /system/bin/logcat is covered by a mount ($(grep -F ' /system/bin/logcat ' /proc/self/mountinfo | cut -d' ' -f4 | head -n 1)); Android's own logcat runs from under it for this session"
+        else
+            rm -f "$LCW/logcat.new"
+        fi
+fi
+if [ "$LOGCAT_BIN" = "$LCW/logcat" ]; then
+    PATH="$LCW:$PATH" && export PATH
+elif [ -z "$LOGCAT_BIN" ]; then
+    echo "preflight: no logcat that takes logcat's options (PATH's: ${LC_PATH:-none}; $(ls -l /system/bin/logcat 2>&1 | cut -c1-160); mounts on it: $(grep -F ' /system/bin/logcat ' /proc/self/mountinfo 2>/dev/null | cut -d' ' -f4,5,9 | tr '\n' ';')): this session's logs have no logcat"
+elif [ "$LC_PATH" != "$LOGCAT_BIN" ]; then
+    mkdir -p /data/local/tmp/oneos_logcat_bin && ln -sf "$LOGCAT_BIN" /data/local/tmp/oneos_logcat_bin/logcat &&
+        PATH="/data/local/tmp/oneos_logcat_bin:$PATH" && export PATH
+    echo "preflight: logcat in PATH was ${LC_PATH:-none} ($(timeout 5 "${LC_PATH:-/nonexistent}" -d -t 1 2>&1 | head -n 1 | cut -c1-120)); using $LOGCAT_BIN"
+fi
+
 # A store app's native helper run as a program (libtimer.so from an app's lib
 # folder, as the shell user, argument "umhpipe") that works on kernel pipes:
 # every S24-family kernel panic in free_pipe_info/pipe_read since 0.4.9x ran in
-# that thread (0.5.03's timer_threads.txt, report 60192300, 11-13). Not stopped
-# here: the panic comes when its pipe is freed, so killing it would be the crash. The
-# app starts the tool again at boot (aee4e2df on 0.5.04: refused after two restarts), so
-# the message asks for the app to be uninstalled.
+# that thread (0.5.03's timer_threads.txt, report 60192300, 11-13). Up to 0.5.27 it was
+# not stopped here (the panic was thought to come when its pipe is freed) and the switch
+# refused until the app was uninstalled or turned off; see 0.5.28 below.
+# 11-19 report 176dcdab (S24 Ultra, 0.5.25, kernel panic in libtimer.so pid 1730): the app had been updated
+# while its tool ran, and the tool's exe read ".../==deleted==/.../lib/arm64/libtimer.so (deleted)", which the
+# pattern missed; the app's name is then taken from the command line (its old /data/app path).
+# 0.5.28 (owner: "can we not just kill it ourselves before booting"): S24 users could not start any system
+# since 0.5.24, also after uninstalling the app: an uninstalled or updated app's tool keeps running from its
+# deleted file until a restart, and "Turn it off" did not see it there. OneOS now stops every libtimer.so
+# program itself, wherever it was started from (deleted or not), before anything else; the watcher stops one
+# that starts during the session too. The switch is refused only when one survives the kill.
 #
 # An app update can unlink the executable while it still runs (S24 Ultra, 0.5.25,
 # report 176dcdab). The scan keeps matching that process after the update.
@@ -56,15 +100,14 @@ root_only() {
 # ("oneos_switch.sh start 05:52:13", "process scan done 05:52:22") on ~1500
 # processes, as guest_runtime.sh's baseline did (c9e13b9). ls -l prints
 # "... $1/PID/exe -> TARGET" for each (kernel threads and vanished pids only
-# complain on stderr); the awk regex is the case pattern below
-# (/data/app/*/lib/*/libtimer.so, * across slashes too), and the first match
-# in /proc order is printed as "PID TARGET", as the old loop refused at the
-# first. A target with spaces stays whole after the first " -> ". $1 is the
-# proc root (tests pass a fixture). It prints "none" when it saw link lines and
-# no match, and nothing when ls gave no " -> " line for any pid (an ls that
-# followed the links or printed them another way): then the old readlink loop
-# below decides, slowly, so a refusal that keeps an S24's kernel alive never
-# goes missing because of the scan's shape.
+# complain on stderr); the awk regex matches a libtimer.so program wherever it
+# runs from, live or "(deleted)" (an uninstalled or updated app's), and every
+# match is printed as "PID TARGET", one per line. A target with spaces stays
+# whole after the first " -> ". $1 is the proc root (tests pass a fixture). It
+# prints "none" when it saw link lines and no match, and nothing when ls gave no
+# " -> " line for any pid (an ls that followed the links or printed them another
+# way): then the readlink loop in timer_tools decides, slowly, so a libtimer.so
+# that keeps an S24's kernel in danger never goes missing because of the scan's shape.
 libtimer_exe() {
     ls -l "$1"/[0-9]*/exe 2>/dev/null | awk -v root="$1/" '
         { i = index($0, " -> "); if (i == 0) next
@@ -73,37 +116,40 @@ libtimer_exe() {
           p = substr(l, j + length(root)); sub(/\/exe$/, "", p)
           if (p !~ /^[0-9]+$/) next
           c++
-          if (t !~ /^\/data\/app\/.*\/lib\/.*\/libtimer\.so( \(deleted\))?$/) next
-          if (!n++) m = p " " t }
+          if (t !~ /\/libtimer\.so( \(deleted\))?$/) next
+          n++; m = m (m == "" ? "" : "\n") p " " t }
         END { if (n) print m; else if (c) print "none" }' || :
 }
-refuse_libtimer() {
-    lt_pid=$1
-    lt_exe=$2
-    lt_proc=$3
-    a=${lt_exe#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
-    case "$lt_exe:$a" in
-        *" (deleted)":*|*:|*:*/*)
-            a=$(tr '\0' ' ' 2>/dev/null < "$lt_proc/$lt_pid/cmdline" |
-                sed -n 's|^/data/app/[^/]*/\([A-Za-z0-9_.]*\)-[^/]*/lib/.*|\1|p')
-            [ -n "$a" ] || a="(an app updated since it started the tool)" ;;
-    esac
-    refuse "the app $a runs a kernel tool (libtimer.so, pid $lt_pid) that crashed the kernel of S24 phones during OneOS sessions. It starts again after every restart, so restarting does not help: uninstall $a (Settings, Apps; the phone may restart once while its tool closes), then switch again"
-}
 libtimer_proc=/proc
-lt=$(libtimer_exe "$libtimer_proc")
-if [ -z "$lt" ]; then
-    echo "preflight: process scan fell back to readlink (ls gave no link targets)"
-    for ex in "$libtimer_proc"/[0-9]*/exe; do
-        t=$(readlink "$ex" 2>/dev/null) || continue
-        case "$t" in
-            /data/app/*/lib/*/libtimer.so|/data/app/*/lib/*/libtimer.so" (deleted)")
-                pid=${ex%/exe}
-                refuse_libtimer "${pid##*/}" "$t" "$libtimer_proc" ;;
-        esac
+timer_tools() { # pid and program of every process whose program is a libtimer.so, one per line
+    lt=$(libtimer_exe "$libtimer_proc")
+    if [ -z "$lt" ]; then
+        [ "${1:-}" != first ] || echo "preflight: process scan fell back to readlink (ls gave no link targets)" >&2
+        for ex in "$libtimer_proc"/[0-9]*/exe; do
+            t=$(readlink "$ex" 2>/dev/null) || continue
+            # The suffix quoted: Android's mksh does not strip an unquoted " (deleted)" with ${t% (deleted)}.
+            case "$t" in */libtimer.so|*/libtimer.so" (deleted)") p=${ex%/exe}; echo "${p##*/} $t" ;; esac
+        done
+    elif [ "$lt" != none ]; then
+        echo "$lt"
+    fi
+}
+TT=$(timer_tools first)
+if [ -n "$TT" ]; then
+    echo "$TT" | while read -r tp tt; do
+        echo "preflight: stopping an app's kernel tool, pid $tp ($tt): it crashed the kernel of S24 phones during OneOS sessions"
+        kill -s KILL "$tp" 2>/dev/null
     done
-elif [ "$lt" != none ]; then
-    refuse_libtimer "${lt%% *}" "${lt#* }" "$libtimer_proc"
+    n=0
+    while [ -n "$(timer_tools)" ] && [ $n -lt 10 ]; do sleep 0.3; n=$((n + 1)); done
+    TT=$(timer_tools)
+    if [ -n "$TT" ]; then
+        tt=$(echo "$TT" | head -n 1 | cut -d' ' -f2-)
+        a=${tt#/data/app/}; a=${a#*/}; a=${a%%/lib/*}; a=${a%%-*}
+        case "$a" in */*|""|"$tt") a="an app" ;; esac
+        refuse "the app $a runs a kernel tool (libtimer.so, pid $(echo "$TT" | head -n 1 | cut -d' ' -f1)) that crashed the kernel of S24 phones during OneOS sessions, and it did not stop: restart the phone, then switch again"
+    fi
+    echo "preflight: the kernel tool stopped"
 fi
 echo "preflight: process scan done $(date +%T)"
 
@@ -268,6 +314,10 @@ case "${ONEOS_HEAT_CAP_CPU:-1}" in 0|1) ;; *) refuse "ONEOS_HEAT_CAP_CPU=$ONEOS_
 # the adb loop sets it: the app's session.env has no such key and
 # oneos_root.sh unsets every other ONEOS_* variable.
 case "${ONEOS_GUEST_BOOST:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_BOOST=$ONEOS_GUEST_BOOST (0 or 1)" ;; esac
+# The guest feeding the battery temperature to the speaker amplifier (guest_start.sh): 0 or 1, unset meaning 0.
+case "${ONEOS_GUEST_AMP_TEMP:-0}" in 0|1) ;; *) refuse "ONEOS_GUEST_AMP_TEMP=$ONEOS_GUEST_AMP_TEMP (0 or 1)" ;; esac
+# The ColorOS fingerprint icon scaled by the running mode's width (guest_props.sh): 0 or 1, unset meaning 0.
+case "${ONEOS_GUEST_FP_ICON_SCALE:-0}" in 0|1) ;; *) refuse "ONEOS_GUEST_FP_ICON_SCALE=$ONEOS_GUEST_FP_ICON_SCALE (0 or 1)" ;; esac
 case "${ONEOS_FULL_LOGS:-1}" in 0|1) ;; *) refuse "ONEOS_FULL_LOGS=$ONEOS_FULL_LOGS (0 or 1)" ;; esac
 # Silence the noise tags in the logcat capture (LOGCAT_FILTER, below): 0 or 1, unset meaning 1.
 case "${ONEOS_LOG_FILTER:-1}" in 0|1) ;; *) refuse "ONEOS_LOG_FILTER=$ONEOS_LOG_FILTER (0 or 1)" ;; esac
@@ -380,7 +430,14 @@ for PA_FILE in "/dev/__properties__/${PA_CTX:-u:object_r:system_prop:s0}" "/dev/
     if PA_LEFT=$(pa_free "$PA_FILE"); then
         # No OneOS session since the phone restarted: a restart cannot help, this phone's One UI leaves too
         # little room for this system (0.5.17, S25 5e098b17 restarted many times and got the same refusal).
-        if [ "$PA_LEFT" -lt "$PA_NEED" ] && [ "$(cat "$STAGE/guest_props.boot" 2>/dev/null)" != "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" ]; then
+        # (0.5.28: also /data/local/tmp/oneos_props.boot, which a new stage does not remove.)
+        PA_BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+        if [ "$PA_LEFT" -lt "$PA_NEED" ] && [ "$(cat "$STAGE/guest_props.boot" 2>/dev/null)" != "$PA_BOOT" ] &&
+           [ "$(cat /data/local/tmp/oneos_props.boot 2>/dev/null)" != "$PA_BOOT" ]; then
+            # 0.5.28: what fills it, for the report (S25+ a957415a: 4 KB left in default_prop right after a
+            # restart): the area's property names by their first two parts, the most first (names only).
+            echo "Property area ${PA_FILE##*/}: $(getprop -Z 2>/dev/null | grep -cF "[${PA_FILE##*/}]") names; the most common prefixes:"
+            getprop -Z 2>/dev/null | grep -F "[${PA_FILE##*/}]" | sed -n 's/^\[\([^].]*\.[^].]*\).*/\1/p' | sort | uniq -c | sort -rn | head -n 20
             refuse "This phone's One UI leaves too little property space for this system, even right after a restart ($((PA_LEFT / 1024)) KB left in ${PA_FILE##*/}, it needs $((PA_NEED / 1024)) KB). Choose another system; please send a report so we can look at it"
         fi
         [ "$PA_LEFT" -ge "$PA_NEED" ] ||
@@ -478,6 +535,8 @@ echo "=== OneOS guest takeover starting ==="
 echo "Last reset before this session: $(cat /proc/reset_reason 2>/dev/null | tr -d '\000\n' | head -c 40); $(head -c 600 /proc/extra 2>/dev/null | tr -d '\000' | tr '\n' ' ' | head -c 300); boot reasons $(getprop persist.sys.boot.reason.history | head -n 3 | tr '\n' ' '); uptime $(cut -d' ' -f1 /proc/uptime 2>/dev/null) s"
 # One header per session in auto_return.log, which every session appends to:
 # the app's last-session screen reads the outcome of the newest session only.
+# /proc/uptime includes suspend. Capture the header's time for the return report.
+SESSION_START_UPTIME=$(awk '$1 ~ /^[0-9]+[.][0-9]+$/ { print int($1) }' /proc/uptime 2>/dev/null)
 echo "=== OneOS session $(date '+%F %T') epoch $(date +%s) boot $(cat /proc/sys/kernel/random/boot_id 2>/dev/null) app $APP profile ${ONEOS_PROFILE:-none} return max ${ONEOS_RETURN_MAX:-600}s black ${ONEOS_RETURN_BLACK:-150}s keys ${ONEOS_RETURN_KEYS:-1} ===" >> "$STAGE/auto_return.log"
 echo "preflight: switch start $(date +%T)"
 
@@ -514,7 +573,17 @@ GUEST_RESTART_REQ="$STAGE/data/user/0/com.fahadali.oneos.guest/files/oneos_resta
 # watcher below starts the session's full capture on it and says so in /data/oneos_bootui/full_logs.
 GUEST_FULLLOGS_REQ="$STAGE/data/user/0/com.fahadali.oneos.guest/files/oneos_full_logs"
 FULLLOGS_STATE="$STAGE/data/oneos_bootui/full_logs"
-rm -f "$GUEST_RETURN_REQ" "$GUEST_RESTART_REQ" "$GUEST_FULLLOGS_REQ"
+# 0.5.32 (owner, A36 ColorOS: level 3 "is better ... add a toggle in OneOS guest app"): Lighter animations in the
+# guest's OneOS app is a fourth request file ("1" or "3"): the watcher sets ColorOS's persist.sys.oplus.anim_level,
+# restarts its launcher and SystemUI, keeps the choice in data/oneos_anim_level for the next starts
+# (guest_props.sh) and answers in /data/oneos_bootui/anim_level.
+GUEST_ANIM_REQ="$STAGE/data/user/0/com.fahadali.oneos.guest/files/oneos_anim_level"
+ANIM_STATE="$STAGE/data/oneos_bootui/anim_level"
+GUEST_SCHED_REQ="$STAGE/data/user/0/com.fahadali.oneos.guest/files/oneos_scheduler_trial"
+SCHED_SCRIPT="$STAGE/pyb110-scheduler-trial.sh"
+SCHED_DIR="$STAGE/data/oneos_bootui"
+SCHED_TOKEN=''
+rm -f "$GUEST_RETURN_REQ" "$GUEST_RESTART_REQ" "$GUEST_FULLLOGS_REQ" "$GUEST_ANIM_REQ"
 # An earlier session's mark (it would make this session's report look like full logs were on).
 rm -f "$STAGE/full_logs_mid.log"
 # One UI's protected state, recorded now and compared by return_to_oneui.sh:
@@ -919,8 +988,8 @@ echo "preflight: guest baseline done $(date +%T)"
 # guest's boot) after about 26 minutes. The watcher's 90 s round also keeps
 # the files of the boot in $LOGS/head (hard links, below).
 LOGS=/data/local/tmp/oneos_logs
-# Logcat filterspecs for the two captures below (the one this session starts and the
-# one the guest's OneOS app turns on mid-session), defined once so they cannot drift.
+LOGCAT_PROCESS="^(/system/bin/)?logcat .*$LOGS/boot[.]log( |$)"
+# Logcat filterspecs shared by every session capture.
 # Galaxy S25 Ultra, ColorOS 17 guest, sessions 22343aacdd4e1d6c, 161a843fbaddcd7a and
 # f8c0108ef1bea94a (2026-11-18/19): the guest logs 210-420k lines/min at boot and
 # 20-150k/min later, so a 32 MB file lasted 30-60 s, the report (head/, the newest
@@ -934,7 +1003,7 @@ LOGS=/data/local/tmp/oneos_logs
 # host perf HAL) and the other Oplus helpers. Nothing used for diagnosis is listed
 # (MediaProvider, StorageManager*, ActivityManager, WindowManager, Keyguard, Biometric,
 # camera, vold, init, OneOS*, audio...): '*:V' keeps every other tag. The specs go after
-# -f/-r/-n so return_to_oneui.sh's pkill '^logcat .*/oneos_logs/boot.log' still matches.
+# -f/-r/-n, as in the unfiltered capture.
 # ONEOS_LOG_FILTER=0 (adb loop only, like ONEOS_GUEST_BOOST) captures everything again.
 # One line once assembled (the backslash-newlines vanish): the value is pasted into the
 # capture command's script text, where the quotes keep '*' from being a glob.
@@ -944,6 +1013,24 @@ Blur_WindowBlurSessionImpl:S Blur_ScreenCapture:S BlurApp:S SQLiteLog:S Finsky:S
 SG:S OplusRequestedLayerState:S OplusStartingWindowManager:S OverlayManager:S \
 OplusAppDataMigrateManager:S ULELite:S Region:S HYPER-HAL:S '*:V'"
 if [ "${ONEOS_LOG_FILTER:-1}" = 0 ]; then LOGCAT_FILTER=""; fi
+# Generate the capture even when Full session logs starts off: the guest can turn it on.
+# The S24 FE's PATH could resolve logcat to a different program with subcommands.
+cat > "$STAGE/logcat_capture.sh" <<LOGCAT_CAPTURE
+#!/system/bin/sh
+err="$STAGE/tmp/logcat_capture.\$\$.err"
+run_capture() {
+    /system/bin/logcat -b "\$1" -v threadtime -f "$LOGS/boot.log" -r 32768 -n 24 $LOGCAT_FILTER 2>"\$err"
+    status=\$?
+    echo "\$(date) logcat capture ended: exit \$status (\$(ls "$LOGS" 2>/dev/null | wc -l) files in $LOGS) \$(tail -c 512 "\$err" 2>/dev/null | tail -n 2 | tr '\n' ' ')" >> "$STAGE/auto_return.log"
+    rm -f "\$err"
+}
+run_capture all
+# Status 2 indicates rejected options. Signal exits from normal cleanup must stay stopped.
+if [ "\$status" = 2 ]; then
+    echo "\$(date) logcat capture: again on the main, system, crash, events and radio buffers" >> "$STAGE/auto_return.log"
+    run_capture main,system,crash,events,radio
+fi
+LOGCAT_CAPTURE
 # LOGCAT_HEAD=1 only for a capture this session starts: a capture already
 # running (by hand, or the last session's within the 120 s before
 # return_to_oneui.sh stops it) keeps its head/, which may hold the boot of an
@@ -956,18 +1043,18 @@ LOGCAT_HEAD=0
 if [ "${ONEOS_LOGCAT:-1}" = 1 ] && [ "${ONEOS_FULL_LOGS:-1}" != 1 ]; then
     # An earlier session's files move to oneos_logs.prev, as a new capture does, so this
     # session's report never carries them as its own.
-    if ! pgrep -f "^logcat .*$LOGS/boot.log" >/dev/null 2>&1; then
+    if ! pgrep -f "$LOGCAT_PROCESS" >/dev/null 2>&1; then
         rm -rf "$LOGS.prev"; [ -d "$LOGS" ] && mv "$LOGS" "$LOGS.prev"
     fi
     echo "Logcat capture: off (Full session logs off in the app)"
     if [ -d "$STAGE/data/oneos_bootui" ]; then echo 0 > "$FULLLOGS_STATE" && chmod 644 "$FULLLOGS_STATE"; fi
 elif [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
-    # pgrep -f matches the same "^logcat ... boot.log" command line in one
-    # process. The loop it replaces forked tr and grep for each of ~1100 pids:
+    # pgrep -f finds the capture by its command line. The loop it replaces
+    # forked tr and grep for each of ~1100 pids:
     # 1.6 s with One UI idle (measured 22 Oct, pgrep 49 ms), and it runs before
     # the gap splash below, which in run 33 reached ActivityTaskManager 6 s
     # after the switch started (adbd 14:40:51.03, START 14:40:57.03).
-    lp=$(pgrep -f "^logcat .*$LOGS/boot.log" 2>/dev/null | head -1)
+    lp=$(pgrep -f "$LOGCAT_PROCESS" 2>/dev/null | head -1)
     if [ -n "$lp" ]; then
         # The last return stops its capture two minutes after One UI is up
         # (return_to_oneui.sh) unless its token is gone: this session keeps it.
@@ -976,13 +1063,6 @@ elif [ "${ONEOS_LOGCAT:-1}" = 1 ]; then
     else
         rm -rf "$LOGS.prev"; [ -d "$LOGS" ] && mv "$LOGS" "$LOGS.prev"
         mkdir -p "$LOGS"
-        # 0.5.20: through a small script that logs the end of the capture with its exit status (several Galaxy
-        # S24+/S24 FE sessions with full logs on had no capture at all, "0 files of the boot kept": the process had
-        # gone and nothing said when or why); the watcher's rounds start it again if it ended early (see there).
-        printf '%s\n' '#!/system/bin/sh' \
-            "logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER" \
-            "echo \"\$(date) logcat capture ended: exit \$? (\$(ls $LOGS 2>/dev/null | wc -l) files in $LOGS)\" >> $STAGE/auto_return.log" \
-            > "$STAGE/logcat_capture.sh"
         $BB setsid sh "$STAGE/logcat_capture.sh" </dev/null >/dev/null 2>&1 &
         LOGCAT_HEAD=1
         echo "Logcat capture: $LOGS/boot.log"
@@ -1726,6 +1806,30 @@ if [ "${ONEOS_PREPARE_ONLY:-0}" = "1" ]; then
     exit 0
 fi
 
+# Each debug PYB110 session gets a new request token. A request left behind
+# by an earlier session cannot start a trial. Clear stale status on every boot.
+if (
+    cd -P "$SCHED_DIR" && [ "$PWD" = "$SCHED_DIR" ] && root_only . &&
+        rm -f ./scheduler_trial
+) 2>/dev/null && [ "$APP" = 1 ] && [ "${ONEOS_PYB110_SCHEDULER_TRIAL:-0}" = 1 ] &&
+   [ "$(getprop ro.product.model)" = SM-S911B ] &&
+   grep -qx '  "image": "coloros17-pyb110",' "$STAGE/.oneos_stage" &&
+   [ -f "$SCHED_SCRIPT" ] && [ ! -L "$SCHED_SCRIPT" ] && root_only "$SCHED_SCRIPT" &&
+   awk '$2 == "pyb110-scheduler-trial.sh" { found = 1 } END { exit !found }' "$SUMS"; then
+    SCHED_TOKEN=$(cat /proc/sys/kernel/random/uuid 2>/dev/null)
+    case "$SCHED_TOKEN" in ''|*[!0-9a-f-]*) SCHED_TOKEN='' ;; esac
+    if [ -n "$SCHED_TOKEN" ] && ! (
+        cd -P "$SCHED_DIR" && [ "$PWD" = "$SCHED_DIR" ] && root_only . || exit 1
+        pending=$(mktemp .scheduler.XXXXXX) || exit 1
+        printf '%s idle\n' "$SCHED_TOKEN" > "$pending" && chmod 644 "$pending" &&
+            "$BB" mv -Tf "$pending" ./scheduler_trial && exit 0
+        rm -f "$pending"
+        exit 1
+    ); then
+        SCHED_TOKEN=''
+    fi
+fi
+
 # OneOS: keep the network usable while the guest boots. With One UI's
 # ConnectivityService gone nothing maintains the routes, so the phone dropped
 # off the network (and the adb tunnel with it) until the guest finished
@@ -2295,6 +2399,10 @@ GUEST_VIVO=0
 # HyperOS keeps system_ext at the image root (system/system_ext links to One UI's).
 GUEST_MIUI=0
 [ -f "$STAGE/rootfs/system_ext/framework/miui-services.jar" ] && GUEST_MIUI=1
+# One UI images (0.5.32): their own input service drives the touch ICs through Samsung's sysinput HAL, so the
+# cover touch IC handling below is left to them (a second writer to the IC's enabled node: A17 5G kernel panic).
+GUEST_ONEUI=0
+grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null && GUEST_ONEUI=1
 # A guest whose status bar is AOSP's SystemUI, laid out from the framework's
 # cutout: every non-ColorOS guest, and Infinity-X, which carries OPPO's framework
 # jars (GUEST_OPLUS) on a LineageOS base. ColorOS's own SystemUI places its icons
@@ -2323,8 +2431,10 @@ esac
 # back to 60 Hz.  Read the highest physical mode (up to OneOS's 120 Hz policy)
 # from the One UI dump captured before the switch.  Keep 120 as the conservative
 # fallback for old stages or an incomplete dump.
+# 0.5.32: rounded first. The S24 FE's One UI lists its 120 Hz mode as fps=120.00001, which the old "<= 120"
+# test dropped: the guest got 60 Hz as its top rate and every swipe ran at 60 (report 44afc238).
 GUEST_REFRESH=120.0
-R=$(awk -F'fps=' '{ for (i = 2; i <= NF; i++) { v = $i + 0; if (v >= 30 && v <= 120 && v > m) m = v } }
+R=$(awk -F'fps=' '{ for (i = 2; i <= NF; i++) { v = int($i + 0.5); if (v >= 30 && v <= 120 && v > m) m = v } }
     END { if (m) printf "%.1f", m }' "$STAGE/display_host.txt" 2>/dev/null)
 case "$R" in
     30.0|[3-9][0-9].0|1[01][0-9].0|120.0) GUEST_REFRESH=$R ;;
@@ -3364,6 +3474,62 @@ while true; do
                 mkdir $STAGE/data/oneos_samcam_perms 2>/dev/null
                 echo \"[UI Activator] Samsung Camera: granted\${GR:- nothing} (once per stage)\"
             fi
+            # Debloater (0.5.32): an app guest_prepare.sh hid that the guest had updated (its newer copy in
+            # /data/app) stays installed as an ordinary app. The owner wants it removed for real, not turned
+            # off (A36 test, 1.1 GB of updates): that copy is uninstalled here (pm uninstall: its APK, code and data go), so
+            # nothing of it is left; Restore all brings back the image's own version, which Play updates again.
+            # data/oneos_debloat_off holds apps an earlier test build only turned off; they are turned on again
+            # once no longer listed, or uninstalled while still listed.
+            DBW=''
+            [ -s $STAGE/debloat.list ] && [ ! -L $STAGE/debloat.list ] && DBW=\$(cut -f1 $STAGE/debloat.list | grep -E '^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+\$' | sort -u)
+            DBO=$STAGE/data/oneos_debloat_off
+            if [ -L \$DBO ]; then
+                echo '[UI Activator] Debloat: data/oneos_debloat_off is a link, not made by OneOS; left alone'
+            elif [ -n \"\$DBW\" ] || [ -s \$DBO ]; then
+                GONE=''; KEPT=''; ON=''
+                for p in \$DBW; do
+                    PP=\$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm path \$p 2>/dev/null | head -n 1)
+                    case \"\$PP\" in
+                        package:/data/app/*)
+                            if timeout 60 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm uninstall \$p 2>/dev/null | grep -q Success; then
+                                GONE=\"\$GONE \$p\"
+                                [ -s \$DBO ] && { grep -v -x -F \"\$p\" \$DBO > \$DBO.new; mv \$DBO.new \$DBO; }
+                            else
+                                KEPT=\"\$KEPT \$p\"
+                            fi ;;
+                        package:*) KEPT=\"\$KEPT \$p(\${PP#package:})\" ;;
+                    esac
+                done
+                if [ -s \$DBO ]; then
+                    for p in \$(cat \$DBO); do
+                        printf '%s\\n' \"\$DBW\" | grep -q -x -F \"\$p\" && continue
+                        timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm enable --user 0 \$p >/dev/null 2>&1; ON=\"\$ON \$p\"
+                    done
+                    if [ -n \"\$ON\" ]; then
+                        for p in \$ON; do grep -v -x -F \"\$p\" \$DBO > \$DBO.new; mv \$DBO.new \$DBO; done
+                    fi
+                fi
+                [ -s \$DBO ] || rm -f \$DBO
+                # What is left of each app no longer installed: OneOS's storage guards (guest_storage_guards.py) drop
+                # installd's rmPackageDir and destroyAppData, which would act on One UI's data, so the code folder
+                # and the app's data stayed (A36, 11-21: Photos, YouTube, YouTube Music and Meet uninstalled, 620 MB
+                # of code and 290 MB of data left). They are in the stage, the guest's own /data: removed here, only
+                # for a listed app the guest's package list (read whole, 50 packages or more) does not have.
+                ALLP=\$(timeout 30 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm list packages 2>/dev/null | sed -n 's/^package://p')
+                FREED=0; LEFT=''
+                if [ \"\$(printf '%s\\n' \"\$ALLP\" | grep -c .)\" -ge 50 ]; then
+                    for p in \$DBW; do
+                        printf '%s\\n' \"\$ALLP\" | grep -q -x -F \"\$p\" && continue
+                        for d in $STAGE/data/app/~~*/\$p-* $STAGE/data/user/0/\$p $STAGE/data/user_de/0/\$p $STAGE/data/misc/profiles/cur/0/\$p $STAGE/data/misc/profiles/ref/\$p; do
+                            [ -d \"\$d\" ] && [ ! -L \"\$d\" ] || continue
+                            k=\$(du -sk \"\$d\" 2>/dev/null | cut -f1)
+                            rm -rf \"\$d\" && FREED=\$((FREED + \${k:-0})) || LEFT=\"\$LEFT \$d\"
+                            case \"\$d\" in $STAGE/data/app/~~*/*) rmdir \"\${d%/*}\" 2>/dev/null ;; esac
+                        done
+                    done
+                fi
+                echo \"[UI Activator] Debloat: updated copies removed:\${GONE:- none}; could not remove:\${KEPT:- none}; turned on again:\${ON:- none}; left-out apps' code and data freed: \$((FREED / 1024)) MB\${LEFT:+ (not removed:\$LEFT)}\"
+            fi
             # Nothing's Settings shows the phone's own RAM and storage in About
             # phone only on Nothing's phones (Build.DEVICE Spacewar or Pong, or
             # its bool screen_size_for_mp); anywhere else its strings def_ram and
@@ -3526,6 +3692,13 @@ while true; do
                 # fill\"); half of it looked right on the A36 (60 px).
                 HRCF=\$HRC
                 [ $GUEST_MIUI = 1 ] && case \"\$HRC\" in ''|*[!0-9]*) ;; *) HRC=\$((HRC / 2)) ;; esac
+                # Which of these overlays were already on when the guest started (an earlier session made them),
+                # for HyperOS's restart below.
+                PREALL=\$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay list 2>/dev/null | grep -F 'com.android.shell:OneOS')
+                PRE=\$(printf '%s\\n' \"\$PREALL\" | grep -F '[x] com.android.shell:OneOS')
+                # 0.5.32 (A36, 11-21: app open/close corners missing, and every HyperOS session found these off at
+                # start although the last one saved them on): their state as the guest started, for the next report.
+                [ $GUEST_MIUI = 1 ] && echo \"[UI Activator] HyperOS overlays at start: \$(printf '%s\\n' \"\$PREALL\" | tr '\\n' ' ' | cut -c1-400)\"
                 OVS=''
                 if [ -n \"\$CUT\" ] && [ -n \"\$CUTR\" ] &&
                    gxo fabricate --target android --name OneOSCutout android:string/config_mainBuiltInDisplayCutout string \"\$CUT\" &&
@@ -3569,10 +3742,22 @@ while true; do
                         ''|*[!0-9]*) ;;
                         *) r=\$(gdim OneOSCornerRadius android android:dimen/rounded_corner_radius=\$HRC android:dimen/rounded_corner_radius_top=\$HRC android:dimen/rounded_corner_radius_bottom=\$HRC)
                            case \"\$r\" in registered*) OVS=\"\$OVS OneOSCornerRadius\" ;; *) DIMS=\"\$DIMS radius: \$r;\" ;; esac
+                           # HyperOS's island (SystemUI's DynamicIslandController answers the plugin's
+                           # cutout_y with dimen/cut_out_center_y, Xiaomi's own phone's value) centred on
+                           # this phone's camera hole: the middle of One UI's cutout rect (A36: 24..92 -> 58;
+                           # it sat at 76 and the hole showed above the island, owner 11-19).
+                           if [ $GUEST_MIUI = 1 ]; then
+                               CY=\$(echo \"\$CUTR\" | tr -c '0-9,-' ' ' | tr ' ' '\\n' | sed -n 's/^-*[0-9]*,\\([0-9][0-9]*\\)\$/\\1/p' | sort -n | sed -n '1p;\$p' | tr '\\n' ' ')
+                               CY=\$(echo \"\$CY\" | awk 'NF == 2 && \$2 > \$1 { printf \"%d\", (\$1 + \$2) / 2 }')
+                               if [ -n \"\$CY\" ]; then
+                                   r=\$(gdim OneOSIslandCenter com.android.systemui com.android.systemui:dimen/cut_out_center_y=\$CY)
+                                   case \"\$r\" in registered*) OVS=\"\$OVS OneOSIslandCenter\" ;; *) DIMS=\"\$DIMS island \$CY px: \$r;\" ;; esac
+                               fi
+                           fi
                            # Where the corner's curve leaves the status bar's icons
                            # room: at a third of the bar's height (the top of the
                            # clock's digits). Only over the 8dp the static RRO
-                           # gives (24 px), both sides alike.
+                           # gives (24 px), both sides alike. AOSP SystemUI only.
                            PAD=\$(awk -v r=\"\${HRCF:-\$HRC}\" -v h=\"\${HSBG:-0}\" -v k=\"\$SBK\" 'BEGIN { if (split(k, a, \" \") == 2) r = r * a[1] / a[2]; y = h / 3; p = 0; if (y < r) p = r - sqrt(r * r - (r - y) * (r - y)); printf \"%d\", p + 0.5 }')
                            # HyperOS too (11-19, A36): Xiaomi's own SystemUI overlay gives 100 px, the
                            # clock started at 113 px; this phone's curve gives 36 (\"perfect\", owner).
@@ -3642,6 +3827,23 @@ while true; do
                     sp=\$(timeout 10 $BB nsenter -t \$PID -m /system/bin/pidof com.android.systemui 2>/dev/null)
                     case \"\$sp\" in ''|*[!0-9\ ]*) ;; *) kill \$sp 2>/dev/null && echo \"[UI Activator] Nothing's SystemUI restarted for the power key place and status bar\" ;; esac ;;
                 esac
+                # 0.5.31 (owner's A36, HyperOS 4 Global r4, 11-20: \"the px adjustment for the status bar icons and
+                # the roundness of app open/close animations are not applied this session\"): HyperOS's SystemUI
+                # (the icons' corner padding) and launcher (the window corner radius of its open/close cards) read
+                # these once, when they start. A session that starts with them on (an earlier session made them) is
+                # right; the first one on new files enabled them at 23:30 after both started at 23:29, while
+                # WindowManager had them (status bar 101 px, corners 59 px). Overlays turned on here that were off
+                # when the guest started: both restarted once.
+                if [ $GUEST_MIUI = 1 ]; then
+                    NEWON=''
+                    for o in \$ON; do printf '%s\\n' \"\$PRE\" | grep -q -x -F \"[x] com.android.shell:\$o\" || NEWON=\"\$NEWON \$o\"; done
+                    if [ -n \"\$NEWON\" ]; then
+                        for pk in com.android.systemui com.miui.home; do
+                            sp=\$(timeout 10 $BB nsenter -t \$PID -m /system/bin/pidof \$pk 2>/dev/null)
+                            case \"\$sp\" in ''|*[!0-9\ ]*) ;; *) kill \$sp 2>/dev/null && echo \"[UI Activator] HyperOS: \$pk restarted for the overlays turned on now:\$NEWON\" ;; esac
+                        done
+                    fi
+                fi
                 echo \"[UI Activator] status bar: One UI's cutout '\${HCS:-none}', as \$CUTU: '\${CUT:-none}', rect '\${CUTR:-none}'; height \${HSB:-?} px\${SBK:+ (\$HSBG px at the \${SBK% *} px the guest runs)}, corner radius \${HRC:-?} px; overlays on:\${ON:- none}\${DIMS:+ (not made:\$DIMS)}\"
             else
                 # No host cutout this session (ONEOS_GUEST_HOST_CUTOUT=0, or a
@@ -3651,7 +3853,7 @@ while true; do
                     case \$o in
                         OneOSCornerRadius) [ -n \"\$CRAD\" ] && continue
                             gxo disable --user 0 com.android.shell:\$o && OFF=\"\$OFF \$o\" ;;
-                        OneOSCutout|OneOSCutoutRect|OneOSStatusBarHeight|OneOSCornerPadding|OneOSNtStatusBar|OneOSIslandY|OneOSNtPowerKey)
+                        OneOSCutout|OneOSCutoutRect|OneOSStatusBarHeight|OneOSCornerPadding|OneOSNtStatusBar|OneOSIslandY|OneOSIslandCenter|OneOSNtPowerKey)
                             gxo disable --user 0 com.android.shell:\$o && OFF=\"\$OFF \$o\" ;;
                     esac
                 done
@@ -3772,7 +3974,7 @@ while true; do
                         sec_touchscreen2) TS2=/dev/input/\${e##*/} ;;
                     esac
                 done
-                if [ \"${ONEOS_COVER_TSP:-1}\" = 1 ] && [ \"${ONEOS_GUEST_FORM:-fold}\" = fold ] && [ -n \"\$FLIP\" ] && [ -n \"\$TS2\" ]; then
+                if [ \"${ONEOS_COVER_TSP:-1}\" = 1 ] && [ $GUEST_ONEUI = 0 ] && [ \"${ONEOS_GUEST_FORM:-fold}\" = fold ] && [ -n \"\$FLIP\" ] && [ -n \"\$TS2\" ]; then
                     for d in /sys/class/sec/tsp*; do
                         [ \"\$(cat \$d/input/name 2>/dev/null)\" = sec_touchscreen2 ] && [ -w \$d/enabled ] && TSP2=\$d
                         [ \"\$(cat \$d/input/name 2>/dev/null)\" = sec_touchscreen ] && [ -w \$d/enabled ] && TSP1=\$d
@@ -4317,7 +4519,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     F=$STAGE/heat_cap.log
     CFL=/sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit
     if [ $HEAT_CAP = 1 ]; then
-        echo \"# \$(date) OneOS heat cap: from 45.0, 46.5, 48.0 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down)\" > \$F
+        echo \"# \$(date) OneOS heat cap: from 45.0, 46.5, 48.0 C skin every CPU policy and the GPU at 80, 65, 50% of their top clock (three readings running 2 C under to step down); charging with the screen on, from 44, 48 C direct charger 80, 65% (0.5.31, 2 C hysteresis)\" > \$F
         if [ $HEAT_CAP_CPU = 1 ]; then
             echo \"# and from 82, 90 C on the hottest CPU thermal zone for levels 1 and 2 only (three and four readings running to go up, three 4 C under to step down); the higher level applies\" >> \$F
         else
@@ -4406,7 +4608,7 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
     # Curve B (S25 Ultra, coloros17-findx9u-in-1105, sessions db475ad5017133c4 and
     # a12bf19e1931e81a): skin enters immediately and waits 3 readings (-2 C) to leave;
     # CPU needs 3 >= 82 C for L1, 4 >= 90 C for L2 (max), and 3 (-4 C) to leave.
-    slvl=0; clvl=0; sk_prev=''; sk_prev2=''; cpu_prev=0; cpu_prev2=0; cpu_prev3=0; hst=0
+    chl=0; slvl=0; clvl=0; sk_prev=''; sk_prev2=''; cpu_prev=0; cpu_prev2=0; cpu_prev3=0; hst=0
     while true; do
         if [ -f $STAGE/data/oneos_rec_stop ] || [ ! -s $STAGE/guest_mntns ]; then
             [ \$lvl = 0 ] || full stopped
@@ -4462,6 +4664,27 @@ if [ $HEAT_CAP = 1 ] || [ $GUEST_THERMAL_MAP = 1 ]; then
                 [ \$clvl -gt \$new ] && new=\$clvl
                 why=\"\${why:+\$why, }cpu \$((ct / 1000)).\$((ct % 1000 / 100)) C (\$cz)\"
             fi
+            # 0.5.31 (upstream, owner's A36, HyperOS, 45 W): charging with the screen on keeps the direct charger at
+            # 47-52 C while One UI's SSRM holds the clocks back; battery/dchg_temp (0.1 C) sets one more level:
+            # from 44 C 80%, from 48 C 65% (2 C hysteresis, chl). The highest level of skin, CPU and charging
+            # applies. Builtins only (read, case): it runs every 10 s.
+            ch=0; chs=''; chv=''; chdt=0
+            read -r chs 2>/dev/null < /sys/class/power_supply/battery/status
+            if [ \"\$chs\" = Charging ]; then
+                read -r chdt 2>/dev/null < /sys/class/power_supply/battery/dchg_temp
+                case \"\$chdt\" in ''|*[!0-9]*) chdt=0 ;; esac
+                on=0
+                for b in /sys/class/backlight/*/brightness; do chv=''; read -r chv 2>/dev/null < \$b; case \"\$chv\" in ''|0|*[!0-9]*) ;; *) on=1 ;; esac; done
+                if [ \$on = 1 ] && [ \$chdt -gt 0 ]; then
+                    ch=\$chl
+                    [ \$ch -lt 2 ] && [ \$chdt -ge 480 ] && ch=2
+                    [ \$ch -lt 1 ] && [ \$chdt -ge 440 ] && ch=1
+                    [ \$ch = 2 ] && [ \$chdt -lt 460 ] && ch=1
+                    [ \$ch = 1 ] && [ \$chdt -lt 420 ] && ch=0
+                fi
+            fi
+            chl=\$ch
+            if [ \$ch -gt \$new ]; then new=\$ch; why=\"\${why:+\$why, }charging, direct charger \$((chdt / 10)) C\"; fi
             case \$new in 1|2) cam_limit ;; esac
             if [ \"\$new\" = 0 ] && [ \$first = 1 ]; then
                 capped=''
@@ -4932,6 +5155,78 @@ if [ "$RETURN_MAX" -gt 0 ]; then
         echo -1000 > /proc/\$\$/oom_score_adj 2>/dev/null
         t=0; total=0; dead=0; sfgone=0; prev_failed=0; homebase=0; wmbase=0; wmseen=0; sui=0
         trial_gen=''
+        sched_pid=''
+        sched_target=''
+        sched_running=0
+        sched_output=$STAGE/tmp/scheduler-$SCHED_TOKEN.log
+        scheduler_status() (
+            cd -P $SCHED_DIR && [ \"\$PWD\" = $SCHED_DIR ] || exit 1
+            case \"\$(stat -c '%u %A' . 2>/dev/null)\" in
+                \"0 \"?????w*|\"0 \"????????w*) exit 1 ;;
+                \"0 \"*) ;;
+                *) exit 1 ;;
+            esac
+            [ -f ./scheduler_trial ] && [ ! -L ./scheduler_trial ] || exit 1
+            read -r token rest < ./scheduler_trial || exit 1
+            [ \"\$token\" = $SCHED_TOKEN ] || exit 1
+            pending=\$(mktemp .scheduler.XXXXXX) || exit 1
+            printf '%s %s %s\n' $SCHED_TOKEN \"\$1\" \"\$sched_target\" > \"\$pending\" &&
+                chmod 644 \"\$pending\" && $BB mv -Tf \"\$pending\" ./scheduler_trial && exit 0
+            rm -f \"\$pending\"
+            exit 1
+        )
+        scheduler_tick() {
+            if [ -n \"\$sched_pid\" ]; then
+                if kill -0 \"\$sched_pid\" 2>/dev/null; then
+                    if [ \"\$sched_running\" = 0 ] && grep -q '^Trial active for ' \"\$sched_output\"; then
+                        scheduler_status running
+                        sched_running=1
+                    fi
+                    return
+                fi
+                if wait \"\$sched_pid\"; then
+                    scheduler_status restored
+                else
+                    scheduler_status failed
+                fi
+                cat \"\$sched_output\"
+                rm -f \"\$sched_output\"
+                sched_pid=''
+            fi
+            [ -f $GUEST_SCHED_REQ ] && [ ! -L $GUEST_SCHED_REQ ] || return
+            [ -d $STAGE/tmp ] && [ ! -L $STAGE/tmp ] || return
+            claim=\$(mktemp $STAGE/tmp/scheduler-request.XXXXXX) || return
+            # Pin the physical app directory, and claim the leaf before reading
+            # it. A symlink swapped in during the rename is rejected after it.
+            if (
+                cd -P ${GUEST_SCHED_REQ%/*} && [ \"\$PWD\" = ${GUEST_SCHED_REQ%/*} ] &&
+                    timeout 2 $BB mv -Tf ./oneos_scheduler_trial \"\$claim\"
+            ) && [ -f \"\$claim\" ] && [ ! -L \"\$claim\" ]; then
+                request_size=\$(stat -c %s \"\$claim\" 2>/dev/null)
+                case \"\$request_size\" in
+                    [1-9]|[1-7][0-9]|80) request=\$(timeout 2 head -c 80 \"\$claim\") ;;
+                    *) request=''; request_size=0 ;;
+                esac
+            else
+                request=''
+                request_size=0
+            fi
+            rm -f \"\$claim\"
+            [ \"\$request_size\" -eq \"\${#request}\" ] || return
+            case \"\$request\" in
+                \"$SCHED_TOKEN render\") sched_target=render ;;
+                \"$SCHED_TOKEN main\") sched_target=main ;;
+                \"$SCHED_TOKEN unirender-engine\") sched_target=unirender-engine ;;
+                \"$SCHED_TOKEN launcher-worker0\") sched_target=launcher-worker0 ;;
+                \"$SCHED_TOKEN launcher-worker1\") sched_target=launcher-worker1 ;;
+                \"$SCHED_TOKEN launcher-main\") sched_target=launcher-main ;;
+                *) return ;;
+            esac
+            scheduler_status starting || return
+            /system/bin/sh $SCHED_SCRIPT --run 60 \"\$sched_target\" </dev/null > \"\$sched_output\" 2>&1 &
+            sched_pid=\$!
+            sched_running=0
+        }
         restart_guest() {
             kind=base
             if [ -f $STAGE/tmp/guest-patch-session/scope ]; then
@@ -4960,7 +5255,39 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             restart_guest patch-rollback 0
         }
         rm -f $STAGE/diag.pid
+        lt_n=0
+        lt_list() { # pid and program of every libtimer.so program, one per line (the preflight's scan)
+            lt=\$(ls -l /proc/[0-9]*/exe 2>/dev/null | awk -v root=/proc/ '
+                { i = index(\$0, \" -> \"); if (i == 0) next
+                  t = substr(\$0, i + 4); l = substr(\$0, 1, i - 1)
+                  j = index(l, root); if (j == 0) next
+                  p = substr(l, j + length(root)); sub(/\\/exe\$/, \"\", p)
+                  if (p !~ /^[0-9]+\$/) next
+                  c++
+                  if (t !~ /\\/libtimer\\.so( \\(deleted\\))?\$/) next
+                  n++; m = m (m == \"\" ? \"\" : \"\\n\") p \" \" t }
+                END { if (n) print m; else if (c) print \"none\" }')
+            if [ -z \"\$lt\" ]; then
+                for ex in /proc/[0-9]*/exe; do
+                    tt=\$(readlink \$ex 2>/dev/null) || continue
+                    case \"\$tt\" in */libtimer.so|*/libtimer.so\" (deleted)\") tp=\${ex%/exe}; echo \"\${tp##*/} \$tt\" ;; esac
+                done
+            elif [ \"\$lt\" != none ]; then
+                echo \"\$lt\"
+            fi
+        }
         while [ \$t -lt $RETURN_MAX ]; do
+            # 0.5.28: an app's kernel tool (libtimer.so, see the preflight) started during the session is
+            # stopped too (S24 Ultra e4e21a83: the kernel panicked in such a thread 8 minutes in). The preflight's
+            # single ls and awk scan, only every 6th round (about once a minute): a readlink fork per process cost
+            # 9 s on the S25 Ultra's ~1500 processes, and this loop would pay it every 10 s.
+            lt_n=\$((lt_n + 1))
+            if [ \$((lt_n % 6)) = 0 ]; then
+                lt_list | while read -r tp tt; do
+                    kill -s KILL \$tp 2>/dev/null
+                    echo \"\$(date) stopped an app's kernel tool started during the session: pid \$tp (\$tt)\"
+                done
+            fi
             # The 10 s wait ends early on a request. Run 34: Volume Up + Volume
             # Down were held 3 s from 16:43:56, but the request was handled only
             # at 16:44:06 (the rest of this wait, then the diagnostics and the
@@ -4986,13 +5313,32 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 # Only with ONEOS_LOGCAT=1, and only once: a capture that runs is left alone.
                 if [ -f $GUEST_FULLLOGS_REQ ] && [ ! -L $GUEST_FULLLOGS_REQ ]; then
                     rm -f $GUEST_FULLLOGS_REQ
-                    if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && ! pgrep -f '^logcat .*$LOGS/boot.log' >/dev/null 2>&1; then
+                    if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && ! pgrep -f '$LOGCAT_PROCESS' >/dev/null 2>&1; then
                         mkdir -p $LOGS
-                        $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER </dev/null >/dev/null 2>&1 &
+                        if [ -f $STAGE/logcat_capture.sh ]; then
+                            $BB setsid sh $STAGE/logcat_capture.sh </dev/null >/dev/null 2>&1 &
+                        else
+                            $BB setsid logcat -b all -v threadtime -f $LOGS/boot.log -r 32768 -n 24 $LOGCAT_FILTER </dev/null >/dev/null 2>&1 &
+                        fi
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\" >> $STAGE/full_logs_mid.log
                         echo \"\$(date) Full session logs turned on in the guest's OneOS app\"
                     fi
                     if [ \"${ONEOS_LOGCAT:-1}\" = 1 ] && [ -d $STAGE/data/oneos_bootui ]; then echo 1 > $FULLLOGS_STATE && chmod 644 $FULLLOGS_STATE; fi
+                fi
+                if [ -n '$SCHED_TOKEN' ]; then scheduler_tick; fi
+                if [ -z \"\$sched_pid\" ] && [ -f $GUEST_ANIM_REQ ] && [ ! -L $GUEST_ANIM_REQ ]; then
+                    al=\$(timeout 2 head -c 4 $GUEST_ANIM_REQ 2>/dev/null | tr -dc 0-9)
+                    rm -f $GUEST_ANIM_REQ
+                    case \"\$al\" in
+                        1|3)
+                            if [ -f $ANIM_STATE ] && [ ! -L $ANIM_STATE ] && [ ! -L $STAGE/data/oneos_anim_level ]; then
+                                echo \"\$al\" > $STAGE/data/oneos_anim_level
+                                setprop persist.sys.oplus.anim_level \"\$al\"
+                                kill \$(pidof com.android.launcher) \$(pidof com.android.systemui) 2>/dev/null
+                                echo \"\$al\" > $ANIM_STATE && chmod 644 $ANIM_STATE
+                                echo \"\$(date) ColorOS animation level \$al from the guest's OneOS app (launcher and SystemUI restarted)\"
+                            fi ;;
+                    esac
                 fi
                 if [ -f $GUEST_RESTART_REQ ] && [ ! -L $GUEST_RESTART_REQ ]; then
                     rm -f $GUEST_RESTART_REQ
@@ -5040,7 +5386,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         continue
                     fi
                 fi
-                echo \"\$(date) guest requested a soft reboot (\$req) after \${t}s\"
+                echo \"\$(date) guest requested a soft reboot (\$req) after \${total}s\"
                 # A second restart while testing rolls back to the last accepted script.
                 [ -z \"\$trial_gen\" ] || app_restart=0
                 if restart_guest \"\$req\" \"\$app_restart\"; then continue; fi
@@ -5048,7 +5394,14 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 exec /system/bin/sh $STAGE/return_to_oneui.sh
             fi
             if [ -n \"\$req\" ]; then
-                echo \"\$(date) guest requested '\$req' after \${total}s, returning to One UI\"
+                # Report elapsed time from the session header, including suspend.
+                elapsed=\$total
+                session_start='$SESSION_START_UPTIME'
+                current_uptime=\$(awk '\$1 ~ /^[0-9]+[.][0-9]+$/ { print int(\$1) }' /proc/uptime 2>/dev/null)
+                if [ -n \"\$session_start\" ] && [ -n \"\$current_uptime\" ] && [ \"\$current_uptime\" -ge \"\$session_start\" ]; then
+                    elapsed=\$((current_uptime - session_start))
+                fi
+                echo \"\$(date) guest requested '\$req' after \${elapsed}s, returning to One UI\"
                 # Who asked: the guarded ShutdownThread logs under the tag OneOS (run
                 # 31 was Restart in ColorOS's power menu, seen only in the recording).
                 # 0.4.87: the system buffer on its own. Read together with main, a busy
@@ -5130,7 +5483,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # $LOGS/head: hard links, no copy, and no space used until the
             # rotation deletes their first name. This session's capture only.
             # The capture ended early (0.5.20, see where it starts): started again, appending to its file.
-            if [ $LOGCAT_HEAD = 1 ] && [ -n \"\$dname\" ] && [ -f $STAGE/logcat_capture.sh ] && ! pgrep -f \"^logcat .*$LOGS/boot.log\" >/dev/null 2>&1; then
+            if [ $LOGCAT_HEAD = 1 ] && [ -n \"\$dname\" ] && [ -f $STAGE/logcat_capture.sh ] && ! pgrep -f '$LOGCAT_PROCESS' >/dev/null 2>&1; then
                 mkdir -p $LOGS
                 $BB setsid sh $STAGE/logcat_capture.sh </dev/null >/dev/null 2>&1 &
                 echo \"\$(date) logcat capture had ended: started again\"
@@ -5337,6 +5690,12 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         # 55af6cc8: compass and camera did not work, and nothing in the logs told why).
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys sensorservice > \$D/sensors.txt 2>&1
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys media.camera > \$D/camera.txt 2>&1
+                        # Video encoders as the guest sees them (11-20 report 193e52c2, A56 on Nothing OS: video
+                        # recording still used the guest's software AVC encoder, which crashed, with the software
+                        # ones ranked last; the phone's Codec2 store answered 'createComponent -- transaction failed').
+                        { timeout 10 $BB nsenter -t \$SFP -m /system/bin/sh -c 'service list 2>&1 | grep -iE c2\|codec; ls -lZ /vendor/etc/media_codecs*.xml; grep -hoE name=.c2[.][a-z0-9_.]*encoder. /vendor/etc/media_codecs*.xml | sort -u; grep -h encoder /vendor/etc/media_codecs_performance.xml | head -n 30; grep media_codecs /proc/self/mountinfo; ls /dev | grep -iE ^video\|mfc\|mscl'
+                          echo; ps -A -o PID,LABEL,NAME 2>/dev/null | grep -iE 'c2|codec|media'
+                        } > \$D/codecs.txt 2>&1
                         # WebView and the zygote sockets (S24 Ultra, IN build, session 77e7789e: the
                         # WebView zygote start found no zygote socket file).
                         { timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys webviewupdate
@@ -5526,6 +5885,13 @@ if [ "$RETURN_MAX" -gt 0 ]; then
         # boot matches (and the PID is still a oneos_switch.sh shell).
         cat /proc/sys/kernel/random/boot_id 2>/dev/null > "$KS/boot"
         KDEVS=$(getevent -pl 2>/dev/null | awk '/^add device/ { dev = $NF } /KEY_VOLUME(UP|DOWN)/ { print dev }' | sort -u)
+        # 0.5.32 (owner, A36: a frozen ColorOS, black screen, no sign the chord was taken): one buzz when the 3 s
+        # hold is recognized. Straight from the phone's vibrator HAL (IVibrator.on(ms, null callback), transaction
+        # 3), which serves One UI and the guest alike and keeps running whatever either framework does; a
+        # timed_output node where the kernel has one.
+        KVIB=$(service list 2>/dev/null | sed -n 's/.*\(android\.hardware\.vibrator\.IVibrator\/[A-Za-z0-9_]*\).*/\1/p' | head -n 1)
+        [ -n "$KVIB" ] || { [ -w /sys/class/timed_output/vibrator/enable ] && KVIB=timed_output; }
+        echo "$KVIB" > "$KS/vibrator"
         for kd in $KDEVS; do
             # Like the watcher: not in the app cgroup, never OOM-killed (the
             # getevent and the loop below inherit it from this subshell; the
@@ -5543,6 +5909,11 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                     ( sleep 3
                       [ "$(cat "$KS/both" 2>/dev/null)" = "$tok" ] && [ "$(cat "$KS/up")" = DOWN ] && [ "$(cat "$KS/down")" = DOWN ] &&
                           echo "$(date) Volume Up + Volume Down held 3 s" >> "$STAGE/auto_return.log" &&
+                          { case "$(cat "$KS/vibrator" 2>/dev/null)" in
+                                '') ;;
+                                timed_output) echo 200 > /sys/class/timed_output/vibrator/enable 2>/dev/null ;;
+                                *) timeout 3 service call "$(cat "$KS/vibrator")" 3 i32 200 null >/dev/null 2>&1 ;;
+                            esac; true; } &&
                           setprop oneos.guest.powerctl "keys:volume-up+down" ) &
                 else
                     : > "$KS/both"

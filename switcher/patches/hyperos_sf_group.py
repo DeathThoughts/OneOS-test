@@ -13,10 +13,12 @@ HyperOS session there (0.4.31 to 0.4.36). Both byte loads become 32-bit loads.
 
 Each supported /system_ext/lib64/libsurfaceflinger.so is pinned by SHA-256.
 
-Usage: hyperos_sf_group.py <libsurfaceflinger.so> <out libsurfaceflinger_patched.so>
+Usage: hyperos_sf_group.py [--madrid] <libsurfaceflinger.so> <out libsurfaceflinger_patched.so>
 """
 import hashlib
 import sys
+
+MADRID_SHA256 = "20bdc8f2e4e313b65fb019f68af21630b8c22c70d6c87f779c2cf06a9754591e"
 
 # (file offset, original instruction, patched instruction); offsets equal the
 # addresses in these libraries (their text segments are mapped at their file offsets).
@@ -35,6 +37,11 @@ BUILDS = {
         # constructAvailableRefreshRates() filter: ldrb w8, [x8, #48] -> ldr w8, [x8, #48]
         (0x4B3210, "08c14039", "083140b9"),
     ),
+    # Xiaomi 18 Pro Max CN (Madrid), HyperOS OS4.0.30.0.XEOCNXM.
+    MADRID_SHA256: (
+        (0x4A5624, "e9c24039", "e93240b9"),
+        (0x4B6F34, "08c14039", "083140b9"),
+    ),
     # HyperOS OS4.0.5.0.XFRMIXM Global (hongkong)
     "795d4a96c32007a612fc62956fabd40fb2c279b4ddb83e625c122d633239c8ad": (
         # constructAvailableRefreshRates()::$_2 filter (std::function body): ldrb w8, [x8, #48] -> ldr w8, [x8, #48]
@@ -46,9 +53,17 @@ BUILDS = {
 
 
 def main():
-    src, out = sys.argv[1], sys.argv[2]
+    args = sys.argv[1:]
+    madrid = args[:1] == ["--madrid"]
+    if madrid:
+        args = args[1:]
+    if len(args) != 2:
+        sys.exit(__doc__)
+    src, out = args
     data = bytearray(open(src, "rb").read())
     have = hashlib.sha256(data).hexdigest()
+    if madrid and have != MADRID_SHA256:
+        sys.exit(f"--madrid requires Madrid's libsurfaceflinger.so (sha256 {have})")
     patches = BUILDS.get(have)
     if patches is None:
         sys.exit("not the library this patch was made for (sha256 %s)" % have)

@@ -478,6 +478,8 @@ for pair in $BRIDGES; do
     d=${pair%%:*}
     umnt "/data/$d" || umnt -l "/data/$d" || true
 done
+# HyperOS's status bar threshold (guest_prepare.sh, 0.5.31): only the value OneOS set.
+[ "$(getprop debug.layered.strategy.phone)" = 99 ] && setprop debug.layered.strategy.phone "" 2>/dev/null || true
 # Never touch One UI's files, or start One UI in place, while a bridge is
 # still there: it would act on the guest's staged copy.
 still_bridged=""
@@ -1217,7 +1219,7 @@ if [ -d "$LOGS" ] && [ ! -L "$LOGS" ]; then
     echo $! > "$S/store_watch.pid"
     STOP_TOKEN="$(date +%s).$$"
     echo "$STOP_TOKEN" > "$LOGS/logcat.stop" 2>/dev/null
-    "$BB" sh -c "sleep 600; [ \"\$(cat $LOGS/logcat.stop 2>/dev/null)\" = $STOP_TOKEN ] || exit 0; rm -f $LOGS/logcat.stop; pkill -f '^logcat .*/data/local/tmp/oneos_logs/boot.log'" </dev/null >/dev/null 2>&1 &
+    "$BB" sh -c "sleep 600; [ \"\$(cat $LOGS/logcat.stop 2>/dev/null)\" = $STOP_TOKEN ] || exit 0; rm -f $LOGS/logcat.stop; pkill -f '^(/system/bin/)?logcat .*/data/local/tmp/oneos_logs/boot[.]log( |$)'" </dev/null >/dev/null 2>&1 &
 fi
 "$BB" rm -rf $NODES
 echo "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) $(date +%s)" > $S/return_inplace.done

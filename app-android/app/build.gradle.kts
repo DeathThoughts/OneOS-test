@@ -52,47 +52,56 @@ gradle.taskGraph.whenReady {
 // One UI" app; the ColorOS sets since their 2026-10-25 rebuild), and
 // guest_prepare.sh puts it in the guest's /oem/app.
 val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
-    "n6-global-f8" to (File(repoRoot, "out/fold8-global-r0513") to listOf("tethering_payload.img", "OneOSFoldCutout.apk", "OneOSTabletQs.apk")),
+    "n6-global-f8" to (File(repoRoot, "out/fold8-global-r0531") to listOf("tethering_payload.img", "OneOSFoldCutout.apk", "OneOSTabletQs.apk")),
     // Find N6 global image (0.4.38), the Z Folds. tethering_payload.img is never mounted.
-    "n6-f8u" to (File(repoRoot, "out/overlays_n6g_r21") to listOf("tethering_payload.img")),
+    "n6-f8u" to (File(repoRoot, "out/overlays_n6g_r23") to listOf("tethering_payload.img")),
     // Find X9 Ultra image, S Ultra: no fold grid either.
     // Find X9 Ultra IN image (0.3.3-0.3.6, again from 0.4.11), the bar phones:
     // the CN set's files (shared by hash) and its cell broadcast module.
     // 0.5.02: the newer Find X9 Ultra IN build (CPH2841IN, 2026-11-01), offered next to the older one.
+    // This fork keeps its own directory r2 for the owner's Find X9 Ultra IN set: its services_patched.jar, guards.txt
+    // and SystemUI wave carry fork-only patches (mediahold, guest lock hat, udfps, sehtouch, fptouch, biowrites) that
+    // upstream's r7 does not have; only upstream 0.5.21's samcam_a.tar (video rotation) is taken (merge of 0.5.31).
     "x9u-in-1105-sultra" to (File(repoRoot, "out/overlays_x9u_in_1105_r2") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk")),
     // Pixel 11 Fold image (0.3.7), Z Fold (F8U): everything a Pixel session uses,
     // OneOSGuest.apk included, and the fold hinge (scripts/make-fold8-pixel.py --variant f8u).
-    "pixel-f8u" to (File(repoRoot, "out/overlays_pixel_f8u_r19") to listOf("tethering_payload.img")),
+    "pixel-f8u" to (File(repoRoot, "out/overlays_pixel_f8u_r21") to listOf("tethering_payload.img")),
     // Pixel 11 Pro image (0.4.10), Galaxy S26 Ultra: the same files from that image.
-    "pixel-sultra" to (File(repoRoot, "out/overlays_pixel_kodiak_r18") to listOf("tethering_payload.img")),
-    "pixel-f8" to (File(repoRoot, "out/overlays_pixel_fold8_r19") to listOf("tethering_payload.img")),
+    "pixel-sultra" to (File(repoRoot, "out/overlays_pixel_kodiak_r20") to listOf("tethering_payload.img")),
+    "pixel-f8" to (File(repoRoot, "out/overlays_pixel_fold8_r21") to listOf("tethering_payload.img")),
     // Pixel 9 Pro XL image (0.4.22), Galaxy S25 Ultra, S25, S25+ and S24 Ultra: the same files from that image.
-    "pixel9-sultra" to (File(repoRoot, "out/overlays_pixel_komodo_r18") to listOf("tethering_payload.img")),
+    "pixel9-sultra" to (File(repoRoot, "out/overlays_pixel_komodo_r20") to listOf("tethering_payload.img")),
     // Infinity-X image (0.4.27), every phone: one set from that image. Its cellbroadcast module
     // is built from source (0.4.28): the guest keeps One UI's, like tethering.
-    "infinityx" to (File(repoRoot, "out/overlays_infinityx_r16") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
+    "infinityx" to (File(repoRoot, "out/overlays_infinityx_r18") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
     // HyperOS image (docs/hyperos.md), made for the Z Fold8 Ultra and Z Fold8, on every phone from 0.4.31: Xiaomi's guarded jars,
     // the signal poll and the image's payloads.
+    // This fork stays on its r29 build (guest lock, native AIDL fingerprint, FRP-inactive PIN, display-feature stub);
+    // upstream's r30 only re-patches services and miui-services for runtime installd/oemnetd codes (merge of 0.5.31).
     "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r29") to listOf("tethering_payload.img")),
     "hyper-popsicle" to (File(repoRoot, "out/overlays_hyperos_popsicle_r1") to listOf("tethering_payload.img")),
+    "hyper-madrid" to (File(repoRoot, "out/madrid-overlays") to listOf("tethering_payload.img")),
+    // HyperOS 4 Global (0.5.27): Xiaomi's global build OS4.0.5.0.XFRMIXM with Google apps (gmssystem payload). Tethering never mounts.
+    "hyper-hk" to (File(repoRoot, "out/overlays_hyperos_hk_r4") to listOf("tethering_payload.img")),
     // Nothing OS 5.0 (0.4.33), the Z Fold8 Ultra only: its chips need SVE/SME.
-    "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r38") to listOf("tethering_payload.img")),
-    "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r6") to listOf("tethering_payload.img")),
+    "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r40") to listOf("tethering_payload.img")),
+    "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r8") to listOf("tethering_payload.img")),
     // OxygenOS 16 (0.4.67, experimental), for the phones on One UI 8 (Android 16): no fold overlays, no
     // tethering (One UI's stays), no apex requirement list (no ColorOS set ships one).
     "oxygen16" to (File(repoRoot, "out/overlays_oxygen16_r3") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk",
         "OneOSFoldCutout.apk", "OneOSTabletQs.apk", "oneos-apex-requires.txt")),
     // OriginOS 7 (0.4.73, experimental): set r17 = r14 plus the vivo fold cutout overlay (the cover's lens).
-    "originos" to (File(repoRoot, "out/overlays_originos_cn_r20") to listOf("OneOSWallpapersFoldGrid.apk", "OneOSTabletQs.apk")),
+    "originos" to (File(repoRoot, "out/overlays_originos_cn_r22") to listOf("OneOSWallpapersFoldGrid.apk", "OneOSTabletQs.apk")),
     // LineageOS 24 (0.5.06, experimental): the OnePlus 15 nightly, on every phone that offers Infinity-X. No gmssystem
     // payload (One UI's Google apps are laid over the guest at session time). Tethering never mounts; its source-built
     // cellbroadcast module is left out like Infinity-X's.
-    "lineage" to (File(repoRoot, "out/overlays_lineage_r8") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
+    "lineage" to (File(repoRoot, "out/overlays_lineage_r10") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
     // One UI 9.5 (0.5.22, untested): the Galaxy S26 Ultra build, on the phones on One UI 9. Tethering never mounts.
-    "oneui95" to (File(repoRoot, "out/overlays_oneui95_r5") to listOf("tethering_payload.img")),
+    "oneui95" to (File(repoRoot, "out/overlays_oneui95_r9") to listOf("tethering_payload.img")),
     // ColorOS 17 China Twinity4c (0.5.19 trial), the base Galaxy S23: the set
     // published with the twinity4c image release.
     "twinity-s23" to (File(repoRoot, "out/overlays_twinity4c_r1") to listOf()),
+    "pyb110-s23" to (File(repoRoot, "out/pyb110-overlays") to listOf("tethering_payload.img")),
 )
 // The series downloads (0.4.25): -Poneos.series=<id> packs only the sets that
 // app-android/packages/series.txt lists for it (ApkSeries keeps the same lists,
@@ -107,6 +116,16 @@ val seriesSets: Map<String, Set<String>> = File(packagesDir, "series.txt").readL
 // downloads the files its phone's set needs, by hash. -Poneos.packSets=true packs them as
 // before (a local test build, no download).
 val packSetsInApk: Boolean = (findProperty("oneos.packSets") as String?)?.trim() == "true"
+// Trial APKs may carry individual sets while preserving remote downloads for the rest.
+val selectedLocalSets: Set<String> = providers.gradleProperty("oneos.localSets").orNull.orEmpty()
+    .split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+if (selectedLocalSets.isNotEmpty()) {
+    gradle.taskGraph.whenReady {
+        check(allTasks.none { it.name.contains("Release", ignoreCase = true) }) {
+            "oneos.localSets is for debug builds only."
+        }
+    }
+}
 // 0.4.53: each file's sources, comma-separated: "gh:<tag>" (an asset of that release of fahadalijaved/OneOS-files,
 // named by its sha256) and Drive ids, copies in OneOS/files and OneOS/files2.. (Drive refuses a file once "too
 // many users" downloaded it that day; each copy has its own limit).
@@ -119,12 +138,15 @@ val setRemoteIds: Map<String, String> = File(packagesDir, "remote.txt").takeIf {
             ?: throw GradleException("packages/remote.txt: not a '<sha256> <source>[,<source>...]' line: $l")
         m.groupValues[1] to m.groupValues[2]
     } ?: emptyMap()
-val packedSets: Set<String> = if (seriesId == null) {
+val seriesPackageSets: Set<String> = if (seriesId == null) {
     packageSets.keys
 } else {
     val sets = seriesSets[seriesId] ?: throw GradleException("oneos.series: '$seriesId' is not in packages/series.txt (${seriesSets.keys})")
     (sets - packageSets.keys).takeIf { it.isNotEmpty() }?.let { throw GradleException("packages/series.txt: $seriesId names unknown sets $it") }
     sets
+}
+require(seriesPackageSets.containsAll(selectedLocalSets)) {
+    "oneos.localSets names sets outside this APK: ${selectedLocalSets - seriesPackageSets}"
 }
 // Session scripts copied from switcher/assets at build time (plus the expected
 // installd table). oneos_tunnel.sh (the server tunnel) and 7zz are never shipped.
@@ -137,6 +159,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "guest_vector.bundle" to File(repoRoot, "switcher/assets/guest_vector.bundle"),
     "guest_manager.apk" to File(repoRoot, "switcher/assets/guest_manager.apk"),
     "oneos_switch.sh" to File(repoRoot, "switcher/assets/oneos_switch.sh"),
+    "pyb110-scheduler-trial.sh" to File(repoRoot, "scripts/pyb110-scheduler-trial.sh"),
     "boot_status.sh" to File(repoRoot, "switcher/assets/boot_status.sh"),
     "OneOSBootStatus.dex" to File(repoRoot, "switcher/assets/OneOSBootStatus.dex"),
     "oneos_boot_icon.png" to File(repoRoot, "switcher/assets/oneos_boot_icon.png"),
@@ -229,6 +252,9 @@ abstract class OneOsFilesTask : DefaultTask() {
     @get:Input
     abstract val packSets: Property<Boolean>
 
+    @get:Input
+    abstract val localSets: SetProperty<String>
+
     /** sha256 -> its sources, comma-separated: gh:<tag> and Drive file ids (packages/remote.txt). */
     @get:Input
     abstract val remoteIds: MapProperty<String, String>
@@ -278,7 +304,6 @@ abstract class OneOsFilesTask : DefaultTask() {
         val sizes = sortedMapOf<String, Long>()
         val remote = sortedMapOf<String, String>()
         val ids = remoteIds.get()
-        val pack = packSets.get()
         val publishedSizes = File(packages.get().asFile, "sizes.txt").takeIf { it.isFile }?.readLines()
             ?.filter { it.isNotBlank() && !it.startsWith("#") }?.associate { line ->
                 val parts = line.split(' ')
@@ -293,7 +318,7 @@ abstract class OneOsFilesTask : DefaultTask() {
             sizes[sum] = src.length()
         }
         // A set file: in the APK (packSets), else its size and Drive id only.
-        fun putSet(src: File, sum: String, problems: MutableList<String>) {
+        fun putSet(src: File, sum: String, pack: Boolean, problems: MutableList<String>) {
             if (pack) { put(src, sum); return }
             val id = ids[sum]
             if (id == null) { problems += "${src.name} ($sum) is not on Drive: run scripts/release-files.py"; return }
@@ -301,6 +326,7 @@ abstract class OneOsFilesTask : DefaultTask() {
             remote[sum] = id
         }
         for ((id, spec) in sets.get()) {
+            val pack = packSets.get() || id in localSets.get()
             val dir = File(spec.substringBefore('|'))
             val omitted = spec.substringAfter('|').split(',').filter { it.isNotBlank() }.toSet()
             val listFile = File(packages.get().asFile, "$id.sha256")
@@ -325,7 +351,7 @@ abstract class OneOsFilesTask : DefaultTask() {
                     !f.isFile -> problems += "$n is missing from $dir"
                     f.length() > receiveMax -> problems += "$n is ${f.length()} bytes, over root's receive limit ($receiveMax)"
                     sha(f) != sum -> problems += "$n differs from packages/$id.sha256 (a rebuilt overlay?)"
-                    else -> putSet(f, sum, problems)
+                    else -> putSet(f, sum, pack, problems)
                 }
             }
             if (problems.isNotEmpty()) throw GradleException("package set $id:\n  " + problems.joinToString("\n  "))
@@ -379,14 +405,15 @@ abstract class OneOsFilesTask : DefaultTask() {
 val oneosFiles = tasks.register<OneOsFilesTask>("oneosFiles") {
     group = "build"
     description = "Packs the OneOS package sets and session scripts into the APK's assets, checked against app-android/packages."
-    for ((dir, _) in packageSets.filterKeys { it in packedSets }.values) sources.from(fileTree(dir))
+    for ((dir, _) in packageSets.filterKeys { it in seriesPackageSets }.values) sources.from(fileTree(dir))
     for (f in sessionScripts.values) sources.from(f)
     sources.from(rootScript)
     sources.from(fileTree(File(repoRoot, "switcher/assets")))
-    sets.set(packageSets.filterKeys { it in packedSets }.mapValues { (_, v) -> "${v.first.path}|${v.second.joinToString(",")}" })
+    sets.set(packageSets.filterKeys { it in seriesPackageSets }.mapValues { (_, v) -> "${v.first.path}|${v.second.joinToString(",")}" })
     scripts.set(sessionScripts.mapValues { it.value.path })
     notShipped.set(switcherNotShipped)
     packSets.set(packSetsInApk)
+    localSets.set(selectedLocalSets)
     remoteIds.set(setRemoteIds)
     packages.set(packagesDir)
     outputDir.set(layout.buildDirectory.dir("generated/oneos/assets"))
@@ -528,10 +555,8 @@ android {
         // 0.5.00 (129, published 11-13): every system on the S23 family (SM8550, HIDL audio HAL) plays A2DP through
         // the vendor's Bluetooth module with offload off, as One UI does; 0.4.99's bridge got the session but the
         // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
-        // Refresh stages created before the storage, diagnostics and bring-apps changes.
-        // 0.5.26 fork: refresh the stage for the updated One UI 9.5 overlays.
-        versionCode = 174
-        versionName = "0.5.26"
+        versionCode = 184
+        versionName = "0.5.32"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
 
@@ -553,7 +578,7 @@ android {
             buildConfigField("String", "SCRIPTS_SHA256", "\"${sha256(scriptsList.toByteArray())}\"")
             buildConfigField("String", "SERIES", "\"${seriesId.orEmpty()}\"")
             if (seriesId != null) versionNameSuffix = "-$seriesId"
-            for ((id, _) in packageSets) {
+            for (id in seriesPackageSets) {
                 val f = File(packagesDir, "$id.sha256")
                 val list = if (f.isFile) renderShaList(readShaList(f)) else ""
                 buildConfigField("String", "SET_${id.uppercase().replace('-', '_')}_SHA256", "\"${sha256(list.toByteArray())}\"")
@@ -820,4 +845,5 @@ dependencies {
         exclude(group = "com.google.mlkit", module = "barcode-scanning-common")
     }
     implementation(libs.oneui.icons)
+    testImplementation(libs.junit)
 }

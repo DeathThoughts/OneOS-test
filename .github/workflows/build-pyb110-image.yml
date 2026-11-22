@@ -1,0 +1,147 @@
+name: Build OnePlus 16 ColorOS guest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [port/coloros17-pyb110]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pyb110-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref == 'refs/heads/port/coloros17-pyb110'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          repository: MysticGSI/mysticgsi
+          ref: 825b850dd8ddff11fdb8ed024034fc00e94b1451
+          path: mysticgsi
+          persist-credentials: false
+          sparse-checkout: |
+            /*.py
+            /requirements.txt
+            /patches/
+            /tools/
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install image and overlay tools
+        run: |
+          set -euo pipefail
+          mkdir -p out/pyb110-logs
+          {
+            sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on the runner}}
+            sudo rm -rf -- /usr/share/dotnet /opt/ghc /usr/local/lib/swift "${sdk:?}/ndk"
+            sudo apt-get update
+            sudo apt-get install -y e2fsprogs zip unzip zstd python3-venv
+            sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+            if [ ! -x "$sdkmanager" ]; then
+              sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+            fi
+            [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+            yes | "$sdkmanager" --licenses > /dev/null || true
+            "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0"
+            echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+            python3 -m venv mysticgsi/.venv
+            mysticgsi/.venv/bin/python -m pip install -r mysticgsi/requirements.txt capstone
+            chmod +x mysticgsi/tools/bin/Linux/x86_64/{e2fsdroid,extract.erofs,mke2fs,mkfs.erofs}
+            df -h "$GITHUB_WORKSPACE"
+          } 2>&1 | tee out/pyb110-logs/setup.log
+
+      - name: Extract and verify the donor partitions
+        run: |
+          set -euo pipefail
+          mysticgsi/.venv/bin/python scripts/prepare-pyb110-source.py out/pyb110-input \
+            2>&1 | tee out/pyb110-logs/source.log
+
+      - name: Convert to an ext4 guest
+        run: |
+          set -euo pipefail
+          {
+            mysticgsi/.venv/bin/python scripts/mysticgsi-from-images.py \
+              --drop --no-debloat --type=coloros pyb110 out/pyb110-input
+            mapfile -t images < <(find mysticgsi/out/pyb110 -maxdepth 1 -name '*.img' -type f)
+            [ "${#images[@]}" -eq 1 ]
+            mkdir -p out/pyb110-image
+            ln "${images[0]}" out/pyb110-image/system.img
+            e2fsck -fn out/pyb110-image/system.img
+            stat -c '%s bytes' out/pyb110-image/system.img
+            sha256sum out/pyb110-image/system.img
+          } 2>&1 | tee out/pyb110-logs/image.log
+
+      - name: Build and verify OneOS overlays
+        id: overlays
+        env:
+          APKTOOL: ${{ github.workspace }}/mysticgsi/tools/apktool/apktool.jar
+          EXTRACT_EROFS: ${{ github.workspace }}/mysticgsi/tools/bin/Linux/x86_64/extract.erofs
+        run: |
+          set -euo pipefail
+          key_dir=$(mktemp -d "$RUNNER_TEMP/pyb110-rro.XXXXXX")
+          trap 'rm -rf "$key_dir"' EXIT
+          export KEYSTORE="$key_dir/debug.keystore"
+          {
+            keytool -genkeypair -keystore "$KEYSTORE" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 3650 \
+              -dname "CN=OneOS PYB110 RRO Debug,O=OneOS,C=US"
+            sh scripts/make-overlays.sh out/pyb110-image/system.img out/pyb110-overlays
+            cd out/pyb110-overlays
+            for overlay in vold_patched service.incremental_patched.so surfaceflinger_patched; do
+              test -s "$overlay" || { echo "Missing required OnePlus 16 overlay: $overlay" >&2; exit 1; }
+            done
+            sha256sum --strict --check guards.txt
+            find . -type f -print0 | sort -z | xargs -0r sha256sum > ../pyb110-logs/overlays.sha256
+            cp ../pyb110-logs/overlays.sha256 SHA256SUMS
+            cp guards.txt ../pyb110-logs/guards.txt
+            find . -maxdepth 1 -type f -printf '%s %f\n' | sort > ../pyb110-logs/overlay-sizes.txt
+          } 2>&1 | tee out/pyb110-logs/overlays.log
+
+      - name: Package the untested guest image
+        if: steps.overlays.outcome == 'success'
+        run: |
+          set -euo pipefail
+          gzip -1nc out/pyb110-image/system.img > out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+          gzip -t out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+          {
+            stat -c '%s bytes' out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+            sha256sum out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+          } | tee out/pyb110-logs/archive.log
+
+      - uses: actions/upload-artifact@v4
+        if: steps.overlays.outcome == 'success'
+        with:
+          name: pyb110-guest-untested
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+          path: out/pyb110-image/OneOS_ColorOS17_OnePlus16.img.gz
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.overlays.outcome == 'success'
+        with:
+          name: pyb110-overlays
+          retention-days: 7
+          if-no-files-found: error
+          path: out/pyb110-overlays/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pyb110-build-report
+          retention-days: 14
+          if-no-files-found: warn
+          path: out/pyb110-logs/

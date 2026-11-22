@@ -23,6 +23,10 @@ ASSIGN = re.search(r'^LOGCAT_FILTER="(?:[^"\\]|\\.|\\\n)*"\nif \[ "\$\{ONEOS_LOG
                    SWITCH, re.M).group(0)
 CMD1 = re.search(r'^\s*"(logcat -b all [^"\n]*boot\.log[^"\n]*)" \\$', SWITCH, re.M).group(1)
 CMD2 = re.search(r'\$BB setsid (logcat -b all [^\n]*boot\.log[^\n]*?) </dev/null', SWITCH).group(1)
+# 0.5.28 (merged from upstream): the capture script's commands send their error to a file for the retry on the
+# standard buffers (and a third, the retry itself, uses the same variable); the words are compared without it.
+CMD1 = CMD1.replace(' 2>$STAGE/logcat_capture.err', '')
+RETRY = re.findall(r'"(logcat -b main,system,crash,events,radio [^"\n]*boot\.log[^"\n]*)"', SWITCH)
 
 PROTECTED = ['MediaProvider', 'StorageManager', 'ModernMediaScanner', 'OneOSMediaHold', 'AndroidRuntime',
              'ActivityManager', 'ActivityTaskManager', 'WindowManager', 'DEBUG', 'libc', 'SystemUi--Keyguard',
@@ -55,7 +59,9 @@ class Filter(unittest.TestCase):
         self.assertIn('$LOGCAT_FILTER', CMD1)
         self.assertIn('$LOGCAT_FILTER', CMD2)
         self.assertEqual(len(re.findall(r'^LOGCAT_FILTER="[A-Za-z]', SWITCH, re.M)), 1)
-        self.assertEqual(SWITCH.count('-r 32768 -n 24'), 2)
+        self.assertEqual(SWITCH.count('-r 32768 -n 24'), 3)
+        self.assertEqual(len(RETRY), 1)
+        self.assertIn('-n 24 $LOGCAT_FILTER 2>', RETRY[0])
         for cmd in (CMD1, CMD2):
             self.assertTrue(cmd.endswith('-n 24 $LOGCAT_FILTER'), cmd)
 

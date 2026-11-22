@@ -171,6 +171,10 @@ add)
         rm -f "$OVR"
     fi
     echo "$BOOT_ID" > "$STAGE/guest_props.boot"
+    # 0.5.28: the same boot outside the stage, for oneos_switch.sh's property space check: preparing
+    # another system replaces the stage and its guest_props.boot (S25+ a957415a: "even right after a
+    # restart" two days after the last one, after sessions of another system in that boot).
+    echo "$BOOT_ID" > /data/local/tmp/oneos_props.boot 2>/dev/null
     # One getprop for the whole host set instead of one per key. An empty
     # value counts as unset (as for Android's readers), so the props an
     # earlier session of this boot blanked (remove) are the guest's again;
@@ -416,8 +420,12 @@ add)
     # also ships oplus-services.jar but has no oplus-telephony-common.jar.
     # Memory only and in the added list, so remove blanks it again.
     # ONEOS_GUEST_ANIM_LEVEL=0 leaves it unset; 2, 3 or 4 sets that level.
-    AL=persist.sys.oplus.anim_level; ALV=${ONEOS_GUEST_ANIM_LEVEL:-1}
+    # 0.5.32: the level chosen in the guest's OneOS app (Lighter animations: 3) stays for the next starts.
+    ALS=$(head -c 4 "$STAGE/data/oneos_anim_level" 2>/dev/null | tr -dc 0-9)
+    [ -L "$STAGE/data/oneos_anim_level" ] && ALS=""
+    AL=persist.sys.oplus.anim_level; ALV=${ONEOS_GUEST_ANIM_LEVEL:-${ALS:-1}}
     case "$ALV" in 1|2|3|4) ;; *) ALV="" ;; esac
+    rm -f "$STAGE/data/oneos_bootui/anim_level"
     if [ -n "$ALV" ] && { grep -q '"image": "coloros17-findn6"' "$STAGE/.oneos_stage" ||
             { [ -f "$GSE/framework/oplus-telephony-common.jar" ] && [ -e "$ROOTFS/system/framework/oplus-services.jar" ]; }; }; then
         # A previous return can leave an empty property name behind. Treat an
@@ -433,6 +441,9 @@ add)
             echo "$AL=$ALV" >> "$NEW"
             echo "guest_props: $AL=$ALV for the session (ColorOS launcher material blur level)"
         fi
+        # The level in effect, for the guest's OneOS app (its Lighter animations row).
+        [ -d "$STAGE/data/oneos_bootui" ] && [ ! -L "$STAGE/data/oneos_bootui" ] &&
+            echo "$ALV" > "$STAGE/data/oneos_bootui/anim_level" && chmod 644 "$STAGE/data/oneos_bootui/anim_level"
     fi
     if grep -q '"image": "coloros17-findn6"' "$STAGE/.oneos_stage"; then
         # Framework animation/Gaussian tiers use 3 for high-end; COUI's
@@ -1062,6 +1073,7 @@ add)
             echo "guest_props: $MDT=2 for the session (HyperOS fold: cover screen wallpapers)"
         fi
     fi
+    # (from vdcoolok's feat/guest-local-pin, ported 11-19)
     # HyperOS hides the whole fingerprint UI unless a vendor is named:
     # FingerprintServiceStubImpl.isFpHardwareDetected() reads
     # persist.vendor.sys.fp.vendor and reports no hardware for an empty value or
@@ -1104,6 +1116,15 @@ add)
     # panel's physical mode (display_modes_host.log). 13.5 mm across, centred,
     # so the glyph lands on the sensor at any resolution (S25 Ultra: 587,2251
     # and 266,266 in 1440x3120, 200 px at 1080x2340).
+    # ro.vendor.localhbm.enable=true with them: Samsung's panel lights the
+    # sensor spot itself (local HBM). Without it HyperOS's SystemUI treats the
+    # sensor as a global-HBM one (MiuiGxzwManager makes MiuiGxzwOverlayView only
+    # when MiuiGxzwUtils.GXZW_LHBM_FINGER and GXZW_CFOD_FINGER are false) and
+    # lays its "hbm_overlay", a full-screen black window at alpha 0.657, over
+    # the lock screen to offset a panel boost that never comes on One UI's
+    # panel: the lock screen ran at a third of its brightness (A36, 11-19). The
+    # flag's only other reader, FodFingerprintServiceStubImpl.fodCallBack, then
+    # leaves "show touches" alone during a sensor touch.
     if [ -e "$ROOTFS/system/system_ext/framework/miui-services.jar" ] || [ -e "$ROOTFS/system_ext/framework/miui-services.jar" ]; then
         FOD_MM=$(awk -F, 'NR == 1 { printf "%.2f", $1 + $4 / 2 }' /sys/class/fingerprint/fingerprint/position 2>/dev/null)
         FOD_PX=$(awk -v mm="${FOD_MM:-0}" '
@@ -1118,10 +1139,15 @@ add)
                 s = int(13.5 * d / 25.4 + 0.5)
                 x = int((w - s) / 2 + 0.5)
                 y = int(h - mm * d / 25.4 - s / 2 + 0.5)
-                printf "%d,%d %d,%d", x, y, s, s
+                printf "%d,%d %d,%d %dx%d", x, y, s, s, w, h
             }' "$STAGE/display_modes_host.log" 2>/dev/null)
+        # 0.5.32: MiuiGxzwUtils takes the panel's physical size from persist.sys.miui_default_resolution, and
+        # without it from the running mode: a QHD Galaxy at One UI's FHD+ (the guest runs at One UI's width, S24+
+        # 2c69348f: 1080x2340) then read these 1440 px values as 1080 px ones, the glyph far right and low of the
+        # sensor. The panel's own size, as a Xiaomi QHD phone has it.
+        FOD_RES=${FOD_PX##* }; FOD_PX=${FOD_PX% *}
         if [ -n "$FOD_PX" ]; then
-            for kv in "ro.hardware.fp.fod=1" \
+            for kv in "ro.hardware.fp.fod=1" "ro.vendor.localhbm.enable=true" "persist.sys.miui_default_resolution=$FOD_RES" \
                       "persist.vendor.sys.fp.fod.location.X_Y=${FOD_PX% *}" \
                       "persist.vendor.sys.fp.fod.size.width_height=${FOD_PX#* }"; do
                 k=${kv%%=*}
@@ -1132,10 +1158,33 @@ add)
                 sed -i "/^$(echo "$k" | sed 's/\./\\./g')=/d" "$NEW"
                 echo "$kv" >> "$NEW"
             done
-            echo "guest_props: ro.hardware.fp.fod=1, glyph ${FOD_PX% *} size ${FOD_PX#* } in physical pixels (sensor ${FOD_MM:-?} mm from the bottom) for the session (HyperOS draws the fingerprint icon)"
+            echo "guest_props: ro.hardware.fp.fod=1, ro.vendor.localhbm.enable=true, glyph ${FOD_PX% *} size ${FOD_PX#* } in physical pixels (sensor ${FOD_MM:-?} mm from the bottom) for the session (HyperOS draws the fingerprint icon)"
         else
             echo "guest_props: FOD glyph props left unset (no sensor position or panel mode in the stage); HyperOS draws no fingerprint icon"
         fi
+    fi
+    # 0.5.32, HyperOS on a QHD Galaxy (S25 Ultra: "behaving like a foldable, everything zoomed in"): the guest
+    # runs the whole 1440 px panel at One UI's dp width (UI activator: 560 for One UI's 560 at QHD, 600 for its
+    # default FHD+), but its base density was One UI's shared ro.sf.lcd_density, Samsung's for the 1080 px mode
+    # (450). HyperOS sizes its display level and layouts against that base, so 560 or 600 over 450 was a 1.24x or
+    # 1.33x zoom. The base for the whole panel instead, for the session (One UI's back at the return): 450 x 1440
+    # / 1080 = 600. Phones run at 1080 or less and folds are left alone. ONEOS_GUEST_QHD_BASE=0 leaves it.
+    if { [ -e "$ROOTFS/system/system_ext/framework/miui-services.jar" ] || [ -e "$ROOTFS/system_ext/framework/miui-services.jar" ]; } &&
+       [ "${ONEOS_GUEST_FORM:-fold}" != fold ] && [ "${ONEOS_GUEST_QHD_BASE:-1}" = 1 ]; then
+        LD=ro.sf.lcd_density
+        ld=$(getprop "$LD")
+        # The width the guest runs the panel at is One UI's (S25 Ultra at QHD: 1440; S24+ at FHD+: 1080, 2c69348f).
+        pw=$(sed -n 's/.* width=\([0-9]*\) .*/\1/p' "$STAGE/host_display" 2>/dev/null)
+        case "$ld:$pw" in
+            *[!0-9:]*|:*|*:) echo "guest_props: HyperOS base density left at One UI's (${ld:-none}; panel width ${pw:-not recorded})" ;;
+            *) if [ "$pw" -gt 1080 ] && [ "$ld" -ge 120 ] && grep -qxF "$LD" "$HOST"; then
+                   nd=$(( (ld * pw + 540) / 1080 ))
+                   if "$RP" -n "$LD" "$nd" 2>/dev/null; then
+                       echo "$LD=$ld" >> "$OVR"
+                       echo "guest_props: $LD=$nd for the session (HyperOS's base at the $pw px it runs the panel at; One UI's $ld is its 1080 px mode's)"
+                   fi
+               fi ;;
+        esac
     fi
     # HyperOS's rust runtime (its launcher among the packages): the image's
     # init.hyos_spawner.rc sets rust.runtime_version when zygote runs and
@@ -1218,6 +1267,21 @@ ro.miui.backdrop_sampling_enabled=true"
             echo "$k=${tl##*:}" >> "$NEW"
         done
         echo "guest_props: log.tag.XQos, perfflinger_client, DolbyRenderer, RadioProxyEx, com.xiaomi.type = S and AdrenoVK-0 = W for the session (failures and dumps on every frame or call)"
+        # HyperOS Global (11-19, A36, "slightly sluggish"): logd at 35-106 % of a core. Its own debug and info
+        # chatter, per 200,000 lines: MI-SF 27,000, backgroundBlur 13,400, AllInOneBase 7,900, hyper_launcher_app
+        # 7,500, AllInOneConvertDataDebug 6,200, MiuiBlurUtils 5,700, hyos_spawner 4,800, flutter 4,700,
+        # PowerInsight_DisplayCalculator 3,200, the lock screen editor's views 2,500-2,800 each, MIUIInput 2,300.
+        # Down to W: their warnings and errors still reach the log and the reports.
+        VQ=""
+        for t in MI-SF backgroundBlur AllInOneBase hyper_launcher_app AllInOneConvertDataDebug MiuiBlurUtils hyos_spawner \
+                 flutter PowerInsight_DisplayCalculator AllInOneTemplateView Keyguard-Editor-CombinedWallpaperView \
+                 Keyguard-Editor-PagerMarginTransformer Keyguard-Editor-GLTextureView MIUIInput; do
+            k=log.tag.$t
+            grep -qxF "$k" "$HOST" && continue
+            sed -i "/^$(echo "$k" | sed 's/\./\\./g')=/d" "$NEW"
+            echo "$k=W" >> "$NEW"; VQ="$VQ $t"
+        done
+        [ -n "$VQ" ] && echo "guest_props: log.tag = W for the session (HyperOS's debug chatter):$VQ"
         # HyperOS's SurfaceFlinger pre-warms its shaders at start with fake
         # layers, and died there on two phones (0.4.38): S24 Ultra 548e7b73
         # SIGSEGV in DolbyRenderer::requiresDolbyEffect, A57 609d7c2f abort
@@ -1563,20 +1627,25 @@ ro.miui.backdrop_sampling_enabled=true"
         # formula for both kinds.
         FF=/system/etc/floating_feature.xml
         fpf=$(sed -n 's/.*<SEC_FLOATING_FEATURE_BIOAUTH_CONFIG_FINGERPRINT_FEATURES>\([^<]*\)<.*/\1/p' "$FF" 2>/dev/null | head -n 1)
-        ULINE=$(grep 'type INTERNAL' "$STAGE/display_host.txt" 2>/dev/null | grep 'FLAG_ALLOWED_TO_BE_DEFAULT_DISPLAY' | head -n 1)
-        UDPI=$(printf '%s\n' "$ULINE" | sed -n 's/.*density [0-9]*, \([0-9.]*\) x [0-9.]* dpi.*/\1/p')
-        # OPPO's SystemUI places the icon in the pixels of the resolution the panel runs at, the sysfs position is in
-        # the physical panel's: scaled by the two widths (0.5.22, S24 Ultra: a 1440 px panel at 1080, the icon a
-        # quarter too high, "in heaven"; the A36 runs at its physical 1080). The size, 196 px at 1080, the same way.
-        UMODE=$(printf '%s\n' "$ULINE" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) x [0-9][0-9]*, modeId.*/\1/p')
-        UPHYS=$(printf '%s\n' "$ULINE" | sed -n 's/.*physicalDisplayWidth=\([0-9]*\).*/\1/p')
-        fpl=$(echo "$fp ${UDPI:-$fp_dpi} ${UMODE:-0} ${UPHYS:-0}" | awk '{ n = split($1, p, ","); dpi = $2; k = ($3 > 0 && $4 > 0) ? $3 / $4 : 1;
-            if (n < 6 || dpi < 100 || p[1] <= 0) exit; printf "%d", (p[1] + p[4] / 2) * dpi / 25.4 * k + 0.5 }')
-        fps=$(echo "${UMODE:-1080}" | awk '{ printf "%d", 196 * ($1 > 0 ? $1 : 1080) / 1080 + 0.5 }')
+        # Upstream 0.5.22 (S24 Ultra, a 1440 px panel running at 1080: the icon a quarter too high) scales the centre
+        # and the size by the running mode's width over the physical one, on the reading that OPPO's SystemUI places
+        # the icon in the pixels of the resolution the panel runs at. This fork's S25 Ultra works with the physical
+        # pixels above (735 px in every ColorOS session since 3d9814984612c525; which mode One UI ran at then is not
+        # known here), so the scaling is opt-in: ONEOS_GUEST_FP_ICON_SCALE=1 (adb loop only). Not tried on a phone.
+        fp_size=196
+        if [ "${ONEOS_GUEST_FP_ICON_SCALE:-0}" = 1 ]; then
+            ULINE=$(grep 'type INTERNAL' "$STAGE/display_host.txt" 2>/dev/null | grep 'FLAG_ALLOWED_TO_BE_DEFAULT_DISPLAY' | head -n 1)
+            UMODE=$(printf '%s\n' "$ULINE" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) x [0-9][0-9]*, modeId.*/\1/p')
+            UPHYS=$(printf '%s\n' "$ULINE" | sed -n 's/.*physicalDisplayWidth=\([0-9]*\).*/\1/p')
+            fp_k=$(echo "${UMODE:-0} ${UPHYS:-0}" | awk '{ k = ($1 > 0 && $2 > 0 && $1 <= $2) ? $1 / $2 : 1; printf "%.6f", k }')
+            fp_loc=$(awk -v mb="$fp_mb" -v ah="$fp_ah" -v dpi="$fp_dpi" -v k="$fp_k" 'BEGIN { printf "%.0f", (mb + ah / 2) * dpi / 25.4 * k }')
+            fp_size=$(awk -v m="${UMODE:-0}" 'BEGIN { printf "%d", 196 * (m > 0 ? m : 1080) / 1080 + 0.5 }')
+            echo "guest_props: ColorOS fingerprint icon scaled to the running mode (${UMODE:-?} of ${UPHYS:-?} px wide): ${fp_loc}px, size ${fp_size}"
+        fi
         case "$fpf" in *ultrasonic*) fp_type=ultrasonic ;; *optical*) fp_type=optical ;; *) fp_type=ultrasonic ;; esac
         for kv in persist.vendor.fingerprint.sensor_type=$fp_type \
-                  persist.vendor.fingerprint.optical.iconlocation="${fpl:-$fp_loc}" \
-                  persist.vendor.fingerprint.optical.iconsize="$fps"; do
+                  persist.vendor.fingerprint.optical.iconlocation="$fp_loc" \
+                  persist.vendor.fingerprint.optical.iconsize="$fp_size"; do
             key=${kv%%=*}; value=${kv#*=}
             if grep -qxF "$key" "$HOST"; then
                 hv=$(getprop "$key")
@@ -1588,7 +1657,7 @@ ro.miui.backdrop_sampling_enabled=true"
                 echo "$key=$value" >> "$NEW"
             fi
         done
-        echo "guest_props: ColorOS fingerprint icon ${fpl:-$fp_loc}px from the bottom (${fp_mb}mm + ${fp_ah}mm/2 at ${fp_dpi} dpi)"
+        echo "guest_props: ColorOS fingerprint icon ${fp_loc}px from the bottom (${fp_mb}mm + ${fp_ah}mm/2 at ${fp_dpi} dpi)"
         [ "$fp_type" = ultrasonic ] || echo "guest_props: ColorOS fingerprint sensor kind: $fp_type (One UI's floating features)"
         # The panel lights the spot itself (local HBM, as One UI's fingerprint service reads it): ColorOS's lock
         # screen then keeps its brightness instead of its dim layer (patch-coloros-keyguard-lhbm.py, 0.5.20

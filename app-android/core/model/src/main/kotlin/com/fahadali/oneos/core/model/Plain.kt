@@ -424,7 +424,12 @@ object Plain {
             // switch" (0.5.08 report 0b3ca180, the app still running its tool).
             "libtimer" in p -> {
                 val app = Regex("""the app ([A-Za-z0-9_.]{3,40}) """).find(problem)?.groupValues?.get(1) ?: "an app"
-                if (app == "an app") PlainMessage(
+                // 0.5.28: the switch stops the tool itself; it refuses only when the tool survived that.
+                if ("did not stop" in p) PlainMessage(
+                    "Restart the phone first",
+                    "An app's kernel tool that crashes S24 phones did not stop when OneOS stopped it. Restart the phone, then switch again.",
+                    FixAction.NONE, null,
+                ) else if (app == "an app") PlainMessage(
                     "Turn off an app first",
                     "An app runs a kernel tool that crashes S24 phones during a switch. Uninstall it in Settings, Apps, then switch again.",
                     FixAction.NONE, null,
@@ -478,6 +483,11 @@ object Plain {
             stopped -> PlainMessage("Setup stopped", "$sys isn't ready. Set it up again whenever you like.", FixAction.SET_UP_AGAIN, defaultLabel(FixAction.SET_UP_AGAIN), Level.WARN)
             "in the app is damaged" in p || "not the pinned one" in p -> PlainMessage(
                 "This copy of OneOS is damaged", "Reinstall OneOS, then set up $system again.", FixAction.NONE, null,
+            )
+            "downloading this system's oneos files" in p || "no supported github release source" in p -> PlainMessage(
+                "Couldn't download OneOS corrections",
+                "A correction file couldn't be downloaded from GitHub. One UI wasn't changed.",
+                FixAction.SEND_REPORT, defaultLabel(FixAction.SEND_REPORT),
             )
             "services.jar is not the jar" in p -> PlainMessage(
                 "One UI changed during setup", "Restart your phone and try again.", FixAction.NONE, null,
