@@ -180,7 +180,9 @@ jobs:
 
       - name: Test scheduler trials
         if: github.ref_name == 'review/pyb110-scheduler-apk'
-        run: python3 scripts/test-pyb110-scheduler-trial.py
+        run: |
+          python3 scripts/test-pyb110-scheduler-trial.py
+          python3 scripts/test-pyb110-scheduler-dispatch.py
 
       - name: Test OnePlus 16 staging and build host APK
         working-directory: app-android
@@ -260,6 +262,11 @@ jobs:
                   assert hashlib.file_digest(guest, "sha256").hexdigest() == scripts[staged_guest.name], (
                       "APK does not carry the staged debug guest manager"
                   )
+              scheduler = Path("scripts/pyb110-scheduler-trial.sh")
+              if scheduler.name in scripts:
+                  assert apk.read(files + scripts[scheduler.name]) == scheduler.read_bytes(), (
+                      "APK does not carry the pinned scheduler worker"
+                  )
               other = set()
               for path in sorted(entries):
                   if not path.startswith(asset_base + "sets/") or path in {
@@ -280,8 +287,10 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           name=OneOS-0.5.32-OnePlus16-S23-gzip-debug.apk
+          version_code=183
           if [ "$GITHUB_REF_NAME" = review/pyb110-scheduler-apk ]; then
             name=OneOS-0.5.32-PYB110-Scheduler-Trials-debug.apk
+            version_code=184
           fi
           apk=dist/$name
           cp app-android/app/build/outputs/apk/full/debug/app-full-debug.apk "$apk"
@@ -289,7 +298,7 @@ jobs:
           badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk")
           package_info=$(printf '%s\n' "$badging" | sed -n '/^package:/p')
           grep -Fq "versionName='0.5.32'" <<< "$package_info"
-          grep -Fq "versionCode='183'" <<< "$package_info"
+          grep -Fq "versionCode='$version_code'" <<< "$package_info"
           host_certs=$("$apksigner" verify --print-certs "$apk")
           guest_certs=$("$apksigner" verify --print-certs switcher/assets/guest_manager.apk)
           signer=$(printf '%s\n' "$host_certs" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' | tr 'A-F' 'a-f')
