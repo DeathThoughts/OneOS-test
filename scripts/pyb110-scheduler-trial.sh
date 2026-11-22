@@ -17,16 +17,34 @@ fail() {
     exit 1
 }
 
+pin=
 case "$#:$1" in
-    1:--check|2:--check) target=${2-render} ;;
-    2:--run|3:--run)
+    1:--check|2:--check|3:--check)
+        target=${2-render}
+        if [ "$#" = 3 ]; then
+            pin=$3
+            [ -n "$pin" ] || fail 'render expects a TID:START_TICKS pin'
+        fi ;;
+    2:--run|3:--run|4:--run)
         case "$2" in
             [1-9]|[1-9][0-9]|1[01][0-9]|120) duration=$2 ;;
             *) fail 'duration must be 1 through 120 seconds' ;;
         esac
-        target=${3-render} ;;
-    *) fail 'usage: pyb110-scheduler-trial.sh --check [TARGET] | --run SECONDS [TARGET]' ;;
+        target=${3-render}
+        if [ "$#" = 4 ]; then
+            pin=$4
+            [ -n "$pin" ] || fail 'render expects a TID:START_TICKS pin'
+        fi ;;
+    *) fail 'usage: pyb110-scheduler-trial.sh --check [TARGET] | --run SECONDS [TARGET]; render also accepts TID:START_TICKS' ;;
 esac
+if [ -n "$pin" ]; then
+    [ "$target" = render ] || fail 'a TID:START_TICKS pin is only valid after render'
+    pin_tid=${pin%%:*}
+    pin_start=${pin#*:}
+    [ "$pin_tid" != "$pin" ] || fail 'render expects a TID:START_TICKS pin'
+    case "$pin_tid" in ''|0|1|*[!0-9]*) fail 'invalid TID in render pin' ;; esac
+    case "$pin_start" in ''|*[!0-9]*) fail 'invalid start ticks in render pin' ;; esac
+fi
 case "$target" in
     render)
         thread_name=RenderThread
@@ -142,6 +160,48 @@ task_info() {
     ' "$1/stat"
 }
 
+select_render_thread() {
+    named=0
+    eligible=0
+    details=
+    first_info=
+    for candidate in "$process"/task/*; do
+        [ "$(cat "$candidate/comm" 2>/dev/null)" = RenderThread ] || continue
+        candidate_tid=${candidate##*/}
+        case "$candidate_tid" in ''|0|1|*[!0-9]*) continue ;; esac
+        [ "$candidate_tid" != "$pid" ] || continue
+        named=$((named + 1))
+        first=$candidate
+        info=$(task_info "$candidate" "$candidate_tid" 2>/dev/null) || continue
+        first_info=$info
+        [ "$(readlink "$candidate/ns/mnt" 2>/dev/null)" = "$process_ns" ] || continue
+        start=${info%%:*}
+        policy_nice=${info#*:}
+        details="${details}
+  TID=$candidate_tid start=$start nice=${policy_nice#*:} policy=${policy_nice%%:*}"
+        [ "$policy_nice" = "0:$BASELINE_NICE" ] || continue
+        [ -z "$pin" ] || [ "$pin" = "$candidate_tid:$start" ] || continue
+        eligible=$((eligible + 1))
+        task=$candidate
+        thread_info=$info
+    done
+    [ "$named" -gt 0 ] || fail "no $thread_label"
+    if [ "$eligible" = 1 ]; then
+        return
+    fi
+    if [ -z "$pin" ] && [ "$named" = 1 ]; then
+        task=$first
+        thread_info=${first_info:-}
+        return
+    fi
+    [ -z "$details" ] || printf 'Verified RenderThread candidates:%s\n' "$details" >&2
+    if [ -n "$pin" ]; then
+        fail 'render pin does not identify a current guest SystemUI RenderThread with baseline priority'
+    fi
+    [ "$eligible" -gt 1 ] || fail "no $thread_label was eligible at baseline priority"
+    fail "more than one $thread_label at baseline priority. Pass TID:START_TICKS for the active worker."
+}
+
 process=
 for pid in $(pidof "$process_name" 2>/dev/null); do
     case "$pid" in ''|0|1|*[!0-9]*) continue ;; esac
@@ -157,7 +217,10 @@ process_info=$(task_info "$process" "$pid") || fail "cannot identify $process_na
 process_start=${process_info%%:*}
 
 task=$process/task/$pid
-if [ -n "$thread_name" ]; then
+thread_info=
+if [ "$target" = render ]; then
+    select_render_thread
+elif [ -n "$thread_name" ]; then
     task=
     for candidate in "$process"/task/*; do
         [ -r "$candidate/comm" ] || continue
@@ -169,7 +232,7 @@ if [ -n "$thread_name" ]; then
 fi
 tid=${task##*/}
 case "$tid" in ''|0|1|*[!0-9]*) fail "invalid $thread_label TID" ;; esac
-thread_info=$(task_info "$task" "$tid") || fail "cannot identify $thread_label"
+[ -n "$thread_info" ] || thread_info=$(task_info "$task" "$tid") || fail "cannot identify $thread_label"
 thread_start=${thread_info%%:*}
 
 same_target_thread() {
@@ -199,7 +262,7 @@ observed=$(current_info) || fail 'guest thread identity changed'
 [ "$observed" = "$baseline" ] ||
     fail "expected SCHED_OTHER and nice $BASELINE_NICE, observed policy:nice $observed"
 anim_level=$(getprop persist.sys.oplus.anim_level)
-echo "Verified guest $thread_label PID=$pid TID=$tid nice=$BASELINE_NICE animation_level=${anim_level:-unset}"
+echo "Verified guest $thread_label PID=$pid TID=$tid nice=$BASELINE_NICE animation_level=${anim_level:-unset} start_ticks=$thread_start"
 [ "$1" = --run ] || exit 0
 [ "$anim_level" = 1 ] || fail 'activate ColorOS animation level 1 for this trial'
 

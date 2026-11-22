@@ -214,7 +214,53 @@ mv "$TASK/stat.next" "$TASK/stat"
 
     def test_refuses_ambiguous_renderthreads(self):
         self.create_thread(202, -4, 421)
-        self.assert_refused('more than one SystemUI RenderThread', '--run', '1')
+        self.env['pin'] = '201:420'
+        result = self.run_trial('--check', 'render')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('more than one SystemUI RenderThread', result.stderr)
+        self.assertIn('TID=201 start=420 nice=-4 policy=0', result.stderr)
+        self.assertIn('TID=202 start=421 nice=-4 policy=0', result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_render_ignores_duplicates_with_wrong_policy_nice_or_namespace(self):
+        self.create_thread(202, -4, 421, policy=2)
+        self.create_thread(203, -3, 422)
+        foreign = self.create_thread(206, -4, 423)
+        self.ns(foreign, 10)
+        result = self.run_trial('--check', 'render')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('TID=201', result.stdout)
+        self.assertFalse(self.log.exists())
+        result = self.run_trial('--run', '1', 'render')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log.read_text().splitlines(), ['-6 201', '6 201'])
+
+    def test_render_pin_checks_then_changes_only_the_selected_worker(self):
+        second = self.create_thread(202, -4, 421)
+        self.env['TASK'] = str(second)
+        check = self.run_trial('--check', 'render', '202:421')
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertIn('TID=202', check.stdout)
+        self.assertFalse(self.log.exists())
+        result = self.run_trial('--run', '1', 'render', '202:421')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log.read_text().splitlines(), ['-6 202', '6 202'])
+        self.assertEqual((self.task / 'stat').read_text().split()[18], '-4')
+
+    def test_render_pin_refuses_stale_identity_and_other_process(self):
+        self.create_thread(202, -4, 421)
+        host_thread = self.host / 'task' / '101'
+        self.ns(host_thread, 10)
+        (host_thread / 'comm').write_text('RenderThread\n')
+        self.statfile(host_thread, 101, -4, 419)
+        for pin in ('202:424', '101:419'):
+            with self.subTest(pin=pin):
+                self.assert_refused('render pin does not identify', '--run', '1', 'render', pin)
+
+    def test_render_requires_a_pin_with_tid_and_start_ticks(self):
+        for pin in ('', '201', '201:', '201:420:1'):
+            with self.subTest(pin=pin):
+                self.assert_refused('render', '--check', 'render', pin)
 
     def test_refuses_unbounded_trial(self):
         self.assert_refused('duration must be 1 through 120', '--run', '121')
@@ -268,7 +314,7 @@ mv "$TASK/stat.next" "$TASK/stat"
         self.assert_refused('identity changed', '--run', '1', 'main')
 
     def test_refuses_multiple_modes(self):
-        self.assert_refused('usage:', '--run', '1', 'main', 'render')
+        self.assert_refused('pin is only valid after render', '--run', '1', 'main', 'render')
 
     def configure_surfaceflinger(self):
         for process, root in ((self.host, self.host_root), (self.guest, self.guest_root)):
