@@ -9,7 +9,8 @@ This branch adds optional raw ext4/EROFS images alongside the existing patched
 | Image | Bundle verification | Guest activation |
 | --- | --- | --- |
 | `product`, `system_ext` | SHA-256, size, filesystem, root ownership | Optional read-only loop mount before framework patches |
-| `vendor`, `odm` | Same | Refused |
+| `vendor` | Same, plus exact audited S23 profile and live block-device proof | Optional `stock` mode only; donor activation refused |
+| `odm` | Same | Refused |
 | `vendor_dlkm`, `odm_dlkm`, `system_dlkm` | Same | Refused; no module loading |
 | `boot`, `init_boot`, `vendor_boot`, `dtbo`, `vbmeta`, `super`, modem/bootloader | Refused | Refused |
 
@@ -26,8 +27,9 @@ vendor services or kernel modules on a Samsung based on this loader.
 
 ## Build a bundle offline
 
-Use raw partition images extracted from the **same port build**, and the exact
-patched `system.raw` currently staged by OneOS. Do not use a stock product or
+Use framework partition images extracted from the **same port build**, and the exact
+patched `system.raw` currently staged by OneOS. Vendor stock mode is a separate
+case: it uses the audited Samsung image matching the running host, not a donor vendor. Do not use a stock product or
 system_ext from a different firmware with an existing patched framework.
 
 ```sh
@@ -120,15 +122,58 @@ parse failures as explicit gaps. ELF/library dependencies, actual Binder
 behavior, kernel ABI, SELinux compatibility and dynamic init imports remain
 unverified.
 
-The actual S23 stock `vendor.img` from the firmware currently installed is still
-needed to analyze real binaries, dependencies and hardware interfaces. Record
-`ro.vendor.build.fingerprint` from One UI to pair it with the running firmware.
-Stock ODM would also help where Samsung places device-specific services there.
-No stock or donor vendor binary was available for this stage; no speedup or
-successful vendor replacement is claimed.
+The owner supplied the stock vendor and ODM images plus the matching runtime
+fingerprint. Both image hashes and extracted properties were verified. See
+`docs/vendor-s23-stock-audit.md` for the actual interfaces and evidence. No donor
+vendor service is enabled, and no speedup or successful phone test is claimed.
 
 The first APK CI attempt (`45334153324`) passed the new loader checks and built
 the guest manager, then failed two existing patch-migration tests. Both failures
 were reproduced on unchanged base `cc6f325`; they concern payload source/snapshot
 pins, not partition mounting. They remain a separate build blocker; this work
 does not bypass those checks.
+
+
+## S23 stock vendor guest mount (third stage)
+
+`--stock-vendor` enables manifest mode `stock` for vendor only. It accepts the
+exact EROFS image audited in `vendor-s23-stock-audit.md` (SM-S911B GZIF, SHA-256
+3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7,
+1907937280 bytes). It does not permit a modified image, another Samsung firmware,
+a Poco/OnePlus vendor or any ODM/dlkm activation.
+
+```sh
+python3 scripts/prepare-guest-partitions.py \
+  --system /path/to/current-patched-system.raw \
+  --image vendor=/path/to/vendor-stock.img \
+  --stock-vendor --output /path/to/partition_images
+```
+
+Before stopping One UI, and again before mounting, the runtime checks the
+fingerprint, vendor model SM-S911B and board kalama. It parses the *actual*
+`/vendor` mount's device/major/minor, requires one plain EROFS root mount, checks
+the block device's byte size, and hashes the entire live block device read-only.
+Its digest must equal the supplied image. Root overlays or ambiguous mounts fail
+closed rather than selecting a guessed partition/slot.
+
+The guest receives a read-only loop mount of that same stock content at its real
+`/vendor` directory. The default host-vendor bind is skipped only after this mount
+succeeds. Existing firmware/APEX/module submounts under host `/vendor` are rebound
+at canonical matching guest paths. Parent subtrees carry their descendants with
+rbind; each bind is made rslave/private immediately. Unsafe links, absent targets,
+changed types and excessive submount counts abort. Before rollback unmounts any
+tracked subtree it must make it recursively private; if isolation fails, cleanup
+stops rather than risking host mount propagation. Only that attempt's targets and
+loops are unwound. The usual stage-return cleanup also covers the vendor loop.
+
+Samsung's host services, Binder registrations, linker configuration and drivers
+remain in use. No donor rc/property/policy is loaded. This is a vendor-image
+loading baseline using byte-identical stock content, **not an OPlus HAL adapter**
+and not an expected performance improvement by itself. The file/manifest checks
+also remain paired to the exact patched guest system.raw. Extra hashing adds
+preflight/startup work.
+
+The feature defaults off, has no app import UI yet, and has not been run on a
+phone. Tests use small fixture images with recorded mount operations; production
+profile pins are tested separately without relaxing them in runtime code. A phone
+test of the opt-in path and normal return is still required before promotion.

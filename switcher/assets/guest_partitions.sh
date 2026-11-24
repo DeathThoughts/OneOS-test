@@ -1,11 +1,79 @@
 #!/system/bin/sh
 # Optional raw partition images. No flash, init service start, or kernel/module load.
-# Hardware partitions are inspection-only until a Samsung-specific service design exists.
+# Donor hardware activation stays blocked. Stock mode is pinned to the audited S23 dump.
 oneos_parts_error() { echo "ERROR: guest partitions: $*" >&2; return 1; }
 oneos_parts_file() {
     [ -f "$1" ] && [ ! -L "$1" ] &&
         [ "$(stat -c %u "$1")" = 0 ] || return 1
     case "$(stat -c %a "$1")" in 400|444|600|644) ;; *) return 1 ;; esac
+}
+# A first live vendor-image path: the owner's audited S23 image, byte-identical
+# to the running host partition. This does not introduce OPPO services/drivers.
+oneos_parts_vendor_profile() {
+    [ "$1:$2:$3" = "erofs:3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7:1907937280" ]
+}
+oneos_parts_vendor_host() {
+    oneos_parts_vendor_profile "$1" "$2" "$3" || { oneos_parts_error "unknown stock vendor profile"; return 1; }
+    [ "$(getprop ro.vendor.build.fingerprint)" = 'samsung/dm1qxxx/dm1q:13/TP1A.220624.014/S911BXXUAGZIF:user/release-keys' ] &&
+        [ "$(getprop ro.product.vendor.model)" = SM-S911B ] &&
+        [ "$(getprop ro.board.platform)" = kalama ] || { oneos_parts_error "stock vendor device/build mismatch"; return 1; }
+    # Read the device actually mounted at /vendor, never a guessed slot/name.
+    # Refuse overlays or multiple mounts at that root rather than guessing.
+    OP_HOST_VENDOR=$(awk '
+        $5 == "/vendor" {
+            count++
+            for (i=7; i<=NF; i++) if ($i == "-") {
+                if ($4 != "/" || $(i+1) != "erofs") bad=1
+                dev=$(i+2); mm=$3
+            }
+        }
+        END { if (count != 1 || bad || dev == "") exit 1; print mm, dev }
+    ' /proc/self/mountinfo) || { oneos_parts_error "cannot identify plain live EROFS vendor"; return 1; }
+    set -- $OP_HOST_VENDOR
+    [ "$#" = 2 ] || return 1
+    OP_HOST_MM=$1; OP_HOST_DEV=$2
+    case "$OP_HOST_DEV" in /dev/block/*) ;; *) oneos_parts_error "vendor is not a block-device source"; return 1 ;; esac
+    "$BB" test -b "$OP_HOST_DEV" || return 1
+    OP_HOST_HEX=$(stat -L -c '%t %T' "$OP_HOST_DEV")
+    set -- $OP_HOST_HEX
+    [ "$#" = 2 ] && [ "$(printf '%d:%d' "0x$1" "0x$2")" = "$OP_HOST_MM" ] || return 1
+    [ "$("$BB" blockdev --getsize64 "$OP_HOST_DEV")" = "$OP_SIZE" ] &&
+        [ "$(sha256sum "$OP_HOST_DEV" | cut -d ' ' -f1)" = "$OP_HASH" ] || {
+            oneos_parts_error "live vendor bytes differ from the supplied stock image"; return 1;
+        }
+    # /vendor includes firmware and sometimes module mounts. Preserve every
+    # live submount, not just the EROFS bytes, with canonical guest targets.
+    OP_VENDOR_CHILDREN=$(awk '$5 ~ /^\/vendor\// {print $5}' /proc/self/mountinfo | LC_ALL=C sort -u)
+    OP_COUNT=0
+    for OP_CHILD in $OP_VENDOR_CHILDREN; do
+        OP_COUNT=$((OP_COUNT + 1))
+        case "$OP_CHILD" in *[!A-Za-z0-9_./+-]*|*/../*|*/./*|*/..) oneos_parts_error "unsafe live vendor mount path"; return 1 ;; esac
+        [ "$OP_COUNT" -le 256 ] || { oneos_parts_error "too many vendor submounts"; return 1; }
+    done
+}
+oneos_parts_vendor_children() {
+    for OP_CHILD in $OP_VENDOR_CHILDREN; do
+        OP_DEST="$ROOTFS$OP_CHILD"
+        [ -e "$OP_DEST" ] && [ ! -L "$OP_DEST" ] &&
+            [ "$(readlink -f "$OP_DEST")" = "$OP_DEST" ] || {
+                oneos_parts_error "vendor submount has no safe guest target: $OP_CHILD"; return 1;
+            }
+        # An rbind of an ancestor already carries descendants. Mount each top
+        # subtree once, and isolate it immediately before any failure cleanup.
+        OP_COVERED=0
+        for OP_PRIOR in $OP_VENDOR_BOUND; do
+            case "$OP_CHILD/" in "$OP_PRIOR/"*) OP_COVERED=1 ;; esac
+        done
+        [ "$OP_COVERED" = 0 ] || continue
+        if "$BB" test -d "$OP_CHILD" && [ -d "$OP_DEST" ]; then OP_BIND=--rbind
+        elif "$BB" test -f "$OP_CHILD" && [ -f "$OP_DEST" ]; then OP_BIND=--bind
+        else oneos_parts_error "vendor submount type changed: $OP_CHILD"; return 1; fi
+        "$BB" mount "$OP_BIND" "$OP_CHILD" "$OP_DEST" || return 1
+        OP_MOUNTED="$OP_DEST $OP_MOUNTED"
+        "$BB" mount --make-rslave "$OP_DEST" || return 1
+        "$BB" mount --make-rprivate "$OP_DEST" || return 1
+        OP_VENDOR_BOUND="$OP_CHILD $OP_VENDOR_BOUND"
+    done
 }
 oneos_parts_validate() {
     OP_DIR="$STAGE/partition_images"
@@ -22,8 +90,9 @@ oneos_parts_validate() {
         $1 !~ /^(product|system_ext|vendor|odm|vendor_dlkm|odm_dlkm|system_dlkm)$/ { bad=1 }
         seen[$1]++ { bad=1 }
         $2 !~ /^(ext4|erofs)$/ || length($3) != 64 || $3 ~ /[^0-9a-f]/ || $4 !~ /^[1-9][0-9]*$/ { bad=1 }
-        $5 !~ /^(activate|inspect)$/ { bad=1 }
+        $5 !~ /^(activate|inspect|stock)$/ { bad=1 }
         $5 == "activate" && $1 !~ /^(product|system_ext)$/ { bad=1 }
+        $5 == "stock" && $1 != "vendor" { bad=1 }
         END { if (NR < 2) bad=1; exit bad }
     ' "$OP_DIR/manifest" || { oneos_parts_error "invalid manifest or hardware partition activation requested"; return 1; }
     oneos_parts_file "$STAGE/system.raw" || { oneos_parts_error "unsafe system.raw"; return 1; }
@@ -41,12 +110,22 @@ oneos_parts_validate() {
         [ "$("$BB" blkid "$OP_FILE" 2>/dev/null | sed -n 's/.* TYPE="\([^" ]*\)".*/\1/p')" = "$OP_FS" ] || {
             oneos_parts_error "$OP_NAME is not a raw $OP_FS filesystem"; return 1;
         }
+        if [ "$OP_MODE" = stock ]; then
+            oneos_parts_vendor_host "$OP_FS" "$OP_HASH" "$OP_SIZE" || return 1
+        fi
     done < "$OP_DIR/manifest"
 }
 oneos_parts_target() {
     # Resolve only the two known GSI layouts. Never follow an absolute image
     # link in init's namespace: /product there is One UI's real partition.
     OP_TARGET="$ROOTFS/$1"
+    if [ "$1" = vendor ]; then
+        # The Samsung vendor view must be /vendor, never an unrelated second
+        # real directory at /system/vendor in a donor image.
+        [ -d "$OP_TARGET" ] && [ ! -L "$OP_TARGET" ] &&
+            [ "$(readlink -f "$OP_TARGET")" = "$OP_TARGET" ]
+        return $?
+    fi
     if [ -L "$OP_TARGET" ]; then
         [ "$(readlink "$OP_TARGET")" = "/system/$1" ] || return 1
         OP_TARGET="$ROOTFS/system/$1"
@@ -59,20 +138,30 @@ oneos_parts_target() {
         [ "$(readlink -f "$OP_TARGET")" = "$OP_TARGET" ]
 }
 oneos_parts_rollback() {
-    for OP_T in $OP_MOUNTED; do "$BB" umount "$OP_T" || return 1; done
+    for OP_T in $OP_MOUNTED; do
+        # A just-created rbind can still be a peer of a host shared mount.
+        # Never unmount it after a failed propagation change unless isolation succeeds.
+        "$BB" mount --make-rprivate "$OP_T" || return 1
+        OP_DESCENDANTS=$(awk -v p="$OP_T/" 'index($5,p) == 1 {print $5}' /proc/self/mountinfo | LC_ALL=C sort -ru)
+        for OP_SUB in $OP_DESCENDANTS; do
+            case "$OP_SUB" in "$OP_T"/*) "$BB" umount "$OP_SUB" || return 1 ;; *) return 1 ;; esac
+        done
+        "$BB" umount "$OP_T" || return 1
+    done
     for OP_L in $OP_LOOPS; do "$BB" losetup -d "$OP_L" || return 1; done
     OP_MOUNTED=; OP_LOOPS=
 }
 oneos_parts_mount() {
+    OP_VENDOR_ACTIVE=0
     oneos_parts_validate || return 1
     [ -f "$OP_DIR/manifest" ] || return 0
-    OP_MOUNTED=; OP_LOOPS=
+    OP_MOUNTED=; OP_LOOPS=; OP_VENDOR_BOUND=
     [ "$(readlink -f "$ROOTFS")" = "$ROOTFS" ] || return 1
     # This is a mountpoint created for system.raw, never the host root.
     awk -v p="$ROOTFS" '$5 == p {found=1} END {exit !found}' /proc/self/mountinfo || return 1
     "$BB" mount --make-rprivate "$ROOTFS" || return 1
     while read -r OP_NAME OP_FS OP_HASH OP_SIZE OP_MODE || [ -n "$OP_NAME" ]; do
-        [ "$OP_MODE" = activate ] || continue
+        case "$OP_MODE" in activate|stock) ;; *) continue ;; esac
         oneos_parts_target "$OP_NAME" || { oneos_parts_rollback; oneos_parts_error "unsafe $OP_NAME target"; return 1; }
         if awk -v p="$OP_TARGET" '$5 == p || index($5,p "/") == 1 {found=1} END {exit !found}' /proc/self/mountinfo; then
             oneos_parts_rollback; oneos_parts_error "$OP_NAME already has mounts"; return 1
@@ -94,7 +183,11 @@ oneos_parts_mount() {
         }
         OP_MOUNTED="$OP_TARGET $OP_MOUNTED"
         "$BB" mount --make-private "$OP_TARGET" || { oneos_parts_rollback; return 1; }
-        echo "Guest partition: $OP_NAME at ${OP_TARGET#"$ROOTFS"} (read-only)"
+        if [ "$OP_MODE" = stock ]; then
+            oneos_parts_vendor_children || { oneos_parts_rollback; return 1; }
+            OP_VENDOR_ACTIVE=1
+        fi
+        echo "Guest partition: $OP_NAME at ${OP_TARGET#"$ROOTFS"} (read-only; mode $OP_MODE)"
     done < "$OP_DIR/manifest"
 }
 

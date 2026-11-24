@@ -329,7 +329,8 @@ if ! mount | grep -q "$ROOTFS "; then
     $BB mount -t ext4 -o ro "$LOOP" "$ROOTFS"
 fi
 
-# Mount extra framework partitions before any patch/compatibility overlays.
+OP_VENDOR_ACTIVE=0
+# Mount extra partitions before any patch/compatibility overlays.
 # The switch preflight validates them before stopping One UI; verify again here.
 if [ -e "$STAGE/partition_images" ] || [ -L "$STAGE/partition_images" ]; then
     [ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] || exit 3
@@ -409,6 +410,10 @@ if mount | grep -q "$ROOTFS/linkerconfig " || $BB mount --rbind /linkerconfig "$
     $BB mount --make-rslave "$ROOTFS/linkerconfig" 2>/dev/null || true
 fi
 for vb in vendor odm vendor_dlkm; do
+    if [ "$vb" = vendor ] && [ "$OP_VENDOR_ACTIVE" = 1 ]; then
+        echo "Vendor: verified S23 stock image is mounted; Samsung services remain on the host"
+        continue
+    fi
     if mount | grep -q "$ROOTFS/$vb " || $BB mount --bind "/$vb" "$ROOTFS/$vb"; then
         $BB mount --make-rslave "$ROOTFS/$vb" 2>/dev/null || true
     fi
