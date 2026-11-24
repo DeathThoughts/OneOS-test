@@ -1,6 +1,3 @@
-# The series downloads (app/build.gradle.kts -Poneos.series=<id>): each line is
-# a series id and the package sets its APK carries. ApkSeries lists the same
-# sets, every set its phones' systems use (ApkSeriesTest).
-fold hyper-f8u hyper-hk infinityx lineage n6-f8u n6-global-f8 nothing-f8u oneui95 originos pixel-f8 pixel-f8u
-s25 hyper-f8u hyper-hk hyper-madrid hyper-popsicle infinityx lineage nothing-a nothing-f8u oneui95 originos oxygen16 pixel9-sultra pyb110-s23 twinity-s23 x9u-in-1105-sultra
-s26 hyper-f8u hyper-hk hyper-madrid hyper-popsicle infinityx lineage n6-f8u nothing-a nothing-f8u oneui95 originos pixel-f8 pixel-sultra pixel9-sultra twinity-s23 x9u-in-1105-sultra
+fold hyper-f8u hyper-hk infinityx lineage n6-f8u n6-global-f8 nothing-f8u oneui95 oneui95-f8 originos pixel-f8 pixel-f8u
+s25 hyper-f8u hyper-hk hyper-madrid hyper-popsicle infinityx lineage nothing-a nothing-f8u oneui95 originos oxygen16 pixel9-sultra pixelos pyb110-s23 twinity-s23 x9u-in-1105-sultra
+s26 hyper-f8u hyper-hk hyper-madrid hyper-popsicle infinityx lineage n6-f8u nothing-a nothing-f8u oneui95 originos pixel-f8 pixel-sultra pixel9-sultra pixelos twinity-s23 x9u-in-1105-sultra

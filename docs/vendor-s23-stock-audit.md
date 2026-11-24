@@ -68,6 +68,6 @@ guest build (and stock versions only when studying Samsung dependencies).
 mount as another guest framework partition. Offline examination could inform
 init/fstab/module dependencies, but this work neither flashes it nor applies
 its boot-time content to the running host. Donor vendor activation remains blocked. A separate opt-in loader now accepts
-only this exact stock image, proves it matches the live host block device and
-preserves the host vendor submounts. This code has not been validated on a phone;
+only these exact stock vendor and ODM images, proves it matches the live host block device and
+preserves the corresponding host submounts. This code has not been validated on a phone;
 it is a loading baseline, not a completed ColorOS vendor port.

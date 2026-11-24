@@ -235,7 +235,7 @@ done
 GUARD_JARS="services_patched.jar $(awk '/^#/ { next } $2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" ||
                                        $2 == "miui-services_patched.jar" || $2 == "apprecovery.proinstaller_patched.jar" ||
                                        $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
-                                       $2 == "telephony-common_patched.jar" { print $2 }' "$STAGE/guards.txt")"
+                                       $2 == "telephony-common_patched.jar" || $2 == "framework_patched_oneui95.jar" { print $2 }' "$STAGE/guards.txt")"
 
 if [ "$APP" = 1 ]; then
     # Every staged file (files.sha256, written by the app's root script; all
@@ -675,6 +675,38 @@ grep -E 'mSupportedModes|mActiveModeId|mDefaultModeId|DisplayModeRecord|mUserPre
           if (match($0, /brightnessMaximum [0-9.]+/)) t = t " " substr($0, RSTART, RLENGTH)
           print substr($0, 1, 3000) " ..." t }' >> "$STAGE/display_modes_host.log"
 echo "preflight: display modes done $(date +%T)"
+# 0.5.35 adaptive refresh (owner, A36 PixelOS: "how do we have adaptive proper refresh rate like OneUi does";
+# 120 Hz all the time "will kill the battery for all devices"). Guests without ColorOS's own refresh logic are
+# pinned at their top rate through SurfaceFlinger's backdoor (guest_start.sh), for the VRR panels' 1 Hz
+# freezes and the panel left at 24 Hz (0.4.38-0.4.55). On a panel whose modes are separate seamless rates at
+# or under 120 Hz (the A36: 120 and 60, no VRR config) the pin keeps the panel at its top mode but lets
+# rendering go down to the lower mode's rate on a still screen (oneos_sf_kick.sh, render range), with
+# SurfaceFlinger's content detection off (guest_props.sh), so whatever moves renders at the top rate.
+# The panel itself stays at its top rate: letting DisplayManager switch the panel's modes is what the
+# A36's optical fingerprint did not take (test 9: captures rejected until the panel was pinned again).
+# Every internal display must qualify (One UI's SurfaceFlinger dump); VRR and single-mode panels keep
+# [top, top]. ONEOS_GUEST_ADAPTIVE=0 keeps [top, top] everywhere.
+ONEOS_GUEST_ADAPTIVE_PANEL=0
+if [ "${ONEOS_GUEST_ADAPTIVE:-1}" = 1 ]; then
+    ADP=$(awk '/^Display [0-9]+$/ { d = $2; ds[d] = 1; next } /^Display / { d = "" }
+        d != "" && /^ *activeMode=\{id=[0-9]+,/ { r = $0; sub(/.*resolution=/, "", r); sub(/,.*/, "", r); act[d] = r }
+        d != "" && /^ *\{id=[0-9]+, hwcId=/ { rr = $0; sub(/.*resolution=/, "", rr); sub(/,.*/, "", rr)
+            v = $0; if (!sub(/.*vsyncRate=/, "", v)) v = 0; v = int(v + 0.5)
+            vr = $0; if (sub(/.*vrrConfig=/, "", vr)) { sub(/[,}].*/, "", vr) } else vr = "N/A"
+            k++; md[k] = d; mr[k] = rr; mv[k] = v; mvr[k] = vr }
+        END { n = 0; ok = 1
+            for (d in ds) { n++; c = 0; delete seen
+                for (i = 1; i <= k; i++) if (md[i] == d && mr[i] == act[d]) {
+                    if (mv[i] > 120 || mvr[i] != "N/A") ok = 0
+                    if (mv[i] >= 48 && !(mv[i] in seen)) { seen[mv[i]] = 1; c++ } }
+                if (c < 2) ok = 0 }
+            print (n > 0 && ok) ? 1 : 0 }' "$STAGE/display_sf_host.txt" 2>/dev/null)
+    [ "$ADP" = 1 ] && ONEOS_GUEST_ADAPTIVE_PANEL=1
+fi
+export ONEOS_GUEST_ADAPTIVE_PANEL
+# The switch's later steps run in another process: the decision goes through the stage.
+echo "$ONEOS_GUEST_ADAPTIVE_PANEL" > "$STAGE/adaptive_panel" 2>/dev/null
+echo "preflight: adaptive refresh $ONEOS_GUEST_ADAPTIVE_PANEL (1: seamless modes at or under 120 Hz on every panel; ONEOS_GUEST_ADAPTIVE=${ONEOS_GUEST_ADAPTIVE:-1})"
 for p in /sys/class/lcd/panel /sys/class/lcd/panel1; do
     [ -d "$p" ] || continue
     for n in vrr vrr_lfd; do echo "$p/$n (One UI): $(cat "$p/$n" 2>&1 | tr '\n' ' ' | cut -c1-600)"; done
@@ -780,6 +812,17 @@ if [ "$(printf '%s\n' "$HLINE" | grep -c .)" = 1 ]; then
     # on the S25 Ultra: radius 0, so SystemUI kept no clear of the curved corners).
     cut_after "$HLINE" 'RoundedCorner{position=TopLeft, radius=' ','; HRC=$R
     echo "preflight: display radius done $(date +%T)"
+    # 0.5.35: One UI's status bar window is not always there to read (A36, 13:32: "height not read", the
+    # status bar overlays then missing in PixelOS, owner: "what happened to statusbar"; every other session of
+    # the day read 101 px). The last height read at this panel width stands in.
+    if [ -n "$HSB" ] && [ -n "$HDW" ]; then
+        echo "$HDW $HSB" > "$STAGE/host_statusbar_height.last"
+    elif [ -n "$HDW" ] && [ -f "$STAGE/host_statusbar_height.last" ] && [ ! -L "$STAGE/host_statusbar_height.last" ]; then
+        set -- $(head -c 32 "$STAGE/host_statusbar_height.last")
+        if [ "${1:-}" = "$HDW" ]; then
+            case "${2:-}" in [1-9][0-9]|[1-9][0-9][0-9]) HSB=$2; echo "Host status bar: not on screen now; the height read last time at $HDW px, $HSB px" ;; esac
+        fi
+    fi
     case "$HDW:$HPW:$HSB" in
         *[!0-9:]*|:*|*::*|*:) HSB='' ;;
         *) [ "$HDW" -gt 0 ] && HSB=$(( (HSB * HPW + HDW / 2) / HDW )) || HSB='' ;;
@@ -1949,6 +1992,20 @@ FIT
 chmod 755 "$STAGE/guest_panel_fit.sh"
 
 # The guest's own build props (ro.oplus.* etc.), now that its rootfs is mounted.
+# 0.5.35: guest_start.sh and the UI activator read the adaptive refresh decision (preflight) from the guest's /data.
+rm -f "$STAGE/data/oneos_adaptive"
+# Not on a phone with an in-display fingerprint sensor (guest_prepare.sh wrote its place to data/system/oneos_udfps):
+# the A36's optical sensor captured slowly and then not at all on back-to-back touches while rendering could drop
+# to 60 Hz on the still screen (test 10, owner: "stopped recognizing after 1st attempt"); with rendering at
+# 120 Hz it matched every time. One UI also runs the panel at its top rate for the sensor.
+if [ "$(cat "$STAGE/adaptive_panel" 2>/dev/null)" = 1 ] && [ "${ONEOS_GUEST_ADAPTIVE:-1}" = 1 ] && [ -d "$STAGE/data" ] && [ ! -L "$STAGE/data" ]; then
+    if [ -s "$STAGE/data/system/oneos_udfps" ]; then
+        echo "Adaptive refresh: off (an in-display fingerprint sensor: rendering stays at the panel's top rate)"
+    else
+        : > "$STAGE/data/oneos_adaptive"
+        echo "Adaptive refresh: on (the panel at its top rate, rendering down to the lower mode's on a still screen)"
+    fi
+fi
 /system/bin/sh "$STAGE/guest_props.sh" add "$STAGE/rootfs"
 if [ -f "$STAGE/data/oneos_root/enabled" ]; then
     # Bounded, each part timed. Galaxy S24 Ultra ColorOS report 0756b014
@@ -2297,6 +2354,245 @@ if [ "${ONEOS_GUEST_VULKAN:-0}" = 1 ]; then
     echo "Guest Vulkan: requested Skia Vulkan for HWUI and threaded Skia Vulkan for RenderEngine."
 fi
 
+# Proximity sensor on devices without IR hardware (Galaxy S24 FE ProToS / TSP Hover Proximity):
+# Expose /vendor/lib64/sensors.inputvirtual.so's Hover Proximity sensor (65599, SSENSOR perm)
+# as standard android.sensor.proximity (8, 0.0f NEAR for hover 1..4 / 5.0f FAR for hover 0,5..9,
+# maxRange=5.0f, perm=n/a) for the guest session, then restart vendor.sensors-hal-multihal.
+apply_hover_prox_patch() {
+    HPROX_LIB=/vendor/lib64/sensors.inputvirtual.so
+    HPROX_PATCHED="$STAGE/session/sensors.inputvirtual.session.so"
+    HPROX_MARKER="$STAGE/session/prox_patch.active"
+    [ -f "$HPROX_LIB" ] || return 0
+    [ ! -e /sys/class/sensors/proximity_sensor ] || return 0
+
+    hreadn() {
+        "$BB" dd if="$1" bs=1 skip="$2" count="$3" 2>/dev/null | "$BB" od -An -tx1 | "$BB" tr -d ' \n'
+    }
+    if "$BB" grep -Fq " $HPROX_LIB " /proc/1/mountinfo 2>/dev/null; then
+        msrc=$("$BB" awk -v mp="$HPROX_LIB" '$5 == mp { print $4; exit }' /proc/1/mountinfo 2>/dev/null)
+        case "$msrc" in
+            *sensors.inputvirtual.session.so)
+                echo "Proximity (Hover -> TYPE_PROXIMITY): already patched for this session"
+                return 0 ;;
+            *)
+                echo "Proximity (Hover -> TYPE_PROXIMITY): $HPROX_LIB mounted from $msrc; left alone"
+                return 0 ;;
+        esac
+    fi
+    rm -f "$HPROX_MARKER"
+
+    n_str=$(LC_ALL=C /system/bin/grep -aobF "com.samsung.sensor.hover_proximity" "$HPROX_LIB" 2>/dev/null | "$BB" wc -l)
+    [ "$n_str" = 1 ] || { echo "Proximity: hover_proximity string count=$n_str; left alone"; return 1; }
+    off_str=$(LC_ALL=C /system/bin/grep -aobF "com.samsung.sensor.hover_proximity" "$HPROX_LIB" 2>/dev/null | "$BB" cut -d: -f1)
+    [ "$(hreadn "$HPROX_LIB" $((off_str + 34)) 1)" = "00" ] || { echo "Proximity: hover_proximity string missing NUL; left alone"; return 1; }
+
+    n_perm=$(LC_ALL=C /system/bin/grep -aobF "com.samsung.permission.SSENSOR" "$HPROX_LIB" 2>/dev/null | "$BB" wc -l)
+    [ "$n_perm" = 1 ] || { echo "Proximity: SSENSOR perm string count=$n_perm; left alone"; return 1; }
+    off_perm=$(LC_ALL=C /system/bin/grep -aobF "com.samsung.permission.SSENSOR" "$HPROX_LIB" 2>/dev/null | "$BB" cut -d: -f1)
+    [ "$(hreadn "$HPROX_LIB" $((off_perm + 30)) 1)" = "00" ] || { echo "Proximity: SSENSOR perm missing NUL; left alone"; return 1; }
+
+    rng_pat=$("$BB" printf '\020\101')
+    off_rng=""; m_rng=0
+    for c in $(LC_ALL=C /system/bin/grep -aobF "$rng_pat" "$HPROX_LIB" 2>/dev/null | "$BB" cut -d: -f1); do
+        case "$c" in ''|*[!0-9]*) continue ;; esac
+        [ "$c" -ge 2 ] || continue
+        cand=$((c - 2))
+        if [ "$(hreadn "$HPROX_LIB" "$cand" 8)" = "000010410000803f" ]; then
+            off_rng=$cand; m_rng=$((m_rng + 1))
+        fi
+    done
+    [ "$m_rng" = 1 ] || { echo "Proximity: (9.0f,1.0f) range pair count=$m_rng; left alone"; return 1; }
+
+    ctor_pat=$("$BB" printf '\344\007\200\122\345\003')
+    off_ctor=""; m_ctor=0
+    for c in $(LC_ALL=C /system/bin/grep -aobF "$ctor_pat" "$HPROX_LIB" 2>/dev/null | "$BB" cut -d: -f1); do
+        case "$c" in ''|*[!0-9]*) continue ;; esac
+        if [ "$(hreadn "$HPROX_LIB" "$c" 52)" = "e4078052e50302aae303012a81fffff021781a9182fffff042901f912400a07226008052f4078052f30300aa3400a07298040094" ]; then
+            off_ctor=$c; m_ctor=$((m_ctor + 1))
+        fi
+    done
+    [ "$m_ctor" = 1 ] || { echo "Proximity: HoverProximitySensor ctor count=$m_ctor; left alone"; return 1; }
+
+    read_pat=$("$BB" printf '\011\045\100\171\077\371')
+    off_read=""; m_read=0
+    for c in $(LC_ALL=C /system/bin/grep -aobF "$read_pat" "$HPROX_LIB" 2>/dev/null | "$BB" cut -d: -f1); do
+        case "$c" in ''|*[!0-9]*) continue ;; esac
+        if [ "$(hreadn "$HPROX_LIB" "$c" 48)" = "092540793ff9007161feff54041540b99f240071ac0300542900805289030039001540bd00d8215e602a00bdeaffff17" ] &&
+           [ "$(hreadn "$HPROX_LIB" $((c + 136)) 24)" = "80008052e10315aae2031aaae30317aa8b030094ceffff17" ]; then
+            off_read=$c; m_read=$((m_read + 1))
+        fi
+    done
+    [ "$m_read" = 1 ] || { echo "Proximity: HoverProximitySensor readEvents count=$m_read; left alone"; return 1; }
+
+    "$BB" mkdir -p "$STAGE/session" || return 1
+    rm -f "$HPROX_PATCHED"
+    "$BB" cp -f "$HPROX_LIB" "$HPROX_PATCHED" || return 1
+
+    "$BB" printf 'android.sensor.proximity\000\000\000\000\000\000\000\000\000\000\000' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek="$off_str" conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\000' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek="$off_perm" conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\000\000\240\100\000\000\240\100' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek="$off_rng" conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\004\001\200\122' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek="$off_ctor" conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\037\040\003\325' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek=$((off_ctor + 28)) conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\024\001\200\122' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek=$((off_ctor + 36)) conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\037\040\003\325' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek=$((off_ctor + 44)) conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\010\376\377\124\034\000\000\024\051\000\200\122\211\003\000\071\354\377\377\027\037\040\003\325' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek=$((off_read + 20)) conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+    "$BB" printf '\211\004\000\121\077\015\000\161\011\024\250\122\351\223\211\032\151\052\000\271\340\377\377\027' | "$BB" dd of="$HPROX_PATCHED" bs=1 seek=$((off_read + 136)) conv=notrunc 2>/dev/null || { rm -f "$HPROX_PATCHED"; return 1; }
+
+    if [ "$(hreadn "$HPROX_PATCHED" "$off_str" 25)" != "616e64726f69642e73656e736f722e70726f78696d69747900" ] ||
+       [ "$(hreadn "$HPROX_PATCHED" "$off_ctor" 4)" != "04018052" ] ||
+       [ "$(hreadn "$HPROX_PATCHED" $((off_read + 20)) 24)" != "08feff541c0000142900805289030039ecffff171f2003d5" ] ||
+       [ "$(hreadn "$HPROX_PATCHED" $((off_read + 136)) 24)" != "890400513f0d00710914a852e993891a692a00b9e0ffff17" ]; then
+        echo "Proximity: patched verification mismatch; left alone"
+        rm -f "$HPROX_PATCHED"
+        return 1
+    fi
+
+    chmod 644 "$HPROX_PATCHED"
+    "$BB" chcon u:object_r:vendor_file:s0 "$HPROX_PATCHED" 2>/dev/null || true
+    "$BB" mount --bind "$HPROX_PATCHED" "$HPROX_LIB" || { rm -f "$HPROX_PATCHED"; return 1; }
+    if ! "$BB" grep -Fq " $HPROX_LIB " /proc/1/mountinfo 2>/dev/null; then
+        "$BB" umount "$HPROX_LIB" 2>/dev/null
+        rm -f "$HPROX_PATCHED"
+        return 1
+    fi
+    printf 'session %s %s\n' "$off_ctor" "$off_read" > "$HPROX_MARKER"
+    chmod 600 "$HPROX_MARKER"
+    SENSORS_HAL_RESTART=1
+    echo "Proximity (Hover -> TYPE_PROXIMITY): patched $HPROX_LIB for this session"
+}
+
+# Unblock Samsung Camera HAL (UID 1047) access to vendor VDIS Gyroscope, SuperSteady Gyroscope
+# (com.samsung.permission.SSENSOR), and Rear ALS (com.samsung.permission.HRM_EXT) in non-OneUI guests
+# by zeroing byte 0 of those NUL-terminated permission strings in vendor sensor subHALs for the session.
+apply_cam_sensors_patch() {
+    [ "${ONEOS_GUEST_CAM_SENSORS:-$SENS_DEF}" = 1 ] || return 0
+    ! grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null || return 0
+
+    CS_LIST="$STAGE/session/cam_sensors_patch.list"
+    "$BB" awk '$5 ~ /^\/vendor\/lib64\// && $5 != "/vendor/lib64/sensors.inputvirtual.so" && $4 ~ /\.session\.so$/ { f = 1 } END { exit !f }' /proc/1/mountinfo 2>/dev/null || rm -f "$CS_LIST"
+
+    CS_CANDS=""
+    cs_add_cand() {
+        case " $CS_CANDS " in *" $1 "*) ;; *) CS_CANDS="${CS_CANDS:+$CS_CANDS }$1" ;; esac
+    }
+    if [ -f /vendor/etc/sensors/hals.conf ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line=$(printf '%s' "$line" | "$BB" tr -d '\r')
+            line=${line%%#*}
+            line=$(printf '%s' "$line" | "$BB" awk '{$1=$1;print}')
+            [ -n "$line" ] || continue
+            case "$line" in
+                */*) cs_add_cand "$line" ;;
+                *)   cs_add_cand "/vendor/lib64/$line" ;;
+            esac
+        done < /vendor/etc/sensors/hals.conf
+    fi
+    for lib in /vendor/lib64/sensors.*.so; do
+        cs_add_cand "$lib"
+    done
+
+    cs_readn() {
+        "$BB" dd if="$1" bs=1 skip="$2" count="$3" 2>/dev/null | "$BB" od -An -tx1 | "$BB" tr -d ' \n'
+    }
+
+    for LIB in $CS_CANDS; do
+        [ -L "$LIB" ] && continue
+        [ -f "$LIB" ] || continue
+        [ "$LIB" = "/vendor/lib64/sensors.inputvirtual.so" ] && continue
+
+        offs=""
+        for perm in "com.samsung.permission.SSENSOR" "com.samsung.permission.HRM_EXT"; do
+            for off in $(LC_ALL=C /system/bin/grep -aobF "$perm" "$LIB" 2>/dev/null | "$BB" cut -d: -f1); do
+                case "$off" in ''|*[!0-9]*) continue ;; esac
+                if [ "$(cs_readn "$LIB" "$off" 2)" = "636f" ] && [ "$(cs_readn "$LIB" $((off + 30)) 1)" = "00" ]; then
+                    case " $offs " in *" $off "*) ;; *) offs="${offs:+$offs }$off" ;; esac
+                fi
+            done
+        done
+        [ -n "$offs" ] || continue
+
+        if "$BB" grep -Fq " $LIB " /proc/1/mountinfo 2>/dev/null; then
+            msrc=$("$BB" awk -v mp="$LIB" '$5 == mp { print $4; exit }' /proc/1/mountinfo 2>/dev/null)
+            case "$msrc" in
+                *.session.so)
+                    echo "Camera sensors (VDIS/ALS): $LIB already patched for this session"
+                    continue ;;
+                *)
+                    echo "Camera sensors (VDIS/ALS): $LIB mounted from $msrc; left alone"
+                    continue ;;
+            esac
+        fi
+
+        PATCHED="$STAGE/session/${LIB##*/}.session.so"
+        "$BB" mkdir -p "$STAGE/session" || return 0
+        rm -f "$PATCHED"
+        "$BB" cp -f "$LIB" "$PATCHED" || continue
+
+        w_ok=1
+        for off in $offs; do
+            if ! "$BB" printf '\000' | "$BB" dd of="$PATCHED" bs=1 seek="$off" conv=notrunc 2>/dev/null; then
+                w_ok=0
+                break
+            fi
+        done
+        if [ "$w_ok" != 1 ]; then
+            rm -f "$PATCHED"
+            continue
+        fi
+
+        v_ok=1
+        n_patched=0
+        for off in $offs; do
+            if [ "$(cs_readn "$PATCHED" "$off" 2)" != "006f" ] || [ "$(cs_readn "$PATCHED" $((off + 30)) 1)" != "00" ]; then
+                v_ok=0
+                break
+            fi
+            n_patched=$((n_patched + 1))
+        done
+        if [ "$v_ok" != 1 ] || [ "$n_patched" -eq 0 ]; then
+            echo "Camera sensors (VDIS/ALS): patched verification mismatch for $LIB; left alone"
+            rm -f "$PATCHED"
+            continue
+        fi
+
+        chmod 644 "$PATCHED"
+        "$BB" chcon u:object_r:vendor_file:s0 "$PATCHED" 2>/dev/null || true
+        if ! "$BB" mount --bind "$PATCHED" "$LIB"; then
+            rm -f "$PATCHED"
+            continue
+        fi
+        if ! "$BB" grep -Fq " $LIB " /proc/1/mountinfo 2>/dev/null; then
+            "$BB" umount "$LIB" 2>/dev/null
+            rm -f "$PATCHED"
+            continue
+        fi
+
+        printf '%s %s\n' "$LIB" "$PATCHED" >> "$CS_LIST"
+        chmod 600 "$CS_LIST"
+        SENSORS_HAL_RESTART=1
+        echo "Camera sensors (VDIS/ALS): patched $LIB ($n_patched permission string(s) cleared for this session)"
+    done
+    return 0
+}
+
+SENSORS_HAL_RESTART=0
+# Both patches bind modified copies of One UI's own vendor sensor libraries and restart its sensors HAL:
+# only on the phone they were made and tested on (Galaxy S24 FE, SM-S721*, pull request #355) and never for
+# a One UI guest. ONEOS_GUEST_HOVER_PROX=1 / ONEOS_GUEST_CAM_SENSORS=1 force them elsewhere for testing.
+SENS_DEF=0
+case "$(getprop ro.product.model)" in SM-S721*) SENS_DEF=1 ;; esac
+grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null && SENS_DEF=0
+if [ "${ONEOS_GUEST_HOVER_PROX:-$SENS_DEF}" = 1 ] && [ ! -e /sys/class/sensors/proximity_sensor ] && [ -f /vendor/lib64/sensors.inputvirtual.so ]; then
+    apply_hover_prox_patch || echo "!!! Proximity: Hover Proximity patch was not applied; calls may keep screen on"
+fi
+if [ "${ONEOS_GUEST_CAM_SENSORS:-$SENS_DEF}" = 1 ] && ! grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null; then
+    apply_cam_sensors_patch || true
+fi
+if [ "$SENSORS_HAL_RESTART" = 1 ]; then
+    /system/bin/setprop ctl.restart vendor.sensors-hal-multihal 2>/dev/null || true
+    echo "Sensors HAL: vendor.sensors-hal-multihal restarted for session sensor patches"
+fi
+
 # Launch takeover inside isolated mount namespace
 $BB unshare -m $BB sh "$STAGE/data/guest_start.sh" </dev/null >"$STAGE/data/takeover.log" 2>&1 &
 TAKEOVER_PID=$!
@@ -2448,6 +2744,20 @@ case "$R" in
     30.0|[3-9][0-9].0|1[01][0-9].0|120.0) GUEST_REFRESH=$R ;;
 esac
 echo "Guest refresh-rate policy: ${GUEST_REFRESH} Hz (One UI physical modes)"
+GUEST_HIGH_ORR=3
+[ "$GUEST_REFRESH" = "90.0" ] && GUEST_HIGH_ORR=1
+# ColorOS's own 60/120 Hz choice (variable refresh, min_refresh_rate 0) only where no in-display optical
+# sensor needs a steady rate (the A36's fingerprint failed on variable rates, test 10), or on the Galaxy
+# S24 FE it was tested on (pull request #355); elsewhere the rate stays pinned as before.
+GUEST_ORR_DYN=1
+# ro.boot.hardware back to the phone's own after the guest's zygote preloaded libqti_performance.so: only on the
+# Galaxy S24 FE (pull request #355, its Night mode); elsewhere a zygote restart inside the session would come up
+# without that library (the S26+ UnsatisfiedLinkError). ONEOS_GUEST_RESTORE_BOOT_HW=1 forces it, 0 turns it off.
+GUEST_RESTORE_HW_DEF=0
+case "$(getprop ro.product.model)" in SM-S721*) GUEST_RESTORE_HW_DEF=1 ;; esac
+if [ -s "$STAGE/data/system/oneos_udfps" ]; then
+    case "$(getprop ro.product.model)" in SM-S721*) ;; *) GUEST_ORR_DYN=0 ;; esac
+fi
 # ONEOS_GUEST_POSTURE=live: the fold line's posture follows the guest's hinge
 # state instead of always flat.
 # Live by default with the hinge sets of pull request #1 (Fold8) and the Fold8 Ultra's.
@@ -2654,6 +2964,23 @@ while true; do
                 echo \"[UI Activator] screen timeout: was stay_on_while_plugged_in=\${SOP:-?} screen_off_timeout=\${SOT:-?}; the forced values reset once (0, 60000)\"
             fi
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system haptic_feedback_enabled 1
+            if [ $GUEST_OPLUS = 1 ] && [ $GUEST_ORR_DYN = 1 ] && grep -qF 'name=\"oplus.software.display.dynamic_fps_switch\"' $STAGE/oplus_features_config.xml 2>/dev/null; then
+                ORR=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get secure oplus_customize_screen_refresh_rate 2>/dev/null)
+                case \"\$ORR\" in
+                    2)
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate 60.0
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 0
+                        echo '[UI Activator] refresh rate: keeping user Standard 60 Hz (oplus_customize_screen_refresh_rate=2)' ;;
+                    1|3)
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate $GUEST_REFRESH
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 0 ;;
+                    *)
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put secure oplus_customize_screen_refresh_rate $GUEST_HIGH_ORR
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate $GUEST_REFRESH
+                        $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate 0
+                        echo \"[UI Activator] refresh rate: default High set (oplus_customize_screen_refresh_rate=\${ORR:-unset} -> $GUEST_HIGH_ORR, peak $GUEST_REFRESH)\" ;;
+                esac
+            else
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate $GUEST_REFRESH
             # On ColorOS, panel_keeper and /data/oneos_sf_kick.sh already cure the
             # 24 Hz start without pinning; forcing min_refresh_rate 120.0 held
@@ -2682,9 +3009,24 @@ while true; do
             else
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system min_refresh_rate $GUEST_REFRESH
             fi
+            fi
             # ColorOS's touch idle (OTI) pushes SurfaceFlinger to 240/60 Hz over the
             # 120 Hz policy on this panel (run 29); also staged off by guest_prepare.sh.
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys oplus_vrr_service oti false >/dev/null 2>&1 && echo '[UI Activator] refresh rate: ColorOS touch idle off'
+            # 0.5.37 (owner, A36 ColorOS: lag on and off, a first touch not taken; trace 11-23 22:25):
+            # the guest surfaceflinger ran 10.2 s of 15 s on cpu0-3 only, composite up to 24 ms a frame.
+            # AOSP surfaceflinger puts itself in the system-background cpuset (the little cores) at
+            # start and the phone vendor init moves it (One UI: its own sf cpuset, cpu0-7); this one is
+            # started by guest_start.sh, so nothing moved it. Into the cpuset One UI gives its own.
+            for SFP in \$(pidof surfaceflinger); do
+                SFC=\$(cat /proc/\$SFP/cpuset 2>/dev/null)
+                for SFD in /dev/cpuset/sf /dev/cpuset/foreground; do
+                    [ \"\$SFC\" = \"\${SFD#/dev/cpuset}\" ] && break
+                    [ -f \$SFD/cgroup.procs ] && [ -n \"\$(cat \$SFD/cpus 2>/dev/null)\" ] || continue
+                    echo \$SFP > \$SFD/cgroup.procs 2>/dev/null &&
+                        echo \"[UI Activator] surfaceflinger \$SFP: cpuset \$SFC -> \${SFD#/dev/cpuset} (cpus \$(cat \$SFD/cpus))\" && break
+                done
+            done
             # Samsung Camera's working folder (guest_prepare.sh makes it when the
             # camera already has a uid): on a phone's first session with the
             # camera the package is only installed by this boot, the folder was
@@ -2819,11 +3161,12 @@ while true; do
             [ \"\$NAVK\" = null ] && $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put secure hide_navigationbar_enable 3 2>/dev/null
             # Window blur off once on mid-range Galaxy A and M phones (0.5.14): blur is GPU-only, and on
             # the A36 it alone missed about 240 frames in 30 s. Once per guest data (marker), so a user who
-            # turns it back on (Developer options > Allow window-level blurs) keeps it.
+            # turns it back on (Developer options > Allow window-level blurs; Android 17: Accessibility > Color and
+            # motion > Reduce blur effects, its developer toggle writing nothing in PixelOS 17) keeps it.
             case \"\$(getprop ro.product.model)\" in SM-A*|SM-M*)
                 if [ ! -f $STAGE/data/oneos_blur_default ]; then
                     $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put global disable_window_blurs 1 2>/dev/null &&
-                        touch $STAGE/data/oneos_blur_default && echo \"[UI Activator] window blur off once (mid-range Galaxy; Developer options turn it back on)\"
+                        touch $STAGE/data/oneos_blur_default && echo \"[UI Activator] window blur off once (mid-range Galaxy; Developer options > Allow window-level blurs, or on Android 17 Accessibility > Color and motion > Reduce blur effects, turn it back on)\"
                 fi ;;
             esac
             # Nothing OS haptics at full strength once per guest data (0.5.15). Nothing hides Android's vibration
@@ -3028,6 +3371,14 @@ while true; do
                 fi
                 sleep 3
                 echo \"[UI Activator] sound fx: \$(head -n 3 $STAGE/sound_fx.log 2>/dev/null | tr '\n' ' ' || true)\"
+                # Off by default (0.5.37 review of pull request #355): it stays in the guest's data, also where
+                # OneOS's sound effects give up (no Dolby). ONEOS_GUEST_DISABLE_MUSICFX=1 turns it on.
+                if [ \"${ONEOS_GUEST_DISABLE_MUSICFX:-0}\" = 1 ] &&
+                   $BB timeout 15 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys package com.fahadali.oneos.guest 2>/dev/null | grep -q SoundEffectsActivity &&
+                   $BB timeout 15 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm list packages 2>/dev/null | grep -q '^package:com\\.android\\.musicfx\$'; then
+                    $BB timeout 15 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm disable-user --user 0 com.android.musicfx >/dev/null 2>&1 &&
+                        echo \"[UI Activator] sound fx: disabled com.android.musicfx (OneOS SoundEffectsActivity handles equalizer)\"
+                fi
             elif [ $GUEST_DOLBY_SETTINGS = 1 ]; then
                 $BB timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm default-state \$dolby_provider ||
                     echo \"[UI Activator] could not reset the Dolby Sound settings provider\"
@@ -3189,6 +3540,9 @@ while true; do
                 HW=\$(sed -n 's/.* width=\([0-9]*\) .*/\1/p' $STAGE/host_display 2>/dev/null)
                 HP=\$(sed -n 's/.* physical=\([0-9]*\)$/\1/p' $STAGE/host_display 2>/dev/null)
                 GW=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/wm size -d 0 2>/dev/null | sed -n 's/^Physical size: \([0-9]*\)x[0-9]*$/\1/p' | head -n 1)
+                # The width the guest runs the panel at, for the next start's HyperOS base density
+                # (guest_props.sh: One UI at FHD+ on a QHD panel, whole panel or One UI's width).
+                case \"\$GW\" in ''|*[!0-9]*) ;; *) [ -L $STAGE/data/oneos_guest_width ] || echo \$GW > $STAGE/data/oneos_guest_width ;; esac
                 case \"\$HUD:\$HW:\$HP:\$GW\" in
                     *[!0-9:]*|:*|*::*|*:)
                         echo \"[UI Activator] density: One UI's scale not recorded (\${HUD:-?} at \${HW:-?} of \${HP:-?} px, guest \${GW:-?} px), left at base\" ;;
@@ -3321,7 +3675,7 @@ while true; do
                 if [ $GUEST_OPLUS = 1 ]; then FOLDN=continue_using_apps_when_folded; else FOLDN=fold_lock_behavior_setting; fi
                 FOLDK=\$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system \$FOLDN 2>/dev/null)
                 case \"${ONEOS_GUEST_FOLD_CONTINUE:-1}:\$FOLDN:\$FOLDK\" in
-                    0:*|1:continue_using_apps_when_folded:1|1:continue_using_apps_when_folded:2|1:fold_lock_behavior_setting:stay_awake_on_fold_key|1:fold_lock_behavior_setting:sleep_on_fold_key) ;;
+                    0:*|1:continue_using_apps_when_folded:1|1:continue_using_apps_when_folded:2|1:fold_lock_behavior_setting:stay_awake_on_fold_key|1:fold_lock_behavior_setting:sleep_on_fold_key|1:fold_lock_behavior_setting:selective_stay_awake_key) ;;
                     1:continue_using_apps_when_folded:*) $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system continue_using_apps_when_folded 1 2>/dev/null ;;
                     *) $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system fold_lock_behavior_setting stay_awake_on_fold_key 2>/dev/null ;;
                 esac
@@ -3399,6 +3753,22 @@ while true; do
             fi
             echo \"[UI Activator] refresh: min \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system min_refresh_rate) peak \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system peak_refresh_rate); brightness \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system screen_brightness)\"
             echo '[UI Activator] Home activated!'
+            # Exynos native libraries (Samsung Camera MFP30IF/MFP20/SNAP, MediaCodec):
+            # guest_props.sh set ro.boot.hardware=qcom solely so ColorOS's zygote64
+            # evaluated Build.IS_QCOM_PLATFORM=true and preloaded libqti_performance.so.
+            # Now that zygote64, system_server, SystemUI and Home are up (inheriting the
+            # preloaded library and cached Java constant), restore the host's real
+            # ro.boot.hardware so Samsung Camera uses Exynos ENN NPU instead of Qualcomm
+            # SNPE (libsnpe_wrapper.so not found -> 68 s Night Mode timeout).
+            if [ \"${ONEOS_GUEST_RESTORE_BOOT_HW:-$GUEST_RESTORE_HW_DEF}\" = 1 ] && [ -s $STAGE/host_boot_hardware ] && [ ! -L $STAGE/host_boot_hardware ]; then
+                HBHW=\$(head -n 1 $STAGE/host_boot_hardware 2>/dev/null)
+                case \"\$HBHW\" in
+                    ''|*[!A-Za-z0-9._-]*) echo '[UI Activator] Native hardware prop: invalid saved value, left alone' ;;
+                    *)
+                        \"$RP\" -n ro.boot.hardware \"\$HBHW\" 2>/dev/null
+                        echo \"[UI Activator] Native hardware prop restored: ro.boot.hardware=\$HBHW (now \$(getprop ro.boot.hardware); zygote64 already preloaded libqti_performance.so)\" ;;
+                esac
+            fi
             # ColorOS lock screen depth effect (0.4.60, owner; 0.4.59 A36 768c5a1d, S23
             # 77b9dfc0): SystemUI saves the cut-out subject as /data/oplus/os/deep_scenery_image*,
             # but that folder is system's and SystemUI runs as an app uid here (EACCES, \"can
@@ -3741,6 +4111,13 @@ while true; do
                         :*|*:|*:*[!0-9]*) ;;
                         *) HSBG=\$(awk -v v=\"\$HSB\" -v k=\"\$SBK\" 'BEGIN { split(k, a, \" \"); printf \"%d\", v * a[1] / a[2] + 0.5 }') ;;
                     esac
+                    # The corner radius the same way (S24+ PixelOS, guest at 1080 on the 1440 px panel: One UI's
+                    # radius is the panel's, a third too round at the guest's width).
+                    HRCG=\$HRC
+                    case \"\$SBK:\$HRC\" in
+                        :*|*:|*:*[!0-9]*) ;;
+                        *) HRCG=\$(awk -v v=\"\$HRC\" -v k=\"\$SBK\" 'BEGIN { split(k, a, \" \"); printf \"%d\", v * a[1] / a[2] + 0.5 }') ;;
+                    esac
                     case \"\$HSB\" in
                         ''|*[!0-9]*) ;;
                         *) r=\$(gdim OneOSStatusBarHeight android android:dimen/status_bar_height_default=\$HSBG android:dimen/status_bar_height_portrait=\$HSBG)
@@ -3748,7 +4125,7 @@ while true; do
                     esac
                     case \"\$HRC\" in
                         ''|*[!0-9]*) ;;
-                        *) r=\$(gdim OneOSCornerRadius android android:dimen/rounded_corner_radius=\$HRC android:dimen/rounded_corner_radius_top=\$HRC android:dimen/rounded_corner_radius_bottom=\$HRC)
+                        *) r=\$(gdim OneOSCornerRadius android android:dimen/rounded_corner_radius=\$HRCG android:dimen/rounded_corner_radius_top=\$HRCG android:dimen/rounded_corner_radius_bottom=\$HRCG)
                            case \"\$r\" in registered*) OVS=\"\$OVS OneOSCornerRadius\" ;; *) DIMS=\"\$DIMS radius: \$r;\" ;; esac
                            # HyperOS's island (SystemUI's DynamicIslandController answers the plugin's
                            # cutout_y with dimen/cut_out_center_y, Xiaomi's own phone's value) centred on
@@ -3823,9 +4200,32 @@ while true; do
                     elif [ $GUEST_MIUI = 1 ]; then
                         gxo disable --user 0 com.android.shell:OneOSIslandY
                     fi
+                    # 0.5.35, PixelOS on the A36 (owner, 11-21: \"Statusbar isnt aligned to cam cutout and on the sides
+                    # too\"): AOSP and Pixel SystemUI centre the bar's row in the height under status_bar_padding_top,
+                    # 0 here, so the clock and icons sat at y 19..81 (centre 50) where the camera hole's centre is 58
+                    # (One UI's cutout rect 24..92 in a 101 px bar). Twice that gap, as for Nothing above (its own
+                    # 15 px bias aside): with 15 px the row went to 27..89. Nothing OS keeps its own overlay.
+                    if [ $GUEST_AOSP_SYSUI = 1 ] && [ ! -e $STAGE/rootfs/system_ext/framework/nt-telephony-common.jar ] && [ ! -e $STAGE/rootfs/system/system_ext/framework/nt-telephony-common.jar ]; then
+                        SBT=\$(printf '%s\\n' \"\$HRP\" | awk -v h=\"\${HSBG:-0}\" -v k=\"\$SBK\" '{ for (i = 1; i <= NF; i++) if (split(\$i, q, \",\") == 2) { y = q[2] + 0; if (n == 0 || y < lo) lo = y; if (n == 0 || y > hi) hi = y; n++ } }
+                            END { f = 1; if (split(k, a, \" \") == 2 && a[2] > 0) f = a[1] / a[2]; t = 0; if (n > 1 && h > 0) t = int(2 * ((lo + hi) / 2 * f - h / 2) + 0.5); if (t < 0) t = 0; print t }')
+                        case \"\$SBT\" in ''|*[!0-9]*) SBT=0 ;; esac
+                        if [ \$SBT -gt 0 ]; then
+                            r=\$(gdim OneOSStatusBarTop com.android.systemui com.android.systemui:dimen/status_bar_padding_top=\$SBT)
+                            case \"\$r\" in registered*) OVS=\"\$OVS OneOSStatusBarTop\" ;; *) DIMS=\"\$DIMS status bar top \$SBT px: \$r;\" ;; esac
+                        fi
+                    fi
                 fi
                 ON=''
                 for o in \$OVS; do gxo enable --user 0 com.android.shell:\$o && ON=\"\$ON \$o\"; done
+                # SystemUI reads status_bar_padding_top only when it lays the bar out: turned on now (off when the
+                # guest started, so the first session on new files), SystemUI restarted once. Later sessions start
+                # with it on.
+                case \" \$ON \" in *\" OneOSStatusBarTop \"*)
+                    if ! printf '%s\\n' \"\$PRE\" | grep -q -x -F '[x] com.android.shell:OneOSStatusBarTop'; then
+                        sp=\$(timeout 10 $BB nsenter -t \$PID -m /system/bin/pidof com.android.systemui 2>/dev/null)
+                        case \"\$sp\" in ''|*[!0-9\ ]*) ;; *) kill \$sp 2>/dev/null && echo \"[UI Activator] SystemUI restarted for the status bar top padding (\$SBT px)\" ;; esac
+                    fi ;;
+                esac
                 # 0.5.18 (owner, A36): Nothing's SystemUI reads the power key's place (the screen-off animation) once,
                 # when it starts, and in a guest it starts before these overlays hold: the animation went to Nothing's
                 # own 620 px every session, and right only after a SystemUI restart (owner: \"power animation good\",
@@ -3852,7 +4252,7 @@ while true; do
                         done
                     fi
                 fi
-                echo \"[UI Activator] status bar: One UI's cutout '\${HCS:-none}', as \$CUTU: '\${CUT:-none}', rect '\${CUTR:-none}'; height \${HSB:-?} px\${SBK:+ (\$HSBG px at the \${SBK% *} px the guest runs)}, corner radius \${HRC:-?} px; overlays on:\${ON:- none}\${DIMS:+ (not made:\$DIMS)}\"
+                echo \"[UI Activator] status bar: One UI's cutout '\${HCS:-none}', as \$CUTU: '\${CUT:-none}', rect '\${CUTR:-none}'; height \${HSB:-?} px\${SBK:+ (\$HSBG px at the \${SBK% *} px the guest runs)}, corner radius \${HRCG:-?} px (One UI \${HRC:-?} px on the panel); overlays on:\${ON:- none}\${DIMS:+ (not made:\$DIMS)}\"
             else
                 # No host cutout this session (ONEOS_GUEST_HOST_CUTOUT=0, or a
                 # phone with two panels): an earlier session's overlays go off.
@@ -3861,11 +4261,87 @@ while true; do
                     case \$o in
                         OneOSCornerRadius) [ -n \"\$CRAD\" ] && continue
                             gxo disable --user 0 com.android.shell:\$o && OFF=\"\$OFF \$o\" ;;
-                        OneOSCutout|OneOSCutoutRect|OneOSStatusBarHeight|OneOSCornerPadding|OneOSNtStatusBar|OneOSIslandY|OneOSIslandCenter|OneOSNtPowerKey)
+                        OneOSCutout|OneOSCutoutRect|OneOSStatusBarHeight|OneOSStatusBarTop|OneOSCornerPadding|OneOSNtStatusBar|OneOSIslandY|OneOSIslandCenter|OneOSNtPowerKey)
                             gxo disable --user 0 com.android.shell:\$o && OFF=\"\$OFF \$o\" ;;
                     esac
                 done
                 [ -z \"\$OFF\" ] || echo \"[UI Activator] status bar: no host cutout this session; overlays off:\$OFF\"
+            fi
+            # 0.5.35, PixelOS on the A36 (owner, 11-22: \"fingerprint icon is soo bad\"): Pixel SystemUI sizes the
+            # in-display sensor's icon as udfps_icon_size (6000 um) / pixel_pitch, and pixel_pitch comes from a
+            # Pixel's own vendor overlay; on One UI's vendor it stayed -1, so the icon was -6000 px and its padding
+            # far wider than the 226 px sensor (a light block over a dark circle). The panel's pitch from its dpi
+            # (A36: 25400 / 386.37 = 65.74 um, icon 91 px, tested live). SystemUI reads it when it starts.
+            # 0.5.35, the same SystemUI and the phone's in-display sensor (/data/system/oneos_udfps: x y r, the panel's
+            # own pixels): the sensor sits lower on a Galaxy than on a Pixel (A36: centre at 89 % of the height, a
+            # Pixel's about 82 %), and two lock screen parts placed against it went wrong (owner, A36 PixelOS):
+            # - the indication line (\"Recognizing face...\") under the sensor circle, overlapping it: its area is
+            #   moved to just above the circle (keyguard_indication_margin_bottom = height - circle top + 10 px);
+            # - the large clock, centred between the smartspace and the circle, sat low (\"clock is also sitting
+            #   down\"): keyguard_smartspace_top_offset (read only by ClockSection's large clock and its preview)
+            #   moves that top line so the clock's centre comes to 44.57 % of the height, where the owner approved
+            #   it live (\"clock is perfect now\"; A36: -223 px). Only ever up, never down.
+            # SystemUI reads all three when it starts: one restart for whichever were turned on now.
+            SUIR=''
+            if [ $GUEST_AOSP_SYSUI = 1 ]; then
+                PPG=\$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay lookup com.android.systemui com.android.systemui:dimen/pixel_pitch 2>/dev/null | tr -d '\r' | head -n 1)
+                case \"\$PPG\" in
+                    -*|0|0.0)
+                        XDPI=\$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys display 2>/dev/null | sed -n 's/.*xDpi=\\([0-9.]*\\).*/\\1/p' | head -n 1)
+                        PPN=\$(awk -v d=\"\$XDPI\" 'BEGIN { if (d + 0 >= 200 && d + 0 <= 800) printf \"%.2f\", 25400 / d }')
+                        if [ -n \"\$PPN\" ]; then
+                            r=\$(gdim OneOSPixelPitch com.android.systemui com.android.systemui:dimen/pixel_pitch=f:\$PPN)
+                            case \"\$r\" in
+                                registered*)
+                                    if gxo enable --user 0 com.android.shell:OneOSPixelPitch; then
+                                        echo \"[UI Activator] fingerprint icon: pixel_pitch \$PPN um from the panel's \$XDPI dpi (was \$PPG)\"
+                                        SUIR=\"\$SUIR fingerprint icon size;\"
+                                    fi ;;
+                                *) echo \"[UI Activator] fingerprint icon: pixel_pitch overlay not made: \$r\" ;;
+                            esac
+                        else
+                            echo \"[UI Activator] fingerprint icon: no panel dpi ('\$XDPI'), pixel_pitch left at \$PPG\"
+                        fi ;;
+                esac
+                if [ ! -e $STAGE/rootfs/system_ext/framework/nt-telephony-common.jar ] && [ ! -e $STAGE/rootfs/system/system_ext/framework/nt-telephony-common.jar ] &&
+                   [ -f $STAGE/data/system/oneos_udfps ] && [ ! -L $STAGE/data/system/oneos_udfps ]; then
+                    set -- \$(head -c 64 $STAGE/data/system/oneos_udfps)
+                    UY=\${2:-}; UR=\${3:-}
+                    DSP=\$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys display 2>/dev/null)
+                    # The guest's height and the panel's (a guest run below the panel's size scales the sensor).
+                    LH=\$(printf '%s\\n' \"\$DSP\" | sed -n 's/.*mBaseDisplayInfo=.* real [0-9]* x \\([0-9]*\\),.*/\\1/p' | head -n 1)
+                    NH=\$(printf '%s\\n' \"\$DSP\" | sed -n 's/.*DisplayDeviceInfo{\"[^\"]*\": uniqueId=\"[^\"]*\", [0-9]* x \\([0-9]*\\),.*/\\1/p' | head -n 1)
+                    DEN=\$(printf '%s\\n' \"\$DSP\" | grep -m 1 'mBaseDisplayInfo=' | grep -oE 'density [0-9]+' | head -n 1 | cut -d' ' -f2)
+                    lk() { timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay lookup \"\$1\" \"\$2\" 2>/dev/null | tr -d '\r' | head -n 1; }
+                    IMB=\$(lk com.android.systemui com.android.systemui:dimen/keyguard_indication_margin_bottom)
+                    STO=\$(lk com.android.systemui com.android.systemui:dimen/keyguard_smartspace_top_offset)
+                    ESH=\$(lk com.android.systemui com.android.systemui:dimen/enhanced_smartspace_height)
+                    SBH=\$(lk android android:dimen/status_bar_height_default)
+                    set -- \$(awk -v y=\"\$UY\" -v r=\"\$UR\" -v lh=\"\$LH\" -v nh=\"\$NH\" -v den=\"\$DEN\" -v imb=\"\$IMB\" -v sto=\"\$STO\" -v esh=\"\$ESH\" -v sbh=\"\$SBH\" '
+                        function px(v) { n = v + 0; if (v ~ /di?p/) n = n * den / 160; return n }
+                        BEGIN { if (y + 0 <= 0 || r + 0 <= 0 || lh + 0 < 800 || den + 0 < 100 || esh == \"\" || sbh == \"\" || sto == \"\") { print \"-\"; exit }
+                            f = (nh + 0 > 0) ? lh / nh : 1; top = (y - r) * f
+                            if (top < lh * 0.6 || top >= lh) { print \"-\"; exit }
+                            m = int(lh - top + 10.5); m0 = px(imb)
+                            o = int(2 * 0.4457 * lh - top - px(sbh) / 2 - px(esh) + 0.5); o0 = px(sto)
+                            printf \"%s %s %d %d\\n\", (m > m0 + 0.5) ? m : \"-\", (o < o0 - 0.5) ? o : \"-\", top, lh }')
+                    if [ \"\$1\" = - ] && [ \"\${2:--}\" = - ]; then
+                        echo \"[UI Activator] lock screen: nothing to move for the sensor (\$(cat $STAGE/data/system/oneos_udfps 2>/dev/null); height \$LH/\$NH, density \$DEN; margin \$IMB, offset \$STO)\"
+                    else
+                        if [ \"\$1\" != - ]; then
+                            r=\$(gdim OneOSIndicationBottom com.android.systemui com.android.systemui:dimen/keyguard_indication_margin_bottom=\$1)
+                            case \"\$r\" in registered*) gxo enable --user 0 com.android.shell:OneOSIndicationBottom && SUIR=\"\$SUIR lock screen text;\" && echo \"[UI Activator] lock screen: indication line above the sensor circle (bottom margin \$1 px, was \$IMB; circle top \$3 of \$4)\" ;; *) echo \"[UI Activator] lock screen: indication overlay not made: \$r\" ;; esac
+                        fi
+                        if [ \"\${2:--}\" != - ]; then
+                            r=\$(gdim OneOSLargeClockRaise com.android.systemui com.android.systemui:dimen/keyguard_smartspace_top_offset=\$2)
+                            case \"\$r\" in registered*) gxo enable --user 0 com.android.shell:OneOSLargeClockRaise && SUIR=\"\$SUIR large clock;\" && echo \"[UI Activator] lock screen: large clock raised (smartspace top offset \$2 px, was \$STO)\" ;; *) echo \"[UI Activator] lock screen: clock overlay not made: \$r\" ;; esac
+                        fi
+                    fi
+                fi
+            fi
+            if [ -n \"\$SUIR\" ]; then
+                sp=\$(timeout 10 $BB nsenter -t \$PID -m /system/bin/pidof com.android.systemui 2>/dev/null)
+                case \"\$sp\" in ''|*[!0-9\ ]*) ;; *) kill \$sp 2>/dev/null && echo \"[UI Activator] SystemUI restarted for:\$SUIR\" ;; esac
             fi
             if [ -n \"\$CRAD\" ]; then
                 r=\$(gdim OneOSCornerRadius android android:dimen/rounded_corner_radius=\$CRAD android:dimen/rounded_corner_radius_top=\$CRAD android:dimen/rounded_corner_radius_bottom=\$CRAD)
@@ -3948,6 +4424,19 @@ while true; do
                             gxo enable --user 0 com.android.shell:OneOSDozeAod && DZON=\"\$DZON OneOSDozeAod\"
                         echo \"[UI Activator] AOD: no doze service named (lookup '\$DZC'); overlays on:\${DZON:- none}; now \$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay lookup android android:string/config_dozeComponent 2>/dev/null | head -n 1)\" ;;
                 esac
+                # 0.5.35, PixelOS on the A36 (owner, 11-21: \"Aod is too bright for AOD\"): SystemUI asked for the
+                # display ON while dozing (mDozeScreenStateOverrideFromDreamManager=2) because doze_display_state_supported
+                # is false: a Pixel's vendor overlay sets it, One UI's vendor does not. The panel then showed AOD at
+                # the normal screen brightness instead of its own low-power AOD mode. Read on each doze, so live.
+                # Nothing OS keeps its own (its AOD was tuned on the A36).
+                if [ ! -e $STAGE/rootfs/system_ext/framework/nt-telephony-common.jar ] && [ ! -e $STAGE/rootfs/system/system_ext/framework/nt-telephony-common.jar ]; then
+                    DDS=\$(timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay lookup com.android.systemui com.android.systemui:bool/doze_display_state_supported 2>/dev/null | tr -d '\r' | head -n 1)
+                    if [ \"\$DDS\" = false ]; then
+                        gxo fabricate --target com.android.systemui --name OneOSDozeDisplayState com.android.systemui:bool/doze_display_state_supported 0x12 0xffffffff &&
+                            gxo enable --user 0 com.android.shell:OneOSDozeDisplayState &&
+                            echo \"[UI Activator] AOD: the panel's own doze state (doze_display_state_supported was false)\"
+                    fi
+                fi
             fi
             # Fold test (fold layout only). On every lid switch event record what
             # the guest did: device state, layout, both touch mappers and
@@ -4223,6 +4712,7 @@ while true; do
                     echo '[UI Activator] SystemUI compile skipped: no guest artd this session, One UI artd would run dex2oat outside the guest'
                 fi
             fi
+            # ColorOS wallpaper AOD (0.4.97): now runs earlier right after wm dismiss-keyguard while awake.
 
             # Pixel Fold8 / Fold8 Ultra: start the system-UID sensor reader in the guest namespace
             # (fold8_pixel.sh prepare made runtime.sh only for those two sets).
@@ -5342,8 +5832,17 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             if [ -f $ANIM_STATE ] && [ ! -L $ANIM_STATE ] && [ ! -L $STAGE/data/oneos_anim_level ]; then
                                 echo \"\$al\" > $STAGE/data/oneos_anim_level
                                 setprop persist.sys.oplus.anim_level \"\$al\"
-                                kill \$(pidof com.android.launcher) \$(pidof com.android.systemui) 2>/dev/null
                                 echo \"\$al\" > $ANIM_STATE && chmod 644 $ANIM_STATE
+                                # 0.5.37 (owner, A36: \"zero way to revert\"): a launcher + SystemUI restart left
+                                # the lighter app open/close animations in place after going back to level 1;
+                                # ColorOS reads the level in more processes than those two. A soft restart of
+                                # the guest (as Restart ColorOS in the app) applies it everywhere.
+                                if [ -f $STAGE/tmp/guest_softreboot.sh ]; then
+                                    echo \"\$(date) ColorOS animation level \$al from the guest's OneOS app (ColorOS soft restart)\"
+                                    setprop oneos.guest.powerctl ksud:soft-reboot
+                                    break
+                                fi
+                                kill \$(pidof com.android.launcher) \$(pidof com.android.systemui) 2>/dev/null
                                 echo \"\$(date) ColorOS animation level \$al from the guest's OneOS app (launcher and SystemUI restarted)\"
                             fi ;;
                     esac
@@ -5651,7 +6150,17 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                         }
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/am get-started-user-state 0 > \$D/user0.txt 2>&1
                         timeout 15 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows > \$D/windows.txt 2>&1
+                        # 0.5.33: the stacks only when user 0 is not unlocked (the stuck boot they are for), or with
+                        # ONEOS_DIAG_STACKS=1. In every session they froze Snapdragon 8 Elite / 8 Gen 3 Galaxy phones on
+                        # One UI 9.5 (S25 Ultra 64cf2555: whole phone stopped during diag_90's native debuggerd of
+                        # SystemUI, its file 0 bytes; S25 27022cd2, S24 Ultra 176dcdab, c156bfae the same block; the
+                        # users held the keys and got the upload-mode screen). ANR traces are still copied below.
+                        DSTACKS=0
+                        grep -q RUNNING_UNLOCKED \$D/user0.txt 2>/dev/null || DSTACKS=1
+                        [ \"${ONEOS_DIAG_STACKS:-0}\" = 1 ] && DSTACKS=1
+                        [ \$DSTACKS = 1 ] || echo \"user 0 unlocked: launcher and SystemUI stacks not taken (ONEOS_DIAG_STACKS=1 takes them)\" > \$D/stacks_skipped.txt
                         for app in com.android.launcher com.android.systemui; do
+                            [ \$DSTACKS = 1 ] || break
                             ap=\$(pidof \$app | awk '{print \$1}')
                             [ -n \"\$ap\" ] || continue
                             [ \$heavy = 1 ] && timeout 20 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/debuggerd -j \$ap > \$D/stack_\$app.txt 2>&1
@@ -5724,7 +6233,12 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                             dev=/dev/input/\${e##*/}
                             echo \"\$dev enabled=\$(cat \$e/device/enabled 2>/dev/null)\" > \$D/touch_holders.txt
                             [ \$heavy = 1 ] || continue
-                            ls -l /proc/[0-9]*/fd/* 2>/dev/null | grep \" \$dev\$\" >> \$D/touch_holders.txt
+                            # 0.5.33: only the processes that can hold it (the guest's input reader in system_server,
+                            # OneOS's own keepers and getevent), not every open file of every process: that walk ran at
+                            # 100 % CPU for a minute before the One UI 9.5 freezes above.
+                            for hp in \$(pidof system_server getevent busybox sh 2>/dev/null); do
+                                ls -l /proc/\$hp/fd 2>/dev/null | grep -q \" \$dev\$\" && echo \"\$hp \$(cat /proc/\$hp/comm 2>/dev/null)\"
+                            done >> \$D/touch_holders.txt
                             timeout 15 getevent -lt \$dev > \$D/touch_events.txt 2>&1
                         done
                         # system_server's own black-screen backtraces (OplusWmBlackDetector).

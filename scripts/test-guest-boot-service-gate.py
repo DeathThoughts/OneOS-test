@@ -4,7 +4,7 @@ import os,subprocess,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 s=(ROOT/'switcher/assets/guest_start.sh').read_text()
-RESET=s[s.index('# Properties are shared: One UI left boot_completed=1.'):s.index('echo "[Pivoted Root] Launching guest Zygote')]
+RESET=s[s.index('# Properties are shared: One UI left boot_completed=1.'):s.index('\nfi\n', s.index('# Properties are shared: One UI left boot_completed=1.'))+4]
 class BootGateTest(unittest.TestCase):
  def run_handoff(self,enabled):
   with tempfile.TemporaryDirectory() as d:

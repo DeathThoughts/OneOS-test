@@ -248,11 +248,11 @@ class StageScriptTest {
             assertEquals("$min $max: $r", RootScript.EXIT_USAGE, r.exit)
             assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf(min, max)).isNotEmpty())
         }
-        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + listOf("0", "0", "0", "0")).exit)
+        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + listOf("0", "0", "0", "0", "0", "0")).exit)
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(10)))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf("100", "300")))
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + listOf("0", "0", "0", "0")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + listOf("0", "0", "0", "0", "0", "0")).isNotEmpty())
     }
 
     @Test
@@ -1187,6 +1187,23 @@ class StageScriptTest {
         refused(fr.run(RootScript.Verb.BEGIN, "keep", "f8", Images.ID_FIND_X9U_IN_1105, PackageSets.ID_X9U_IN_1105_SULTRA, "4"), "does not run coloros17-findx9u-in")
     }
 
+    @Test
+    fun galaxyZFold8StagesTheOneUi95Payloads() = eachShell { fr ->
+        fr.props["ro.product.model"] = "SM-F971B"
+        fr.props["ro.product.device"] = "h8q"
+        fr.props["ro.soc.model"] = "SM8850"
+        fr.writeProps()
+        val oneUi = Stager(fr, Profiles.FOLD8, Images.ID_ONEUI95)
+        // 0.5.35: the Fold8's own One UI 9.5 set, with Josh's Fold8 files (pull request #328).
+        assertEquals(PackageSets.ONEUI95_F8, oneUi.set)
+        oneUi.prepare()
+        val stageFiles = File(fr.stage, "files.sha256").readText()
+        for (name in oneUi.set.names) {
+            assertArrayEquals(name, oneUi.files.getValue(name), File(fr.stage, name).readBytes())
+            assertTrue(name, stageFiles.lineSequence().any { it.endsWith("  $name") })
+        }
+    }
+
     /**
      * 0.4.11: the Galaxy S26 (SM-S942 and the Japanese SC-51G, m1q, SM8850)
      * takes the S Ultra's two sets; the S24 Ultra (SM-S928, e3q, SM8650), S23
@@ -1905,9 +1922,9 @@ class StageScriptTest {
         val launch = listOf("session", "4", "0123456789abcdef", "0", "1", "0", "0", "0", "0", "5", "500")
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + "2").isNotEmpty())
         assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "2")).isNotEmpty())
-        // The full 14-argument launch is valid; one more argument is not.
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0")).isEmpty())
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0", "0")).isNotEmpty())
+        // The full 16-argument launch carries scheduler trials and mediaChip; 17 is invalid.
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0", "0", "1")).isEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, launch + listOf("0", "0", "0", "0", "1", "0")).isNotEmpty())
     }
 
     @Test
@@ -1943,6 +1960,28 @@ class StageScriptTest {
         val hyperOs = Stager(fr, profile, Images.ID_HYPEROS_LHASA)
         hyperOs.prepare("keep")
         refused(fr.run(RootScript.Verb.LAUNCH, *launch), "guest Vulkan requires a Galaxy S23 or A55 ColorOS 17 session")
+    }
+
+    @Test
+    fun mediaChipChoiceIsScopedToOneUi95() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val launch = listOf("session", s.code, "0123456789abcdef", "0", "1", "0", "0", "0", "1", "30", "420", "0", "0", "0", "0")
+        val verb = RootScript.Verb.LAUNCH
+        assertTrue(RootScript.problems(verb, launch + "2").isNotEmpty())
+        refused(fr.run(verb, *(launch + "0").toTypedArray()), "the media chip option is unavailable")
+        refused(fr.run(verb, *(launch + "1").toTypedArray()), "test root: every launch check passed")
+
+        Stager(fr, Profiles.S_ULTRA_8850, Images.ID_ONEUI95).prepare("aside")
+        refused(fr.run(verb, *(launch + "0").toTypedArray()), "test root: every launch check passed")
+        refused(fr.run(verb, *launch.toTypedArray()), "test root: every launch check passed")
+
+        fr.props["ro.product.model"] = "SM-F971B"
+        fr.props["ro.product.device"] = "h8q"
+        fr.props["ro.soc.model"] = "SM8850"
+        fr.writeProps()
+        Stager(fr, Profiles.FOLD8, Images.ID_ONEUI95).prepare("aside")
+        refused(fr.run(verb, *(launch + "0").toTypedArray()), "test root: every launch check passed")
     }
 
     @Test
@@ -2403,7 +2442,48 @@ class StageScriptTest {
         org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { fr.run(RootScript.Verb.BRING_CLEAR, "x") }
     }
 
-    /** Only installed user apps (an APK under data/app): never a system app's path, a link, or a path that climbs. */
+    @Test
+    fun bringCopiesSystemApksOfflineAndFromTheHostSnapshot() = eachShell { fr ->
+        val stager = Stager(fr)
+        stager.prepare()
+        val pkg = "org.example.systemapp"
+        val updated = "org.example.updated"
+        val privileged = "org.example.privileged"
+        val path = "/system/priv-app/Example/Example.apk"
+        val updatedPath = "/data/app/~~token==/$updated-token==/base.apk"
+        File(fr.root, path).apply { parentFile.mkdirs(); writeText("host base") }
+        File(fr.root, "/system/priv-app/Example/split_config.apk").writeText("host split")
+        val rows = File(fr.root, "pm_system").apply {
+            writeText("package:$path=$pkg uid:12345\npackage:$path=$privileged uid:1000\npackage:$updatedPath=$updated uid:12346\n")
+        }
+        val staged = File(fr.stage, "data/oneos_bring")
+        File(fr.root, updatedPath).apply { parentFile.mkdirs(); writeText("host update before handoff") }
+        fr.hostCe(pkg).apply { mkdirs(); resolve("settings").writeText("host system data") }
+        val collected = bring(fr, pkg, privileged)
+        stager.ok(collected)
+        assertEquals("bring-collect 1", collected.reply.ok)
+        assertEquals("host base", File(staged, "$pkg/apk/Example.apk").readText())
+        assertEquals("host split", File(staged, "$pkg/apk/split_config.apk").readText())
+        assertFalse(File(staged, "$pkg/ce").exists())
+        assertTrue(File(staged, "$pkg/system").isFile)
+        assertFalse(File(staged, privileged).exists())
+        stager.ok(catalog(fr, "$pkg\tSystem App\t-\tsystem", "$updated\tUpdated App\t-\tsystem"))
+        assertEquals("600", fr.mode(File(fr.stage, "bring-system-apps")))
+
+        // After handoff the running package manager cannot resolve host packages.
+        assertTrue(rows.delete())
+        File(fr.stage, "persist_session.active").writeText("format=2\nboot_id=11111111-2222-3333-4444-555555555555\n")
+        val view = File(fr.root, "mnt/oneos_oneui")
+        File(view, "data").mkdirs()
+        File(view, updatedPath.removePrefix("/data/")).apply { parentFile.mkdirs(); writeText("host view update") }
+        File(fr.root, updatedPath).writeText("guest update")
+        stager.ok(fr.run(RootScript.Verb.BRING_ADD, pkg))
+        stager.ok(fr.run(RootScript.Verb.BRING_ADD, updated))
+        assertEquals("host view update", File(staged, "$updated/apk/base.apk").readText())
+        assertFalse(File(staged, "$updated/ce").exists())
+    }
+
+    /** An unverified system path, a link, or a path that climbs cannot be brought. */
     @Test
     fun bringSkipsWhatIsNotAnInstalledUserApp() = eachShell { fr ->
         val s = Stager(fr)

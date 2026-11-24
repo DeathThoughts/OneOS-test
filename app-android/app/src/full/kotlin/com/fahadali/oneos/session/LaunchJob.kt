@@ -263,6 +263,7 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 if (guestVulkan) "1" else "0",
                 if (SessionPrefs.shareFiles(app)) "1" else "0",
                 if (schedulerTrials) "1" else "0",
+                if (GuestFeatures.optionsForLaunch(app, profile, image.id).mediaChip) "1" else "0",
             ),
             silenceMs = 5 * 60_000L,
         )

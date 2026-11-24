@@ -44,7 +44,7 @@ def dq_end(text, i):
 def extract_activator_refresh_snippet():
     a = SWITCH.index(ACT_START) + len(ACT_START)
     act = SWITCH[a:dq_end(SWITCH, a)]
-    r_start = act.index('            $BB nsenter -t \\$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put system peak_refresh_rate $GUEST_REFRESH\n')
+    r_start = act.index('            if [ $GUEST_OPLUS = 1 ] && [ $GUEST_ORR_DYN = 1 ]')
     oti_marker = "            $BB nsenter -t \\$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys oplus_vrr_service oti false >/dev/null 2>&1 && echo '[UI Activator] refresh rate: ColorOS touch idle off'\n"
     r_end = act.index(oti_marker, r_start) + len(oti_marker)
     refresh_block = act[r_start:r_end]
@@ -124,6 +124,8 @@ class Harness:
         env = {
             **os.environ,
             'GUEST_OPLUS': self.guest_oplus,
+            'GUEST_ORR_DYN': '0',
+            'GUEST_HIGH_ORR': '3',
             'GUEST_REFRESH': self.guest_refresh,
             'STAGE': str(self.stage),
             'BB': str(self.bb),

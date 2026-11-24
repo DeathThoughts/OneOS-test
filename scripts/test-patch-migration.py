@@ -36,7 +36,7 @@ class MigrationTests(unittest.TestCase):
     def test_channel_snapshot_preserves_every_guarded_app_pin(self):
         import json
         packages = migration.ROOT / 'app-android/packages'
-        base = {line.split()[1]: line.split()[0] for line in (packages / 'n6-global-f8.sha256').read_text().splitlines()
+        base = {line.split()[1]: line.split()[0] for line in (migration.ROOT / 'scripts/patch-migration/n6-global-f8-baseline.sha256').read_text().splitlines()
                 if line and not line.startswith('#')}
         snapshot = json.loads((migration.ROOT / 'scripts/patch-migration/f8-n6-global-f8.json').read_text())
         self.assertEqual(set(base), {file['name'] for file in snapshot['files']})

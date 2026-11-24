@@ -10,7 +10,7 @@ This branch adds optional raw ext4/EROFS images alongside the existing patched
 | --- | --- | --- |
 | `product`, `system_ext` | SHA-256, size, filesystem, root ownership | Optional read-only loop mount before framework patches |
 | `vendor` | Same, plus exact audited S23 profile and live block-device proof | Optional `stock` mode only; donor activation refused |
-| `odm` | Same | Refused |
+| `odm` | Same plus exact audited S23 profile and live block-device proof | Optional `stock` mode only; donor activation refused |
 | `vendor_dlkm`, `odm_dlkm`, `system_dlkm` | Same | Refused; no module loading |
 | `boot`, `init_boot`, `vendor_boot`, `dtbo`, `vbmeta`, `super`, modem/bootloader | Refused | Refused |
 
@@ -140,7 +140,7 @@ does not bypass those checks.
 exact EROFS image audited in `vendor-s23-stock-audit.md` (SM-S911B GZIF, SHA-256
 3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7,
 1907937280 bytes). It does not permit a modified image, another Samsung firmware,
-a Poco/OnePlus vendor or any ODM/dlkm activation.
+a Poco/OnePlus vendor or donor ODM or dlkm activation.
 
 ```sh
 python3 scripts/prepare-guest-partitions.py \
@@ -177,3 +177,47 @@ The feature defaults off, has no app import UI yet, and has not been run on a
 phone. Tests use small fixture images with recorded mount operations; production
 profile pins are tested separately without relaxing them in runtime code. A phone
 test of the opt-in path and normal return is still required before promotion.
+
+## 0.5.37 integration and stock ODM
+
+The upstream 0.5.37 source is integrated with this fork's existing patches. Stock
+ODM now has its own exact EROFS hash/size, fingerprint/model and live-device proof,
+canonical guest target, private submount handling and rollback. Vendor and ODM
+may be selected together. ODM AI overlay injection is skipped when stock ODM is
+selected, so it cannot silently replace the verified snapshot. Neither precompiled
+SELinux policy nor ODM init content is loaded into the host.
+
+The offline packager accepts `--stock-odm` with `--image odm=...`, independently
+of `--stock-vendor`. Framework `product` and `system_ext` still must come from the
+same intended guest build; matching adapted images have not been supplied here.
+Boot images and dlkm activation remain unsupported by this live guest design.
+
+After installing this APK and preparing the intended guest with its updated
+helpers, the S23 owner can enable both stock snapshots from One UI in Termux:
+
+```sh
+su -c 'sh /data/local/tmp/oneos/bin/oneos_root.sh stock-parts on'
+```
+
+This uses the ordinary root-operation lock and idle/unfinished-session checks.
+It verifies all staged script and set-file hashes, proves both live stock devices,
+copies them read-only to root-owned private files, checks the copies, hashes the
+current patched system.raw and publishes the bundle as one directory rename.
+Allow about 2 GB of extra space and time to hash/copy the images. It never writes
+the real partitions and does not start a guest. The next normal launch rechecks
+both the bundle and live devices before stopping One UI.
+
+To disable while idle in One UI:
+
+```sh
+su -c 'sh /data/local/tmp/oneos/bin/oneos_root.sh stock-parts off'
+```
+
+The bundle is moved into the existing stage attic; it is retained for inspection,
+so disabling does not reclaim its disk space. Normal launches without a bundle
+use the existing host binds. A new guest system.raw requires a newly paired bundle.
+
+Automated tests cover both stock partitions, atomic setup/disable, refused live
+profiles and mount cleanup. Hardware boot, real Android mounts and return remain
+unverified until tested on the phone. Stock copies alone are not a performance
+optimization or a replacement for Samsung HAL adapters.

@@ -475,7 +475,7 @@
     <string name="guest_patch_auto_title">Download signed guest patches automatically</string>
     <string name="guest_patch_auto_summary">Checks when the OneOS guest opens. Apply patches by choosing Restart guest.</string>
     <string name="guest_vulkan_title">Vulkan rendering (experimental)</string>
-    <string name="guest_vulkan_summary">Uses Vulkan for the ColorOS 17 UI and threaded GPU composition. Applies when launching from One UI.</string>
+    <string name="guest_vulkan_summary">Uses Vulkan for the guest UI and threaded GPU composition. Applies when launching from One UI.</string>
     <string name="guest_vulkan_warning">Vulkan can cause graphical glitches, app crashes, or a black screen. If that happens, return to One UI and turn this off before launching ColorOS again. To return from a black screen, hold Volume Up and Volume Down together for 3 seconds.</string>
     <string name="guest_vulkan_enable">Enable Vulkan</string>
     <string name="fork_patch_warning_title">Patches tested on two phone models</string>

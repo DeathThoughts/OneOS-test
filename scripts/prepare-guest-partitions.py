@@ -36,13 +36,15 @@ def filesystem(path):
     raise ValueError(f'{path}: expected raw ext4/EROFS, not super, boot or firmware')
 
 
-def build(system, images, activate, output, stock_vendor=False):
+def build(system, images, activate, output, stock_vendor=False, stock_odm=False):
     if not images or not set(images) <= NAMES:
         raise ValueError('specify at least one supported partition')
     if not activate <= ACTIVE or not activate <= set(images):
         raise ValueError('only supplied product/system_ext images can be activated; hardware partitions are inspection-only')
     if stock_vendor and 'vendor' not in images:
         raise ValueError('stock vendor activation requires a vendor image')
+    if stock_odm and 'odm' not in images:
+        raise ValueError('stock ODM activation requires an ODM image')
     filesystem(system)
     if output.exists() or output.is_symlink():
         raise ValueError(f'{output}: output must not exist')
@@ -63,6 +65,10 @@ def build(system, images, activate, output, stock_vendor=False):
                 if (fs, sha, size) != ('erofs', STOCK_VENDOR_SHA, STOCK_VENDOR_SIZE):
                     raise ValueError('stock vendor must be the exact audited SM-S911B GZIF image')
                 mode = 'stock'
+            if stock_odm and name == 'odm':
+                if (fs, sha, size) != ('erofs', '1c1e9e3f95fa3e635dcfbb63e37a76fc40f60014b6a6bc8c8ed7e1457d29f4de', 778240):
+                    raise ValueError('stock ODM must be the exact audited SM-S911B GZIF image')
+                mode = 'stock'
             lines.append(f'{name} {fs} {sha} {size} {mode}')
         (temp / 'manifest').write_text('\n'.join(lines) + '\n')
         (temp / 'manifest').chmod(0o600)
@@ -81,6 +87,8 @@ def main():
                    help='experimental guest mount; otherwise image is only verified, never mounted')
     p.add_argument('--stock-vendor', action='store_true',
                    help='experimental S23 stock vendor mount; requires exact audited image and matching live partition')
+    p.add_argument('--stock-odm', action='store_true',
+                   help='experimental S23 stock ODM mount; requires exact audited image and matching live partition')
     p.add_argument('--output', type=Path, required=True)
     a = p.parse_args()
     try:
@@ -90,7 +98,7 @@ def main():
             if not sep or name not in NAMES or name in images:
                 raise ValueError(f'invalid or duplicate partition: {entry}')
             images[name] = Path(filename)
-        for line in build(a.system, images, set(a.activate), a.output, a.stock_vendor):
+        for line in build(a.system, images, set(a.activate), a.output, a.stock_vendor, a.stock_odm):
             print(line)
         print('Bundle created. No device was modified. Hashes identify files; they do not prove ROM compatibility.')
     except (ValueError, OSError) as e:

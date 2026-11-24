@@ -64,7 +64,7 @@ class ApkSeriesTest {
             ApkSeries.S26.setIds().intersect(ApkSeries.S25.setIds()),
         )
         assertEquals(
-            ApkSeries.FOLD.setIds() - setOf(PackageSets.N6_GLOBAL_F8.id, PackageSets.ID_PIXEL_F8U),
+            ApkSeries.FOLD.setIds() - setOf(PackageSets.N6_GLOBAL_F8.id, PackageSets.ID_PIXEL_F8U, PackageSets.ID_ONEUI95_F8),
             ApkSeries.FOLD.setIds().intersect(ApkSeries.S26.setIds()),
         )
         for (s in ApkSeries.entries) assertNotEquals(s.id, PackageSets.ALL.size, s.setIds().size)

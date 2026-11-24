@@ -78,6 +78,8 @@ jobs:
           python3 scripts/test-guest-partitions.py
           python3 scripts/test-guest-vendor.py
           python3 scripts/test-stock-vendor.py
+          python3 scripts/test-stock-odm.py
+          python3 scripts/test-stock-parts-setup.py
           sh -n switcher/assets/guest_partitions.sh
           sh -n scripts/inspect-guest-vendor.sh
 
