@@ -79,3 +79,56 @@ path escapes, and failure cleanup using a recorded mount/loop backend. They do
 not validate Android filesystem mounting, SELinux, ColorOS compatibility or
 fluency on real hardware. A phone test and a matching adapted image set remain
 required before this can be promoted to release.
+
+## Vendor investigation (second stage)
+
+`oneos_parts_inspect_vendor` now implements a separate, developer-only vendor
+image mount. It is **not** called by switch or prepare. The launcher is
+`scripts/inspect-guest-vendor.sh`; it must be invoked as root while the stage is
+idle, with an updated staged `guest_partitions.sh` and a verified bundle
+containing `vendor` in `inspect` mode.
+
+The launcher creates a mount namespace with BusyBox `unshare -m`. The helper
+refuses init's namespace, makes propagation private, mounts a small temporary
+filesystem under the stage, and attaches `vendor.img` through a read-only loop.
+The image is mounted `ro,nodev,nosuid,noexec` (ext4 also `noload`). It emits a tar
+archive of properties, init/VINTF/linker/SELinux config files to stdout, then
+unmounts and detaches its loop. Neither `/vendor` nor the guest's vendor mount
+is replaced. Image symlinks are not followed. No donor service, property file,
+SELinux policy, executable or kernel module is loaded.
+
+The archive output is binary. Redirect stdout to a file outside the stage;
+keep stderr separate. The command has not been run on the S23. Mounting an
+untrusted filesystem still exercises the shared kernel's filesystem parser;
+namespace isolation does not eliminate that risk. Cleanup handles normal exits
+and HUP/INT/TERM; SIGKILL or power loss may leave a loop until reboot. Do not
+run the inspector concurrently with OneOS setup, switch or return.
+
+`scripts/audit-guest-vendor.py` accepts the config archive or an already extracted
+vendor directory and emits JSON to stdout:
+
+```sh
+python3 scripts/audit-guest-vendor.py --stock /path/to/stock-vendor \
+  --candidate /path/to/donor-vendor > vendor-audit.json
+```
+
+It inventories VINTF HAL versions/instances, init service definitions and import
+references, selected build properties, and config hashes. It reports differing
+HAL contracts and colliding service names. It never executes init imports,
+extracts archives to disk, starts a service or certifies activation. It preserves
+parse failures as explicit gaps. ELF/library dependencies, actual Binder
+behavior, kernel ABI, SELinux compatibility and dynamic init imports remain
+unverified.
+
+The actual S23 stock `vendor.img` from the firmware currently installed is still
+needed to analyze real binaries, dependencies and hardware interfaces. Record
+`ro.vendor.build.fingerprint` from One UI to pair it with the running firmware.
+Stock ODM would also help where Samsung places device-specific services there.
+No stock or donor vendor binary was available for this stage; no speedup or
+successful vendor replacement is claimed.
+
+The first APK CI attempt (`45334153324`) passed the new loader checks and built
+the guest manager, then failed two existing patch-migration tests. Both failures
+were reproduced on unchanged base `cc6f325`; they concern payload source/snapshot
+pins, not partition mounting. They remain a separate build blocker; this work
+does not bypass those checks.

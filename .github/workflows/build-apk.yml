@@ -76,7 +76,9 @@ jobs:
       - name: Verify optional guest partition image safety
         run: |
           python3 scripts/test-guest-partitions.py
+          python3 scripts/test-guest-vendor.py
           sh -n switcher/assets/guest_partitions.sh
+          sh -n scripts/inspect-guest-vendor.sh
 
       - name: Check debug branch is based on this release
         if: matrix.variant == 'debug' && github.ref_name == 'release'

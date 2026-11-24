@@ -29,7 +29,7 @@ oneos_parts_validate() {
     oneos_parts_file "$STAGE/system.raw" || { oneos_parts_error "unsafe system.raw"; return 1; }
     OP_BASE=$(awk 'NR == 1 {print $2}' "$OP_DIR/manifest")
     [ "$(sha256sum "$STAGE/system.raw" | cut -d ' ' -f1)" = "$OP_BASE" ] || { oneos_parts_error "bundle belongs to another system.raw"; return 1; }
-    while read -r OP_NAME OP_FS OP_HASH OP_SIZE OP_MODE; do
+    while read -r OP_NAME OP_FS OP_HASH OP_SIZE OP_MODE || [ -n "$OP_NAME" ]; do
         [ "$OP_NAME" = oneos-partitions-v1 ] && continue
         OP_FILE="$OP_DIR/$OP_NAME.img"
         oneos_parts_file "$OP_FILE" &&
@@ -71,7 +71,7 @@ oneos_parts_mount() {
     # This is a mountpoint created for system.raw, never the host root.
     awk -v p="$ROOTFS" '$5 == p {found=1} END {exit !found}' /proc/self/mountinfo || return 1
     "$BB" mount --make-rprivate "$ROOTFS" || return 1
-    while read -r OP_NAME OP_FS OP_HASH OP_SIZE OP_MODE; do
+    while read -r OP_NAME OP_FS OP_HASH OP_SIZE OP_MODE || [ -n "$OP_NAME" ]; do
         [ "$OP_MODE" = activate ] || continue
         oneos_parts_target "$OP_NAME" || { oneos_parts_rollback; oneos_parts_error "unsafe $OP_NAME target"; return 1; }
         if awk -v p="$OP_TARGET" '$5 == p || index($5,p "/") == 1 {found=1} END {exit !found}' /proc/self/mountinfo; then
@@ -97,3 +97,76 @@ oneos_parts_mount() {
         echo "Guest partition: $OP_NAME at ${OP_TARGET#"$ROOTFS"} (read-only)"
     done < "$OP_DIR/manifest"
 }
+
+# Developer-only vendor inspection. Run from a freshly unshared mount namespace,
+# never from switch/prepare. It does not replace the guest or host /vendor.
+oneos_parts_inspect_vendor() (
+    OP_SELF_NS=$(readlink /proc/self/ns/mnt 2>/dev/null)
+    OP_INIT_NS=$(readlink /proc/1/ns/mnt 2>/dev/null)
+    [ -n "$OP_SELF_NS" ] && [ -n "$OP_INIT_NS" ] && [ "$OP_SELF_NS" != "$OP_INIT_NS" ] || {
+        oneos_parts_error "vendor inspection requires a separate mount namespace"; exit 1;
+    }
+    oneos_parts_validate || exit 1
+    OP_RECORD=$(awk '$1 == "vendor" && $5 == "inspect" {print $2}' "$OP_DIR/manifest" 2>/dev/null)
+    case "$OP_RECORD" in ext4|erofs) ;; *) oneos_parts_error "no inspection-only vendor image"; exit 1 ;; esac
+    # All following mounts disappear with this namespace. Only our loop is
+    # detached, never an enumerated host loop, service, driver or real partition.
+    "$BB" mount --make-rprivate / || exit 1
+    OP_INSPECT="$STAGE/vendor_inspection"
+    [ ! -L "$OP_INSPECT" ] && [ ! -e "$OP_INSPECT" ] || {
+        oneos_parts_error "inspection path already exists; inspect and remove it while idle"; exit 1;
+    }
+    mkdir -m 700 "$OP_INSPECT" || exit 1
+    OP_INSPECT_LOOP=; OP_INSPECT_TOP=0; OP_INSPECT_IMAGE=0
+    oneos_parts_inspect_cleanup() {
+        OP_CLEAN_OK=1
+        cd "$STAGE" || return 1
+        if [ "$OP_INSPECT_IMAGE" = 1 ]; then
+            "$BB" umount "$OP_INSPECT/root" || OP_CLEAN_OK=0
+        fi
+        if [ "$OP_CLEAN_OK" = 1 ] && [ -n "$OP_INSPECT_LOOP" ]; then
+            "$BB" losetup -d "$OP_INSPECT_LOOP" || OP_CLEAN_OK=0
+        fi
+        if [ "$OP_INSPECT_TOP" = 1 ]; then
+            "$BB" umount "$OP_INSPECT" || OP_CLEAN_OK=0
+        fi
+        rmdir "$OP_INSPECT" 2>/dev/null || OP_CLEAN_OK=0
+        [ "$OP_CLEAN_OK" = 1 ] || { oneos_parts_error "inspection cleanup incomplete; do not switch until reboot"; return 1; }
+    }
+    trap 'OP_EXIT=$?; trap - EXIT; oneos_parts_inspect_cleanup || OP_EXIT=1; exit "$OP_EXIT"' EXIT
+    trap 'exit 1' HUP INT TERM
+    "$BB" mount -t tmpfs -o size=1m,mode=700,nodev,nosuid,noexec tmpfs "$OP_INSPECT" || exit 1
+    OP_INSPECT_TOP=1
+    mkdir -m 700 "$OP_INSPECT/root" || exit 1
+    OP_INSPECT_LOOP=$("$BB" losetup -f) || exit 1
+    # Record only a successfully attached loop, so a failed attach never detaches
+    # some other process's device after a losetup -f race.
+    OP_PENDING_LOOP="$OP_INSPECT_LOOP"; OP_INSPECT_LOOP=
+    "$BB" losetup -r "$OP_PENDING_LOOP" "$OP_DIR/vendor.img" || exit 1
+    OP_INSPECT_LOOP="$OP_PENDING_LOOP"
+    OP_DEV=$(stat -L -c '%t %T' "$OP_INSPECT_LOOP")
+    set -- $OP_DEV
+    [ "$#" = 2 ] && [ "$(cat "/sys/dev/block/$(printf '%d:%d' "0x$1" "0x$2")/ro" 2>/dev/null)" = 1 ] || exit 1
+    OP_OPTIONS=ro,nodev,nosuid,noexec
+    [ "$OP_RECORD" = ext4 ] && OP_OPTIONS="$OP_OPTIONS,noload"
+    "$BB" mount -t "$OP_RECORD" -o "$OP_OPTIONS" "$OP_INSPECT_LOOP" "$OP_INSPECT/root" || exit 1
+    OP_INSPECT_IMAGE=1
+    "$BB" mount --make-private "$OP_INSPECT/root" || exit 1
+    # Enumerate regular files without following donor directory/file symlinks.
+    # Emit an archive only; no extracted binary, rc, property or module is run.
+    # Relative paths in the archive are rooted in the image's private mount.
+    cd "$OP_INSPECT/root" || exit 1
+    find . -type f | LC_ALL=C sort | while IFS= read -r OP_PATH; do
+        case "$OP_PATH" in
+            ./build.prop|./etc/build.prop|./etc/vintf/*.xml|./etc/init/*.rc|./etc/selinux/*|./etc/ld.config*.txt)
+                # Keep tar's input list unambiguous (no whitespace, traversal or options).
+                case "$OP_PATH" in *[!A-Za-z0-9_./+-]*|*/../*|*/./*) continue ;; esac
+                OP_FULL="$OP_INSPECT/root/${OP_PATH#./}"
+                [ -f "$OP_FULL" ] && [ ! -L "$OP_FULL" ] &&
+                    [ "$(readlink -f "$OP_FULL")" = "$OP_FULL" ] || continue
+                printf '%s\n' "$OP_PATH" ;;
+        esac
+    done > "$OP_INSPECT/files"
+    "$BB" tar -cf - -T "$OP_INSPECT/files" || exit 1
+    cd "$STAGE" || exit 1
+)

@@ -103,6 +103,13 @@ cat() { case "$1" in /sys/dev/block/*/ro) echo 1 ;; *) command cat "$@" ;; esac;
         (self.parts / 'product.img').write_bytes(b'changed')
         self.assert_refused()
 
+    def test_last_record_without_newline_is_still_verified(self):
+        self.make()
+        manifest = self.parts / 'manifest'
+        manifest.write_text(manifest.read_text().rstrip('\n'))
+        (self.parts / 'product.img').write_bytes(b'tampered')
+        self.assert_refused()
+
     def test_wrong_base(self):
         self.make()
         self.system.write_bytes(b'another system')
