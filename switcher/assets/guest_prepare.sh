@@ -329,6 +329,14 @@ if ! mount | grep -q "$ROOTFS "; then
     $BB mount -t ext4 -o ro "$LOOP" "$ROOTFS"
 fi
 
+# Mount extra framework partitions before any patch/compatibility overlays.
+# The switch preflight validates them before stopping One UI; verify again here.
+if [ -e "$STAGE/partition_images" ] || [ -L "$STAGE/partition_images" ]; then
+    [ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] || exit 3
+    . "$STAGE/guest_partitions.sh"
+    oneos_parts_mount || { echo "ERROR: additional guest partitions refused"; exit 3; }
+fi
+
 # /system_ext as its own mount (vivo OriginOS, 0.4.59). Its boot classpath has
 # MediaTek jars in /system_ext/framework, and its zygote allowlists the files
 # open at a fork by those paths (/system_ext/framework/*.jar, /system_ext/app/

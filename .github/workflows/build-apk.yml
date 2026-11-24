@@ -73,6 +73,11 @@ jobs:
           ref: ${{ matrix.variant == 'debug' && github.ref_name == 'release' && 'debug' || github.sha }}
           persist-credentials: false
 
+      - name: Verify optional guest partition image safety
+        run: |
+          python3 scripts/test-guest-partitions.py
+          sh -n switcher/assets/guest_partitions.sh
+
       - name: Check debug branch is based on this release
         if: matrix.variant == 'debug' && github.ref_name == 'release'
         env:

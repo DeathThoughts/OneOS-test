@@ -211,6 +211,14 @@ if [ -d "$LEGACY_STAGE" ] && [ ! -L "$LEGACY_STAGE" ]; then
 fi
 [ -d "$STAGE" ] && [ ! -L "$STAGE" ] || refuse "$STAGE is missing or not a directory"
 root_only "$STAGE" || app_refuse "$STAGE is not root's or is writable by others ($(stat -c '%U:%G %A' "$STAGE" 2>/dev/null))"
+# Experimental partition bundles must fail while One UI is still running.
+if [ -e "$STAGE/partition_images" ] || [ -L "$STAGE/partition_images" ]; then
+    [ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] &&
+        root_only "$STAGE/guest_partitions.sh" || refuse "unsafe or missing guest_partitions.sh"
+    . "$STAGE/guest_partitions.sh"
+    oneos_parts_validate || refuse "additional guest partition images failed preflight"
+fi
+
 [ -f "$STAGE/system.raw" ] || refuse "the guest image ($STAGE/system.raw) is not staged"
 for f in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
          check_host_apex.sh bridges.sh fold8_coloros.sh guest_google.sh zygote_exec guards.txt services_patched.jar; do
