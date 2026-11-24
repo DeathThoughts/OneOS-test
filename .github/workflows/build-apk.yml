@@ -304,9 +304,6 @@ jobs:
           sh -n switcher/assets/guest_patch.sh
           python3 scripts/test-restart-home.py
 
-      - name: Verify guest media mount safety
-        run: python3 scripts/test-guest-media-share.py
-
       - name: Verify guest telemetry policy
         run: |
           python3 scripts/test-oplus-telemetry.py
@@ -340,6 +337,9 @@ jobs:
           GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: ./gradlew --console=plain :app:assembleFull${{ matrix.variant == 'release' && 'Release' || 'Debug' }}
+
+      - name: Verify guest media mount safety
+        run: python3 scripts/test-guest-media-share.py
 
       - name: Verify signature and prepare download
         id: apk
