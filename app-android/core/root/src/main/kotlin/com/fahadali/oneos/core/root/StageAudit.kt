@@ -407,7 +407,7 @@ object ShellScan {
  * phone's user data, reboots, settings, package wipes or mounts.
  */
 object StageAudit {
-    val VERBS = listOf("guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "oneui-media", "debloat")
+    val VERBS = listOf("stock-parts", "guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "oneui-media", "debloat")
 
     val ALLOWED: Set<String> = setOf(
         "umask", "[", "echo", "printf", "id", "stat", "awk", "sed", "grep", "sort", "head", "tail", "cut", "tr", "wc",
@@ -730,6 +730,7 @@ object StageAudit {
             val args = c.args
             val bringHost = c.function == BRING_HOST_VIEW_FUNCTION
             val bbOk = when (args.firstOrNull()) {
+                "sh" -> c.function == "do_stock_parts" && args == listOf("sh", "\"\$STAGE/stock_parts.sh\"", "\"\$STAGE\"", "\"\$BB\"")
                 "--list" -> true
                 "nsenter" -> args.subList(1, minOf(4, args.size)) == listOf("-t", "1", "-m")
                 "mount" -> bringHost && args.drop(1) in BB_BRING_MOUNTS

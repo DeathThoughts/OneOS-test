@@ -22,6 +22,20 @@ class StageAuditTest {
     }
 
     @Test
+    fun stockSnapshotsDelegateOnlyToTheVerifiedStageHelper() {
+        for (mode in listOf("on", "off")) assertTrue(RootScript.problems(RootScript.Verb.STOCK_PARTS, listOf(mode)).isEmpty())
+        for (args in listOf(emptyList(), listOf("on", "off"), listOf("/vendor"), listOf("on;reboot"))) {
+            assertTrue(RootScript.problems(RootScript.Verb.STOCK_PARTS, args).isNotEmpty())
+        }
+        val call = "\"\$BB\" sh \"\$STAGE/stock_parts.sh\" \"\$STAGE\" \"\$BB\""
+        assertTrue(script.contains(call))
+        for (bad in listOf(
+            "\"\$BB\" sh \"/tmp/stock_parts.sh\" \"\$STAGE\" \"\$BB\"",
+            "\"\$BB\" sh \"\$STAGE/stock_parts.sh\" /vendor \"\$BB\"",
+        )) assertTrue(StageAudit.audit(script.replace(call, bad)).isNotEmpty())
+    }
+
+    @Test
     fun selfUpdateGetsNoMoreThanItsOwnInstall() {
         fun bad(from: String, to: String) {
             assertTrue("no '$from' in the script", script.contains(from))

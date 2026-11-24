@@ -185,7 +185,8 @@ INSTALLD_OK_36="a7c17883707d9b0b85e3f75f6d83cb4522ba1d120026d29308b69da968945977
 INSTALLD_SHA_95=86a30991dbd5d91aeda1726ec860b12a2d057dd7b9ca3872f32376478078a23c
 RUNTIME_CODES="# installd and IOemNetd codes read on the phone at runtime (OneOSInstalldCodes, OneOSOemNetdCodes): One UI 9.0 and 9.5 phones"
 # Session scripts from switcher/assets plus the expected installd table.
-SCRIPTS="guest_runtime.sh guest_root guest_zygiskd guest_zygisk_ptrace guest_zygisk.so guest_vector.bundle guest_manager.apk oneos_switch.sh boot_status.sh OneOSBootStatus.dex oneos_boot_icon.png guest_prepare.sh guest_partitions.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh pyb110-scheduler-trial.sh check_host_apex.sh bridges.sh fold8_coloros.sh OneOSFold8Geometry.dex fold8_pixel.sh guest_google.sh zygote_exec OneOSEdmStub.dex oneos_btaudio oneos_essential_key OneOSOverlayDimen.dex OneOSPixelCorners.apk OneOSGalleryStub.apk OneOSRcdCorners.apk host_installd.txt"
+SCRIPTS="guest_runtime.sh guest_root guest_zygiskd guest_zygisk_ptrace guest_zygisk.so guest_vector.bundle guest_manager.apk oneos_switch.sh boot_status.sh OneOSBootStatus.dex oneos_boot_icon.png guest_prepare.sh guest_partitions.sh stock_parts.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh pyb110-scheduler-trial.sh check_host_apex.sh bridges.sh fold8_coloros.sh OneOSFold8Geometry.dex fold8_pixel.sh guest_google.sh zygote_exec OneOSEdmStub.dex oneos_btaudio oneos_essential_key OneOSOverlayDimen.dex OneOSPixelCorners.apk OneOSGalleryStub.apk OneOSRcdCorners.apk host_installd.txt"
+SET_PYB="OneOSGuest.apk adservices_payload.img appsearch_payload.img art_payload.img configinfrastructure_payload.img crashrecovery_payload.img extservices_payload.img framework_patched.jar guards.txt healthfitness_payload.img i18n_payload.img ims-ext-common_patched.jar libcamera_client_patched.so mediaprovider_payload.img ondevicepersonalization_payload.img oplus-framework_patched.jar oplus-services_patched.jar oplus-telephony-common_patched.jar permission_payload.img rkpd_payload.img runtime_payload.img sdkext_payload.img service.incremental_patched.so services_patched.jar surfaceflinger_patched telephony-common_patched.jar vold_patched wifi_payload.img"
 SET_COMMON="services_patched.jar oplus-services_patched.jar vold_patched service.incremental_patched.so OneOSGuest.apk ims-ext-common_patched.jar oplus-telephony-common_patched.jar surfaceflinger_patched guards.txt art_payload.img i18n_payload.img runtime_payload.img sdkext_payload.img crashrecovery_payload.img extservices_payload.img permission_payload.img wifi_payload.img appsearch_payload.img mediaprovider_payload.img adservices_payload.img rkpd_payload.img healthfitness_payload.img ondevicepersonalization_payload.img configinfrastructure_payload.img"
 # The Pixel sets (the Fold's 0.3.7, the S26 Ultra's 0.4.10, the Pixel 9 Pro XL's 0.4.22): services.jar with the guest vold as gvld, the signal
 # poll, Pixel's status bar RRO, the in-guest OneOS app and its own payloads.
@@ -854,7 +855,7 @@ set_files() {
         hyper-popsicle) echo "$SET_POPSICLE" ;;
         hyper-madrid) echo "$SET_POPSICLE" ;;
         twinity-s23) echo "$SET_COMMON framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so oplus-framework_patched.jar samcam_bar.tar" ;;
-        pyb110-s23) echo "OneOSGuest.apk adservices_payload.img appsearch_payload.img art_payload.img configinfrastructure_payload.img crashrecovery_payload.img extservices_payload.img framework_patched.jar guards.txt healthfitness_payload.img i18n_payload.img ims-ext-common_patched.jar libcamera_client_patched.so mediaprovider_payload.img ondevicepersonalization_payload.img oplus-framework_patched.jar oplus-services_patched.jar oplus-telephony-common_patched.jar permission_payload.img rkpd_payload.img runtime_payload.img sdkext_payload.img service.incremental_patched.so services_patched.jar surfaceflinger_patched telephony-common_patched.jar vold_patched wifi_payload.img" ;;
+        pyb110-s23) echo "$SET_PYB" ;;
         hyper-hk) echo "$SET_HYPERHK framework_patched_oneui95.jar libcamera_client_patched_oneui95.so" ;;
         nothing-f8u) echo "$SET_NOTHING framework_patched_oneui95.jar libcamera_client_patched_oneui95.so" ;;
         nothing-a) echo "$SET_NOTHINGA" ;;
@@ -3234,37 +3235,7 @@ do_stock_parts() {
     check_files "$SCRIPTS $(set_files "$M_SET")"
     find_tools
     [ -n "$BB" ] || refuse "root manager BusyBox is missing"
-    . "$STAGE/guest_partitions.sh" || die "partition helper failed"
-    oneos_parts_file "$STAGE/system.raw" || refuse "system.raw is not a safe regular file"
-    # Prove both live block devices before creating or copying any snapshot.
-    OP_HASH=3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7
-    OP_SIZE=1907937280
-    oneos_parts_vendor_host erofs "$OP_HASH" "$OP_SIZE" || refuse "stock vendor does not match this phone"
-    SP_VENDOR=$OP_HOST_DEV
-    OP_HASH=1c1e9e3f95fa3e635dcfbb63e37a76fc40f60014b6a6bc8c8ed7e1457d29f4de
-    OP_SIZE=778240
-    oneos_parts_odm_host erofs "$OP_HASH" "$OP_SIZE" || refuse "stock ODM does not match this phone"
-    SP_ODM=$OP_HOST_DEV
-    SP_NEW=$(umask 077; mktemp -d "$STAGE/.stock-parts.XXXXXX") || die "cannot create snapshot directory"
-    # Exit cleanup removes only this operation's unpublished regular files.
-    trap 'rm -f "$SP_NEW/vendor.img" "$SP_NEW/odm.img" "$SP_NEW/manifest"; rmdir "$SP_NEW" 2>/dev/null; rm -f "$LOCK"' EXIT
-    (umask 077; cat "$SP_VENDOR" > "$SP_NEW/vendor.img" && cat "$SP_ODM" > "$SP_NEW/odm.img") || die "cannot copy stock partitions (free about 2 GB)"
-    for SP_NAME in vendor odm; do
-        case "$SP_NAME" in
-            vendor) SP_HASH=3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7; SP_SIZE=1907937280 ;;
-            odm) SP_HASH=1c1e9e3f95fa3e635dcfbb63e37a76fc40f60014b6a6bc8c8ed7e1457d29f4de; SP_SIZE=778240 ;;
-        esac
-        [ "$(stat -c %s "$SP_NEW/$SP_NAME.img")" = "$SP_SIZE" ] &&
-            [ "$(sha256sum "$SP_NEW/$SP_NAME.img" | cut -d ' ' -f1)" = "$SP_HASH" ] || die "copied $SP_NAME failed verification"
-    done
-    SP_BASE=$(sha "$STAGE/system.raw")
-    is_hex64 "$SP_BASE" || die "cannot hash system.raw"
-    (umask 077; printf 'oneos-partitions-v1 %s\n' "$SP_BASE" > "$SP_NEW/manifest" &&
-        printf '%s\n' 'vendor erofs 3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7 1907937280 stock' \
-            'odm erofs 1c1e9e3f95fa3e635dcfbb63e37a76fc40f60014b6a6bc8c8ed7e1457d29f4de 778240 stock' >> "$SP_NEW/manifest") || die "cannot write manifest"
-    mv "$SP_NEW" "$STAGE/partition_images" || die "cannot publish stock snapshots"
-    trap 'rm -f "$LOCK"' EXIT
-    say "@@OK stock-parts on; verified vendor and ODM snapshots paired to this system.raw"
+    "$BB" sh "$STAGE/stock_parts.sh" "$STAGE" "$BB" || die "stock snapshots were not installed"
 }
 
 # --- Main ---------------------------------------------------------------------

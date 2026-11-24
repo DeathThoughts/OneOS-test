@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / 'app-android/app/src/full/assets/root/oneos_root.sh').read_text()
 FUNCTION = SCRIPT[SCRIPT.index('do_stock_parts() {'):SCRIPT.index('# --- Main ---')]
+HELPER = (ROOT / 'switcher/assets/stock_parts.sh').read_text()
 
 
 class Setup(unittest.TestCase):
@@ -20,16 +21,20 @@ class Setup(unittest.TestCase):
         for name in ('vendor', 'odm', 'system.raw'):
             (self.stage / name).write_bytes(name.encode() * 50)
         self.function = FUNCTION
+        self.helper = HELPER
         for name, sha, size in (
             ('vendor', '3ace2530806e1eeba86007eab46a4fbebe607caf04ea73ce6cbb2ec6a17c63e7', 1907937280),
             ('odm', '1c1e9e3f95fa3e635dcfbb63e37a76fc40f60014b6a6bc8c8ed7e1457d29f4de', 778240),
         ):
             data = (self.stage / name).read_bytes()
-            self.function = self.function.replace(sha, hashlib.sha256(data).hexdigest()).replace(str(size), str(len(data)))
+            self.helper = self.helper.replace(sha, hashlib.sha256(data).hexdigest()).replace(str(size), str(len(data)))
         (self.stage / 'guest_partitions.sh').write_text('''oneos_parts_file() { [ -f "$1" ]; }
 oneos_parts_vendor_host() { [ "$REJECT" != vendor ] && OP_HOST_DEV="$STAGE/vendor"; }
 oneos_parts_odm_host() { [ "$REJECT" != odm ] && OP_HOST_DEV="$STAGE/odm"; }
 ''')
+        (self.stage / 'stock_parts.sh').write_text(self.helper.replace('[ "$(id -u)" = 0 ]', '[ 1 = 1 ]').replace('/data/local/tmp/oneos', str(self.stage)))
+        (self.stage / 'bb').write_text('#!/bin/sh\nshift\nexec /bin/sh "$@"\n')
+        (self.stage / 'bb').chmod(0o700)
         self.prefix = '''usage() { exit 2; }; refuse() { echo "$*"; exit 3; }; die() { echo "$*"; exit 4; }
 say() { echo "$*"; }
 read_marker() { return 0; }
@@ -38,7 +43,7 @@ sha() { sha256sum "$1" | cut -d " " -f1; }
 is_hex64() { [ ${#1} = 64 ]; }
 idle_or_refuse() { [ "$REJECT" != busy ] || refuse busy; }
 check_files() { [ "$REJECT" != scripts ] || refuse scripts; }
-find_tools() { BB=/bin/true; }
+find_tools() { BB="$STAGE/bb"; }
 to_attic() { [ ! -e "$STAGE/$1" ] || mv "$STAGE/$1" "$STAGE/saved"; }
 '''
 
