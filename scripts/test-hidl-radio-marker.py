@@ -46,9 +46,11 @@ cat "$R/lshal_out"
 
 class HidlMarker(unittest.TestCase):
     def run_block(self, manifests=(AIDL_MANIFEST % '',), aidl='no', lshal=LSHAL_HEAD + LSHAL_OTHER + LSHAL_RADIO,
-                  host_hwsm='607', rild='running', image=(), slow=''):
+                  host_hwsm='607', rild='running', image=(), slow='', backends=''):
         with tempfile.TemporaryDirectory() as t:
             r = Path(t)
+            (r / 'inplace_base').mkdir()
+            (r / 'inplace_base/hal_backends').write_text(backends)
             (r / 'bin').mkdir(); (r / 'vintf/manifest').mkdir(parents=True)
             rootfs = r / 'rootfs'
             (rootfs / 'system/system_ext/bin').mkdir(parents=True); (rootfs / 'system/bin').mkdir(parents=True)
@@ -67,7 +69,7 @@ class HidlMarker(unittest.TestCase):
             (r / 'bin/getprop').write_text('#!/bin/sh\n[ "$1" = init.svc.ril-daemon ] && echo "$RILD"\n')
             for f in ('bb', 'service', 'lshal', 'bin/pidof', 'bin/getprop'):
                 os.chmod(r / f, 0o755)
-            env = dict(os.environ, R=str(r), BB=str(r / 'bb'), ROOTFS=str(rootfs), GUEST_SYSTEM_EXT=str(rootfs / 'system/system_ext'),
+            env = dict(os.environ, R=str(r), STAGE=str(r), BB=str(r / 'bb'), ROOTFS=str(rootfs), GUEST_SYSTEM_EXT=str(rootfs / 'system/system_ext'),
                        AIDL=aidl, HOST_HWSM=host_hwsm, RILD=rild, SLOW=slow, PATH=f'{r}/bin:' + os.environ['PATH'])
             began = time.time()
             out = subprocess.run(['/bin/sh', '-c', BLOCK + '\necho "HWSM=$HWSM WHY=$HWSM_WHY"\n'], env=env, capture_output=True,
@@ -91,6 +93,12 @@ class HidlMarker(unittest.TestCase):
                 self.assertEqual(['HIDL: this image has no hwservicemanager and One UI runs one. Radio by its services: AIDL no, '
                                   f'HIDL yes; by the vendor manifest: {said} (HIDL-only: the marker is set)'], got['lines'])
                 self.assertEqual(['service_args', 'lshal_args'], got['asked'])
+
+    def test_registered_backends_take_priority_over_other_sku_manifests(self):
+        got = self.run_block(backends='composer=hidl\naudio=hidl\n')
+        self.assertEqual('HWSM=1 WHY=display composer and audio HAL', got['end'])
+        got = self.run_block(manifests=('<manifest/>',), backends='composer=aidl\naudio=aidl\n', aidl='yes')
+        self.assertEqual('HWSM=0 WHY=', got['end'])
 
     def test_an_aidl_radio_gets_no_marker(self):
         got = self.run_block(manifests=(AIDL_MANIFEST % RADIO_AIDL,), aidl='yes')

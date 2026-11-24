@@ -21,6 +21,22 @@ class ImagesTest {
     )
 
     @Test
+    fun rawImageHeaderDistinguishesFilesystemsFromContainers() {
+        val header = ByteArray(Images.RAW_HEADER_BYTES)
+        val fields = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        assertNull(Images.rawFilesystem(header))
+        fields.putShort(1080, 0xef53.toShort())
+        assertEquals("ext4", Images.rawFilesystem(header))
+        fields.putInt(1024, 0xe0f5e1e2.toInt())
+        assertNull(Images.rawFilesystem(header))
+        fields.putShort(1080, 0)
+        assertEquals("erofs", Images.rawFilesystem(header))
+        assertNull(Images.rawFilesystem(header.copyOf(1081)))
+        fields.putInt(0, 0xed26ff3a.toInt())
+        assertNull(Images.rawFilesystem(header))
+    }
+
+    @Test
     fun rebuiltOnePlus16ArchiveIsRecognizedOnBaseGalaxyS23() {
         val image = Images.COLOROS17_PYB110
         val archive = ImageFileCheck(

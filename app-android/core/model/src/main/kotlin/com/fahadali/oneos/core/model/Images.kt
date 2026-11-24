@@ -151,9 +151,24 @@ object Images {
     /** Where root stages the unpacked image. */
     const val STAGE_NAME = "system.raw"
 
-    /** The ext4 superblock magic 0xEF53, little endian at byte 1080 of the unpacked image. */
-    const val EXT4_MAGIC_OFFSET = 1080L
-    const val EXT4_MAGIC = 0xEF53
+    /** Includes both filesystem signatures and the first four container bytes. */
+    const val RAW_HEADER_BYTES = 1082
+
+    fun rawFilesystem(header: ByteArray): String? {
+        if (header.size < RAW_HEADER_BYTES) return null
+        val bytes = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        when (bytes.getInt(0)) {
+            0xed26ff3a.toInt(), 0x52444e41, 0x52444e56 -> return null // sparse, ANDR, VNDR
+        }
+        val erofs = bytes.getInt(1024) == 0xe0f5e1e2.toInt()
+        val ext4 = bytes.getShort(1080).toInt() and 0xffff == 0xef53
+        return when {
+            erofs && !ext4 -> "erofs"
+            ext4 && !erofs -> "ext4"
+            else -> null
+        }
+    }
+
 
     val FIND_N6 = ImageRef(
         id = ID_FIND_N6,

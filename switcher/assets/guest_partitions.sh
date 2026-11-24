@@ -2,6 +2,18 @@
 # Optional raw partition images. No flash, init service start, or kernel/module load.
 # Donor hardware activation stays blocked. Stock mode is pinned to the audited S23 dump.
 oneos_parts_error() { echo "ERROR: guest partitions: $*" >&2; return 1; }
+# Probe bytes explicitly: some Android BusyBox builds do not recognize EROFS in blkid.
+oneos_magic() { od -An -tx1 -j "$2" -N "$3" "$1" 2>/dev/null | tr -d '[:space:]'; }
+oneos_image_fs() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    case "$(oneos_magic "$1" 0 4)" in ''|3aff26ed|414e4452|564e4452) return 1 ;; esac
+    case "$(oneos_magic "$1" 1024 4):$(oneos_magic "$1" 1080 2)" in
+        e2e1f5e0:53ef) return 1 ;;
+        e2e1f5e0:????) echo erofs ;;
+        *:53ef) echo ext4 ;;
+        *) return 1 ;;
+    esac
+}
 oneos_parts_file() {
     [ -f "$1" ] && [ ! -L "$1" ] &&
         [ "$(stat -c %u "$1")" = 0 ] || return 1
@@ -173,7 +185,9 @@ oneos_parts_validate() {
                 oneos_parts_error "$OP_NAME image failed ownership, size or SHA-256 verification"; return 1;
             }
         # Probe, never auto-detect a filesystem at mount time (no sparse/super/boot).
-        [ "$("$BB" blkid "$OP_FILE" 2>/dev/null | sed -n 's/.* TYPE="\([^" ]*\)".*/\1/p')" = "$OP_FS" ] || {
+        OP_TYPE=$(oneos_image_fs "$OP_FILE")
+        OP_BLKTYPE=$("$BB" blkid "$OP_FILE" 2>/dev/null | sed -n 's/.* TYPE="\([^" ]*\)".*/\1/p')
+        [ "$OP_TYPE" = "$OP_FS" ] && { [ -z "$OP_BLKTYPE" ] || [ "$OP_BLKTYPE" = "$OP_FS" ]; } || {
             oneos_parts_error "$OP_NAME is not a raw $OP_FS filesystem"; return 1;
         }
         if [ "$OP_MODE" = stock ]; then
@@ -192,13 +206,20 @@ oneos_parts_target() {
             [ "$(readlink -f "$OP_TARGET")" = "$OP_TARGET" ]
         return $?
     fi
+    case "$1" in product|system_ext) ;; *) return 1 ;; esac
+    [ ! -L "$ROOTFS/system" ] || return 1
+    OP_NESTED="$ROOTFS/system/$1"
     if [ -L "$OP_TARGET" ]; then
-        [ "$(readlink "$OP_TARGET")" = "/system/$1" ] || return 1
-        OP_TARGET="$ROOTFS/system/$1"
-    elif [ -L "$ROOTFS/system/$1" ]; then
-        [ "$(readlink "$ROOTFS/system/$1")" = "/$1" ] || return 1
-    elif [ -d "$ROOTFS/system/$1" ]; then
-        OP_TARGET="$ROOTFS/system/$1"
+        case "$(readlink "$OP_TARGET")" in "/system/$1"|"system/$1") ;; *) return 1 ;; esac
+        OP_TARGET="$OP_NESTED"
+    elif [ -L "$OP_NESTED" ]; then
+        case "$(readlink "$OP_NESTED")" in "/$1"|"../$1") ;; *) return 1 ;; esac
+    elif [ -d "$OP_NESTED" ]; then
+        # OriginOS overlays an empty top-level system_ext before binding the
+        # completed nested tree there. Otherwise retain each runtime default.
+        if [ ! -d "$OP_TARGET" ] || [ "$1" = product ] || [ "${SEXT_MOUNT:-0}" = 1 ]; then
+            OP_TARGET="$OP_NESTED"
+        fi
     fi
     [ -d "$OP_TARGET" ] && [ ! -L "$OP_TARGET" ] &&
         [ "$(readlink -f "$OP_TARGET")" = "$OP_TARGET" ]

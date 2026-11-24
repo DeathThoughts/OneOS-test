@@ -211,14 +211,6 @@ if [ -d "$LEGACY_STAGE" ] && [ ! -L "$LEGACY_STAGE" ]; then
 fi
 [ -d "$STAGE" ] && [ ! -L "$STAGE" ] || refuse "$STAGE is missing or not a directory"
 root_only "$STAGE" || app_refuse "$STAGE is not root's or is writable by others ($(stat -c '%U:%G %A' "$STAGE" 2>/dev/null))"
-# Experimental partition bundles must fail while One UI is still running.
-if [ -e "$STAGE/partition_images" ] || [ -L "$STAGE/partition_images" ]; then
-    [ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] &&
-        root_only "$STAGE/guest_partitions.sh" || refuse "unsafe or missing guest_partitions.sh"
-    . "$STAGE/guest_partitions.sh"
-    oneos_parts_validate || refuse "additional guest partition images failed preflight"
-fi
-
 [ -f "$STAGE/system.raw" ] || refuse "the guest image ($STAGE/system.raw) is not staged"
 for f in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
          check_host_apex.sh bridges.sh fold8_coloros.sh guest_google.sh zygote_exec guards.txt services_patched.jar; do
@@ -247,7 +239,7 @@ if [ "$APP" = 1 ]; then
     bad=$(awk 'NF != 2 || length($1) != 64 || $1 ~ /[^0-9a-f]/ || $2 !~ /^[A-Za-z0-9_][A-Za-z0-9._-]*$/ ||
                $2 == "system.raw" || seen[$2]++ { print NR ": " $0 }' "$SUMS" | head -3)
     [ -z "$bad" ] || refuse "files.sha256 has malformed lines: $bad"
-    for need in oneos_switch.sh guest_prepare.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
+    for need in oneos_switch.sh guest_prepare.sh guest_partitions.sh guest_patch.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
                 check_host_apex.sh bridges.sh zygote_exec guards.txt $GUARD_JARS; do
         awk -v n="$need" '$2 == n { f = 1 } END { exit !f }' "$SUMS" || refuse "files.sha256 does not list $need"
     done
@@ -308,6 +300,14 @@ if [ "$APP" = 1 ]; then
     case "${ONEOS_PREPARE_ONLY:-0}" in 0|1) ;; *) refuse "ONEOS_PREPARE_ONLY=$ONEOS_PREPARE_ONLY" ;; esac
     env | grep -q '^ONEOS_TUNNEL_' && refuse "ONEOS_TUNNEL_* set"
 fi
+# Load the partition reader after checking the APK's staged helper hashes.
+[ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] &&
+    root_only "$STAGE/guest_partitions.sh" || refuse "unsafe or missing guest_partitions.sh"
+. "$STAGE/guest_partitions.sh" || refuse "cannot load partition helper"
+SYSTEM_FS=$(oneos_image_fs "$STAGE/system.raw") || refuse "system.raw must be raw ext4 or EROFS"
+echo "preflight: system.raw filesystem is $SYSTEM_FS"
+oneos_parts_validate || refuse "additional guest partition images failed preflight"
+
 # Google services in a Pixel guest (guest_prepare.sh, docs/pixel-guest.md):
 # ONEOS_GUEST_GMS is 0 or 1, unset meaning 1, from the app and the adb loop
 # alike; and not on together with ONEOS_GUEST_HIDE_GMS=1 when the payload is

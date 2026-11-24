@@ -312,24 +312,17 @@ loop_ro() {
     set -- $d
     [ "$(cat "/sys/dev/block/$(printf '%d:%d' "0x$1" "0x$2")/ro" 2>/dev/null)" = 1 ]
 }
-if mount | grep -q "$ROOTFS "; then
-    if [ ! -f "$ROOTFS/system/bin/sh" ] || [ ! -f "$ROOTFS/init.environ.rc" ]; then
-        echo "Rootfs mount is invalid or stale. Unmounting..."
-        while mount | grep -q "$ROOTFS"; do
-            $BB umount -l "$ROOTFS" 2>/dev/null || true
-            sleep 0.1
-        done
-    else
-        echo "Rootfs already mounted and healthy."
-    fi
+[ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] || exit 3
+. "$STAGE/guest_partitions.sh" || exit 3
+SYSTEM_FS=$(oneos_image_fs "$STAGE/system.raw") || { echo "ERROR: unrecognized system.raw filesystem"; exit 3; }
+rootfs_mounted() { awk -v p="$ROOTFS" '$5 == p {found=1} END {exit !found}' /proc/self/mountinfo; }
+if rootfs_mounted && { [ ! -f "$ROOTFS/system/bin/sh" ] || [ ! -f "$ROOTFS/init.environ.rc" ]; }; then
+    echo "ERROR: stale guest root at $ROOTFS; return to One UI before preparing again"
+    exit 3
 fi
-
-mkdir -p "$ROOTFS"
-if ! mount | grep -q "$ROOTFS "; then
-    for l in $($BB losetup -a | grep "system.raw" | cut -d: -f1); do
-        $BB losetup -d "$l" 2>/dev/null || true
-    done
-    LOOP=$($BB losetup -f)
+[ ! -L "$ROOTFS" ] && mkdir -p "$ROOTFS" || exit 3
+if ! rootfs_mounted; then
+    LOOP=$($BB losetup -f) || { echo "ERROR: no free loop device for system.raw"; exit 3; }
     # OneOS: a read-only loop device. A plain one let the ro ext4 mount replay
     # a journal into system.raw, which changes the file the app verified (its
     # stat identity in system.raw.id, checked before every switch).
@@ -346,17 +339,13 @@ if ! mount | grep -q "$ROOTFS "; then
         echo "WARNING: could not confirm that $LOOP is read-only (sysfs)"
     fi
     echo "Using LOOP: $LOOP (read-only)"
-    $BB mount -t ext4 -o ro "$LOOP" "$ROOTFS"
-fi
-
-OP_VENDOR_ACTIVE=0
-OP_ODM_ACTIVE=0
-# Mount extra partitions before any patch/compatibility overlays.
-# The switch preflight validates them before stopping One UI; verify again here.
-if [ -e "$STAGE/partition_images" ] || [ -L "$STAGE/partition_images" ]; then
-    [ -f "$STAGE/guest_partitions.sh" ] && [ ! -L "$STAGE/guest_partitions.sh" ] || exit 3
-    . "$STAGE/guest_partitions.sh"
-    oneos_parts_mount || { echo "ERROR: additional guest partitions refused"; exit 3; }
+    SYSTEM_OPTIONS=ro
+    [ "$SYSTEM_FS" = ext4 ] && SYSTEM_OPTIONS=ro,noload
+    if ! "$BB" mount -t "$SYSTEM_FS" -o "$SYSTEM_OPTIONS" "$LOOP" "$ROOTFS"; then
+        "$BB" losetup -d "$LOOP"
+        echo "ERROR: kernel could not mount system.raw as $SYSTEM_FS read-only; stopping guest setup"
+        exit 3
+    fi
 fi
 
 # /system_ext as its own mount (vivo OriginOS, 0.4.59). Its boot classpath has
@@ -372,7 +361,7 @@ fi
 # setup (below), after every mount made under it. Everything until then uses
 # /system/system_ext (GUEST_SYSTEM_EXT). Other images are not touched.
 SEXT_MOUNT=0
-if [ -L "$ROOTFS/system_ext" ] && [ "$(readlink "$ROOTFS/system_ext")" = /system/system_ext ] &&
+if [ -L "$ROOTFS/system_ext" ] && oneos_parts_target system_ext &&
    [ -d "$ROOTFS/system/system_ext" ] && [ ! -L "$ROOTFS/system/system_ext" ] &&
    grep -aq '/system_ext/framework/' "$ROOTFS/system/etc/classpaths/bootclasspath.pb" 2>/dev/null; then
     ROV="$STAGE/root_ov"
@@ -390,6 +379,14 @@ if [ -L "$ROOTFS/system_ext" ] && [ "$(readlink "$ROOTFS/system_ext")" = /system
         echo "ERROR: could not give /system_ext its own mount (overlay on $ROOTFS); not starting the guest"
         exit 3
     fi
+fi
+
+# A root overlay hides mounts made on the old root. Attach the optional
+# partitions to the final root before setting up host binds or patch overlays.
+OP_VENDOR_ACTIVE=0
+OP_ODM_ACTIVE=0
+if [ -e "$STAGE/partition_images" ] || [ -L "$STAGE/partition_images" ]; then
+    oneos_parts_mount || { echo "ERROR: additional guest partitions refused"; exit 3; }
 fi
 
 mkdir -p "$ROOTFS/postinstall" "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys" \
@@ -497,14 +494,10 @@ fi
 # the guest kept its own: PackageManagerService then died parsing
 # /system_ext/apex/com.android.compos.apex, which host apexd reports but the
 # guest's tree does not have.
-GUEST_SYSTEM_EXT="$ROOTFS/system_ext"
-{ [ -L "$GUEST_SYSTEM_EXT" ] || [ "$SEXT_MOUNT" = 1 ]; } && GUEST_SYSTEM_EXT="$ROOTFS/system/system_ext"
-# product the same way, the other way round: ColorOS and Pixel images have
-# system/product and an absolute link /product -> /system/product; others
-# have /product and system/product -> /product, which in this namespace is One
-# UI's /product (see host_part_mounts at the top).
-GUEST_PRODUCT="$ROOTFS/system/product"
-[ -L "$GUEST_PRODUCT" ] && GUEST_PRODUCT="$ROOTFS/product"
+oneos_parts_target system_ext || { echo "ERROR: unsafe or missing guest system_ext"; exit 3; }
+GUEST_SYSTEM_EXT="$OP_TARGET"
+oneos_parts_target product || { echo "ERROR: unsafe or missing guest product"; exit 3; }
+GUEST_PRODUCT="$OP_TARGET"
 ONEUI95_IMAGE=0
 if grep -qx 'ro.build.PDA=S948BXXU6ZZKN' "$ROOTFS/system/build.prop" 2>/dev/null; then
     ONEUI95_IMAGE=1
@@ -513,12 +506,6 @@ ONEUI95_FOLD8=0
 if [ "$ONEUI95_IMAGE" = 1 ] && [ "${ONEOS_PROFILE:-}" = f8 ] && [ "${ONEOS_GUEST_FORM:-fold}" = fold ]; then
     ONEUI95_FOLD8=1
 fi
-for d in "$GUEST_SYSTEM_EXT" "$GUEST_PRODUCT"; do
-    if [ -L "$d" ] || [ ! -d "$d" ]; then
-        echo "ERROR: ${d#$ROOTFS/} in the guest image is a link or missing (system_ext and product: one real folder each); not starting the guest"
-        exit 3
-    fi
-done
 # Signal bars in a guest without ColorOS's OplusSignalSmooth (run 43, Pixel):
 # Samsung's RIL sends the guest no signal strength indication and AOSP polls
 # only for opportunistic subscriptions, so both SIMs kept the all-invalid value
@@ -571,8 +558,14 @@ fi
 # and no AIDL radio (android.hardware.radio.sim).
 HWSM=0
 HWSM_WHY=""
-"$BB" grep -rqs 'android.hardware.graphics.composer3' /vendor/etc/vintf/ || HWSM_WHY="display composer"
-"$BB" grep -rqs 'android.hardware.audio.core' /vendor/etc/vintf/ || HWSM_WHY="${HWSM_WHY:+$HWSM_WHY and }audio HAL"
+host_has_aidl() {
+    HAL_OBSERVED="$STAGE/inplace_base/hal_backends"
+    grep -qx "$1=aidl" "$HAL_OBSERVED" 2>/dev/null && return 0
+    grep -qx "$1=hidl" "$HAL_OBSERVED" 2>/dev/null && return 1
+    "$BB" grep -rqsF "$2" /vendor/etc/vintf/
+}
+host_has_aidl composer android.hardware.graphics.composer3 || HWSM_WHY="display composer"
+host_has_aidl audio android.hardware.audio.core || HWSM_WHY="${HWSM_WHY:+$HWSM_WHY and }audio HAL"
 VM_AIDL=no
 VM_HIDL=no
 "$BB" grep -rqs 'android.hardware.radio.sim' /vendor/etc/vintf/ && VM_AIDL=yes
@@ -3239,7 +3232,7 @@ if [ -e "$MIUI_FW/miui-services.jar" ] || [ -L "$MIUI_FW/miui-services.jar" ]; t
         [ "$(getprop ro.soc.manufacturer)" = QTI ] || return 0
         echo module > "$STAGE/guest_bt_sw"
     }
-    if [ "$APM_X" != 0 ] && ! "$BB" grep -rqs 'android.hardware.audio.core' /vendor/etc/vintf/; then
+    if [ "$APM_X" != 0 ] && ! host_has_aidl audio android.hardware.audio.core; then
         if [ -z "$APM_X" ]; then
             SKU=$(getprop ro.boot.product.vendor.sku)
             # 0.4.63: Qualcomm's SKU file first. HyperOS's parser rejected Samsung's
@@ -3322,7 +3315,7 @@ GAPM=/vendor/etc/audio_policy_configuration.xml
 if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" ] \
    && { [ "${ONEOS_GUEST_APM_A2DP:-1}" = 1 ] || [ "${ONEOS_GUEST_APM_USB:-1}" = 1 ] || [ "${ONEOS_GUEST_APM_DEEP_BUFFER:-1}" = 1 ]; } \
    && [ -f "$GAPM" ] && [ -f "$ROOTFS$GAPM" ] && [ ! -L "$ROOTFS$GAPM" ] \
-   && ! "$BB" grep -rqs 'android.hardware.audio.core' /vendor/etc/vintf/; then
+   && ! host_has_aidl audio android.hardware.audio.core; then
     SKU=$(getprop ro.boot.product.vendor.sku)
     GAPM_OV="$STAGE/guest_apm"
     GAPM_FIRST=""

@@ -25,14 +25,14 @@ def filesystem(path):
     if path.is_symlink() or not path.is_file():
         raise ValueError(f'{path}: expected a regular raw image, not a symlink')
     with path.open('rb') as f:
-        if f.read(4) == b'\x3a\xff\x26\xed':
-            raise ValueError(f'{path}: Android sparse image; convert with simg2img first')
-        f.seek(1024)
-        if f.read(4) == b'\xe2\xe1\xf5\xe0':
-            return 'erofs'
-        f.seek(1080)
-        if f.read(2) == b'\x53\xef':
-            return 'ext4'
+        header = f.read(1082)
+    if header[:4] == b'\x3a\xff\x26\xed':
+        raise ValueError(f'{path}: Android sparse image; convert with simg2img first')
+    if len(header) == 1082 and header[:4] not in (b'ANDR', b'VNDR'):
+        erofs = header[1024:1028] == b'\xe2\xe1\xf5\xe0'
+        ext4 = header[1080:1082] == b'\x53\xef'
+        if erofs != ext4:
+            return 'erofs' if erofs else 'ext4'
     raise ValueError(f'{path}: expected raw ext4/EROFS, not super, boot or firmware')
 
 

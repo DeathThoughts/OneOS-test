@@ -77,10 +77,28 @@ svc_pid() {
 # vold cannot be restarted (init.rc: reboot_on_failure), keystore2 is critical.
 HOST_NAMES="vold android.system.vold.IVold/default android.system.keystore2.IKeystoreService/default installd android.service.gatekeeper.IGateKeeperService"
 
+# Look at the services One UI actually registered before stopping it. Vendor
+# XML may also list an inactive SKU or a framework compatibility requirement.
+host_hal_backends() {
+    aidl=$("$BB" timeout 4 /system/bin/service list 2>/dev/null) || aidl=
+    printf '%s\n' "$aidl" | grep -qE '^[[:space:]]*[0-9]+[[:space:]]' || return 0
+    composer=; audio=
+    printf '%s\n' "$aidl" | grep -qE '[[:space:]]android\.hardware\.graphics\.composer3\.IComposer/default:' && composer=aidl
+    printf '%s\n' "$aidl" | grep -qE '[[:space:]]android\.hardware\.audio\.core\.IModule/default:' && audio=aidl
+    if [ -z "$composer" ] || [ -z "$audio" ]; then
+        hidl=$("$BB" timeout 4 /system/bin/lshal list -i --types=b 2>/dev/null) || hidl=
+        if [ -z "$composer" ] && printf '%s\n' "$hidl" | grep -qE '(^|[[:space:]])android\.hardware\.graphics\.composer@[0-9.]+::IComposer/default([[:space:]]|$)'; then composer=hidl; fi
+        if [ -z "$audio" ] && printf '%s\n' "$hidl" | grep -qE '(^|[[:space:]])android\.hardware\.audio@[0-9.]+::IDevicesFactory/default([[:space:]]|$)'; then audio=hidl; fi
+    fi
+    [ -z "$composer" ] || echo "composer=$composer"
+    [ -z "$audio" ] || echo "audio=$audio"
+}
+
 if [ "$1" = baseline ]; then
     [ -n "$BB" ] || { echo "In-place baseline: no busybox, not taken (the return will reboot)"; exit 0; }
     rm -rf "$BASE"; mkdir -p "$BASE" || exit 0
     cat /proc/sys/kernel/random/boot_id > "$BASE/boot_id" 2>/dev/null
+    ( host_hal_backends > "$BASE/hal_backends" ) &
     ( getprop > "$BASE/props" ) &
     ( getenforce > "$BASE/selinux" 2>&1 ) &
     ( apex_state > "$BASE/apex" ) &
@@ -1164,7 +1182,9 @@ setprop ctl.restart "$COMPOSER_SVC"
 # (android.hardware.graphics.composer@2.x): waiting for the AIDL one rebooted
 # every return there (1f4f0c7f). The vendor manifest says which one this phone
 # serves; lshal, bounded, for the HIDL one.
-if "$BB" grep -rqs 'android.hardware.graphics.composer3' /vendor/etc/vintf/; then
+if grep -qx 'composer=aidl' "$BASE/hal_backends" 2>/dev/null ||
+   { ! grep -qx 'composer=hidl' "$BASE/hal_backends" 2>/dev/null &&
+     "$BB" grep -rqs 'android.hardware.graphics.composer3' /vendor/etc/vintf/; }; then
     wait_found android.hardware.graphics.composer3.IComposer/default 10 || failsafe "the display composer did not come back"
 else
     sleep 1  # past the old instance's registration

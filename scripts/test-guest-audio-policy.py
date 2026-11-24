@@ -27,8 +27,9 @@ def local(block):
 
 
 COPY = local(between(PREPARE, 'apm_hw_lib() {\n', "# HyperOS: Xiaomi's miui-services.jar"))
-HYPEROS = local(between(PREPARE, '    APM_X="${ONEOS_GUEST_APM_XML:-}"\n', '\n# The other systems read AOSP'))
-OTHER = local(between(PREPARE, 'GAPM=/vendor/etc/audio_policy_configuration.xml\n', '\n# ims-ext-common.jar with a 60 s'))
+BACKEND = local(between(PREPARE, 'host_has_aidl() {', '\n}\n')) + '\n}\n'
+HYPEROS = BACKEND + local(between(PREPARE, '    APM_X="${ONEOS_GUEST_APM_XML:-}"\n', '\n# The other systems read AOSP'))
+OTHER = BACKEND + local(between(PREPARE, 'GAPM=/vendor/etc/audio_policy_configuration.xml\n', '\n# ims-ext-common.jar with a 60 s'))
 BRIDGE = local(between(SWITCH, 'BT_WHY=""\nBT_FRAG=', 'BT_COPY="$STAGE/oneos_bt_vintf.xml"'))
 
 PROFILE = ('<profile name="" format="AUDIO_FORMAT_PCM_16_BIT" samplingRates="48000" '

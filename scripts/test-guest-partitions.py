@@ -163,7 +163,7 @@ cat() { case "$1" in /sys/dev/block/*/ro) echo 1 ;; *) command cat "$@" ;; esac;
 
     def test_wrong_filesystem_probe(self):
         self.make()
-        self.bb.write_text('#!/bin/sh\necho f2fs\n')
+        self.bb.write_text('#!/bin/sh\necho \'/dev/test TYPE="f2fs"\'\n')
         self.assert_refused()
 
     def target(self, layout):
@@ -195,6 +195,53 @@ cat() { case "$1" in /sys/dev/block/*/ro) echo 1 ;; *) command cat "$@" ;; esac;
                 self.assertIn('mount -t ext4 -o ro,nodev,nosuid,noload /dev/null ', calls)
                 expected = root / ('system/product' if layout == 'merged' else 'product')
                 self.assertIn(str(expected), calls)
+
+    def test_partition_layouts_share_one_runtime_target(self):
+        root = self.stage / 'rootfs'
+        nested = root / 'system/system_ext'
+        nested.mkdir(parents=True)
+        top = root / 'system_ext'
+        cmd = 'oneos_parts_target system_ext && echo "$OP_TARGET"'
+        self.assertEqual(self.run_shell(cmd).stdout.strip(), str(nested))
+        top.symlink_to('system/system_ext')
+        self.assertEqual(self.run_shell(cmd).stdout.strip(), str(nested))
+        top.unlink()
+        top.mkdir()
+        self.assertEqual(self.run_shell(cmd).stdout.strip(), str(top))
+        self.assertEqual(self.run_shell(cmd, 'SEXT_MOUNT=1').stdout.strip(), str(nested))
+        nested.rmdir()
+        nested.symlink_to('../system_ext')
+        self.assertEqual(self.run_shell(cmd).stdout.strip(), str(top))
+        nested.unlink()
+        nested.symlink_to('/vendor')
+        self.assertNotEqual(self.run_shell(cmd).returncode, 0)
+
+    def test_root_overlay_precedes_optional_mounts_and_host_binds(self):
+        setup = HELPER.with_name('guest_prepare.sh').read_text()
+        self.assertLess(setup.index('SEXT_MOUNT=1'), setup.index('oneos_parts_mount ||'))
+        self.assertLess(setup.index('oneos_parts_mount ||'), setup.index('Setting up Core System Bind Mounts'))
+
+    def test_image_headers_match_the_offline_reader(self):
+        raw = bytearray(4096)
+        raw[1024:1028] = bytes.fromhex('e2e1f5e0')
+        for prefix, ext, size, expected in (
+            (b'RAW0', b'00', 4096, 'erofs'), (b'RAW0', b'00', 1081, None),
+            (b'RAW0', bytes.fromhex('53ef'), 4096, None),
+            (bytes.fromhex('3aff26ed'), b'00', 4096, None),
+            (b'ANDR', b'00', 4096, None), (b'VNDR', b'00', 4096, None),
+        ):
+            with self.subTest(prefix=prefix, ext=ext, size=size):
+                raw[:4], raw[1080:1082] = prefix, ext
+                self.system.write_bytes(raw[:size])
+                result = self.run_shell('oneos_image_fs "$STAGE/system.raw"')
+                if expected:
+                    self.assertEqual(bundle.filesystem(self.system), expected)
+                    self.assertEqual(result.stdout.strip(), expected)
+                    self.assertEqual(result.returncode, 0)
+                else:
+                    with self.assertRaises(ValueError):
+                        bundle.filesystem(self.system)
+                    self.assertNotEqual(result.returncode, 0)
 
     def test_absolute_target_escape_refused_before_attach(self):
         self.make(active=('product',))
