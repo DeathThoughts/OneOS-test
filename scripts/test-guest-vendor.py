@@ -65,6 +65,13 @@ class OfflineAudit(unittest.TestCase):
         self.assertIn('etc/vintf/manifest.xml', comparison['changed_configs'])
         self.assertFalse(report['activation_allowed'])
 
+    def test_init_continuation_joins_service_arguments(self):
+        text = 'service wifi /vendor/bin/wpa ' + chr(92) + '\n    -dd ' + chr(92) + '\n    -g@android:wlan0\n    user wifi\n'
+        services, _ = audit.parse_init(text, 'etc/init/wifi.rc')
+        self.assertEqual(services[0]['args'], ['-dd', '-g@android:wlan0'])
+        self.assertEqual(services[0]['options']['user'], [['wifi']])
+        self.assertEqual(services[0]['line'], 1)
+
     def test_matrix_is_not_a_provided_hal(self):
         root = self.vendor('stock')
         (root / 'etc/vintf/matrix.xml').write_text(

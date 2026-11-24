@@ -108,10 +108,26 @@ def parse_hals(text, name):
     return hals
 
 
+def init_lines(text):
+    pending = ''
+    start = 0
+    for number, raw in enumerate(text.splitlines(), 1):
+        if not pending:
+            start = number
+        slashes = len(raw) - len(raw.rstrip('\\'))
+        if slashes % 2:
+            pending += raw[:-1] + ' '
+            continue
+        yield start, pending + raw
+        pending = ''
+    if pending:
+        raise ValueError('unterminated init line continuation')
+
+
 def parse_init(text, name):
     services, imports = [], []
     current = None
-    for number, raw in enumerate(text.splitlines(), 1):
+    for number, raw in init_lines(text):
         if not raw.strip() or raw.lstrip().startswith('#'):
             continue
         try:
