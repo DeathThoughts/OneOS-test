@@ -65,6 +65,9 @@ def resolve(path, a, b, c):
             return replace_once(a, old, new)
         if "OneOSIslandY" in a and "OneOSCutoutFill" in c:
             return replace_once(a, "OneOSCutoutRect|", "OneOSCutoutRect|OneOSCutoutFill|")
+    # The fork deliberately retains its existing reboot fallback; no new sysrq writes.
+    if name == "return_to_oneui.sh" and "reboot -f" in a and c.startswith(a) and "/proc/sysrq-trigger" in c:
+        return a
     raise ValueError("Unreviewed conflict")
 
 def main():
