@@ -19,6 +19,13 @@ object GoogleAccountQueue {
             .toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
     }
 
+    /** One foreground batch visits each pending address at most once. Skips remain pending. */
+    fun next(pending: List<String>, attempted: Set<String>): String? =
+        pending.firstOrNull { it !in attempted }
+
+    fun confirmed(requested: String, returnedName: String?, returnedType: String?): Boolean =
+        requested == returnedName && returnedType == TYPE
+
     fun decode(bytes: ByteArray): List<String> {
         require(bytes.size <= MAX_BYTES)
         val lines = bytes.toString(Charsets.UTF_8).split('\n')

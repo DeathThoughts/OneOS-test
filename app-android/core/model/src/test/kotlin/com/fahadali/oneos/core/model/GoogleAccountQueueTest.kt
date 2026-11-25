@@ -9,6 +9,22 @@ class GoogleAccountQueueTest {
         assertEquals(names.distinct().sorted(), GoogleAccountQueue.decode(GoogleAccountQueue.encode(names)))
     }
 
+    @Test fun sequentialLoginSkipsWithoutDeletingAndNeverLoops() {
+        val a = "one@example.invalid"
+        val b = "two@example.invalid"
+        val c = "three@example.invalid"
+        val pending = listOf(a, b, c)
+        assertEquals(a, GoogleAccountQueue.next(pending, emptySet()))
+        assertEquals(b, GoogleAccountQueue.next(pending, setOf(a)))
+        assertEquals(c, GoogleAccountQueue.next(pending - b, setOf(a, b)))
+        assertNull(GoogleAccountQueue.next(pending, pending.toSet()))
+        assertEquals(a, GoogleAccountQueue.next(pending - b, emptySet()))
+        assertTrue(GoogleAccountQueue.confirmed(a, a, GoogleAccountQueue.TYPE))
+        assertFalse(GoogleAccountQueue.confirmed(a, b, GoogleAccountQueue.TYPE))
+        assertFalse(GoogleAccountQueue.confirmed(a, a, "other"))
+        assertFalse(GoogleAccountQueue.confirmed(a, null, null))
+    }
+
     @Test fun refusesAnythingExceptAccountAddressesAndCompletePayloads() {
         for (bad in listOf("secret token", "user@example.invalid\npassword", "../file", "a@b", "x@y..invalid")) {
             assertFalse(GoogleAccountQueue.valid(bad))

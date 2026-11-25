@@ -67,7 +67,10 @@ class GoogleAccountInboxProvider : ContentProvider() {
             val bytes = f.inputStream().use { it.readAccountQueue() }
             require(Hashes.sha256(bytes) == arg)
             val names = GoogleAccountQueue.decode(bytes)
-            GoogleAccountInbox.merge(requireNotNull(context), names)
+            val ctx = requireNotNull(context)
+            GoogleAccountInbox.merge(ctx, names)
+            // A newly delivered list enables the count-only reminder if permission is granted.
+            GoogleAccountNotifications.enable(ctx)
             true
         }.getOrDefault(false)
         if (method == "commit") f.delete()

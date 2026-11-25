@@ -1,12 +1,19 @@
 package com.fahadali.oneos.guest
 
+import android.Manifest
 import android.accounts.AccountManager
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PersistableBundle
+import android.provider.Settings
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -14,15 +21,26 @@ import android.widget.ScrollView
 import android.widget.TextView
 import com.fahadali.oneos.core.model.GoogleAccountQueue
 
-/** Explicit Google authenticator UI only. OneOS supplies a login hint, never credentials. */
+/** A foreground queue, not a login service. Google owns all password/passkey/security UI. */
 class GoogleAccountsActivity : Activity() {
     private lateinit var column: LinearLayout
-    private var busy = false
+    private val handler = Handler(Looper.getMainLooper())
+    private val attempted = linkedSetOf<String>()
+    private var batch = false
+    private var copyEach = false
+    private var pausedOn: String? = null
+    private var inFlight = false
+    private var resumed = false
+    private var startFromNotification = false
     private var message = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         title = "Import Google accounts"
+        // After a process recreation, keep the persisted queue but require an explicit resume.
+        startFromNotification = savedInstanceState == null &&
+            intent.getBooleanExtra(GoogleAccountNotifications.SIGN_IN_ALL, false)
         column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val pad = (20 * resources.displayMetrics.density).toInt()
@@ -30,54 +48,198 @@ class GoogleAccountsActivity : Activity() {
         }
         setContentView(ScrollView(this).apply { addView(column) })
     }
-    override fun onResume() { super.onResume(); render() }
 
-    private fun button(label: String, action: () -> Unit) {
-        column.addView(Button(this).apply { text = label; isEnabled = !busy; setOnClickListener { action() } })
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        reconcileVisibleAccounts()
+        GoogleAccountNotifications.refresh(this)
+        render()
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        if (startFromNotification) {
+            startFromNotification = false
+            beginBatch(false)
+        } else scheduleNext()
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
+    private fun visible(): Set<String> = runCatching {
+        AccountManager.get(this).getAccountsByType(GoogleAccountQueue.TYPE).map { it.name }.toSet()
+    }.getOrDefault(emptySet())
+
+    private fun reconcileVisibleAccounts() {
+        val existing = visible()
+        GoogleAccountInbox.load(this).filter { it in existing }.forEach { GoogleAccountInbox.remove(this, it) }
+    }
+
+    private fun refresh() {
+        GoogleAccountNotifications.refresh(this)
+        if (!isDestroyed) render()
+    }
+
+    private fun button(label: String, enabled: Boolean = !inFlight, action: () -> Unit) {
+        column.addView(Button(this).apply { text = label; isEnabled = enabled; setOnClickListener { action() } })
     }
 
     private fun render() {
+        if (isDestroyed || !::column.isInitialized) return
         column.removeAllViews()
         val accounts = GoogleAccountInbox.load(this)
         column.addView(TextView(this).apply {
-            text = "Google handles sign-in. Use a passkey or approval if offered. If the email hint is not accepted, copy and paste the address."
+            text = "${accounts.size} Google accounts pending. Google handles sign-in, passkeys and security confirmations. If a login hint is ignored, use Copy email."
         })
-        if (accounts.isEmpty()) column.addView(TextView(this).apply { text = "No pending accounts. Select them in One UI before booting this guest." })
+        if (message.isNotEmpty()) column.addView(TextView(this).apply { text = message })
+        if (accounts.isNotEmpty()) {
+            button("Sign in all", !inFlight && !batch) { beginBatch(false) }
+            button("Sign in all + copy each email", !inFlight && !batch) {
+                AlertDialog.Builder(this@GoogleAccountsActivity)
+                    .setMessage("Copy each address to the clipboard immediately before opening Google's sign-in. Paste it if needed. No passwords are copied.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Continue") { _, _ -> beginBatch(true) }.show()
+            }
+        }
+        val paused = pausedOn
+        if (batch && paused != null) {
+            column.addView(TextView(this).apply { text = "Not confirmed: $paused" })
+            button("Retry this account") {
+                pausedOn = null
+                login(paused)
+            }
+            button("Skip for now and continue") {
+                pausedOn = null
+                scheduleNext()
+            }
+        }
+        if (batch) button("Stop sequence (keep pending accounts)", !inFlight) {
+            batch = false; pausedOn = null; attempted.clear()
+            message = "Sequence paused. Pending addresses are saved."
+            refresh()
+        }
         for (name in accounts) {
             column.addView(TextView(this).apply { text = name; textSize = 17f })
-            button("Sign in with Google") { login(name) }
-            button("Copy email") { copy(name) }
-            button("Remove from list") { GoogleAccountInbox.remove(this, name); render() }
+            button("Sign in with Google", !inFlight && !batch) { login(name) }
+            button("Copy email and open Google sign-in", !inFlight && !batch) { copy(name); login(name) }
+            button("Copy email", !inFlight) { copy(name); render() }
+            button("Open Android add-account screen", !inFlight && !batch) {
+                copy(name)
+                openAccountSettings(true)
+            }
+            button("Already signed in / remove from queue", !inFlight && !batch) {
+                AlertDialog.Builder(this@GoogleAccountsActivity)
+                    .setMessage("Remove this address from the pending list? This does not change the Google account itself.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
+                        GoogleAccountInbox.remove(this, name); refresh()
+                    }.show()
+            }
         }
-        if (accounts.isNotEmpty()) button("Clear pending accounts") {
-            AlertDialog.Builder(this).setMessage("Delete all pending addresses? Signed-in accounts are not removed.")
-                .setNegativeButton("Cancel", null).setPositiveButton("Clear") { _, _ -> GoogleAccountInbox.clear(this); render() }.show()
+        if (accounts.isNotEmpty()) {
+            button("Enable account reminders", !inFlight) {
+                GoogleAccountNotifications.enable(this)
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 702)
+                } else if (!GoogleAccountNotifications.available(this)) {
+                    startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                }
+                refresh()
+            }
+            button("Clear pending accounts", !inFlight && !batch) {
+                AlertDialog.Builder(this@GoogleAccountsActivity).setMessage("Delete all pending addresses? Signed-in accounts are not removed.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Clear") { _, _ -> GoogleAccountInbox.clear(this); refresh() }.show()
+            }
         }
-        button("Back") { finish() }
-        if (message.isNotEmpty()) column.addView(TextView(this).apply { text = message })
+        button("Manage existing accounts", !inFlight && !batch) { openAccountSettings(false) }
+        button("Back", !inFlight) { finish() }
+    }
+
+    @Deprecated("Permission result")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 702) refresh()
+    }
+
+    private fun openAccountSettings(add: Boolean) {
+        val target = if (add) Intent(Settings.ACTION_ADD_ACCOUNT)
+            .putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf(GoogleAccountQueue.TYPE)) else Intent(Settings.ACTION_SYNC_SETTINGS)
+        runCatching { startActivity(target) }.recoverCatching { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            .onFailure { message = "Account settings unavailable."; render() }
     }
 
     private fun copy(name: String) {
         val clip = ClipData.newPlainText("Google account", name)
         clip.description.extras = PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
         getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
-        message = "Email copied. Paste it into Google's sign-in screen if necessary."
-        render()
+        message = "Email copied. Paste it into Google's sign-in if needed."
+    }
+
+    private fun beginBatch(copyBeforeLogin: Boolean) {
+        if (inFlight || batch) return
+        attempted.clear()
+        batch = true
+        copyEach = copyBeforeLogin
+        pausedOn = null
+        scheduleNext()
+    }
+
+    private fun scheduleNext() {
+        if (!batch || inFlight || pausedOn != null || !resumed || isFinishing || isDestroyed) return
+        handler.post {
+            if (!batch || inFlight || pausedOn != null || !resumed || isFinishing || isDestroyed) return@post
+            val pending = GoogleAccountInbox.load(this)
+            val next = GoogleAccountQueue.next(pending, attempted)
+            if (next == null) {
+                batch = false
+                message = if (pending.isEmpty()) "All queued accounts are complete." else "${pending.size} accounts still pending. You can continue later."
+                refresh()
+            } else {
+                attempted.add(next)
+                if (copyEach) copy(next)
+                login(next)
+            }
+        }
+    }
+
+    private fun finishAttempt(name: String, confirmed: Boolean) {
+        inFlight = false
+        if (isDestroyed || isFinishing) return
+        val complete = confirmed || name in visible()
+        if (complete) {
+            GoogleAccountInbox.remove(this, name)
+            message = "Account added."
+        } else {
+            message = "Sign-in was not confirmed. This account remains pending."
+            if (batch) pausedOn = name
+        }
+        refresh()
+        if (complete) scheduleNext()
     }
 
     private fun login(name: String) {
-        if (busy) return
+        if (inFlight || !resumed || isFinishing || isDestroyed) return
+        if (name in visible()) {
+            finishAttempt(name, true)
+            return
+        }
         val manager = AccountManager.get(this)
-        if (runCatching { manager.getAccountsByType(GoogleAccountQueue.TYPE).any { it.name == name } }.getOrDefault(false)) {
-            GoogleAccountInbox.remove(this, name)
-            message = "This account is already visible in the guest."
-            render(); return
+        val available = runCatching { manager.authenticatorTypes.any { it.type == GoogleAccountQueue.TYPE } }.getOrDefault(false)
+        if (!available) {
+            // Pause once rather than trying every account on a guest without GMS.
+            batch = false; pausedOn = null
+            message = "Google authentication is not available in this guest."
+            refresh()
+            return
         }
-        if (manager.authenticatorTypes.none { it.type == GoogleAccountQueue.TYPE }) {
-            message = "Google Play services authentication is not available in this guest."
-            render(); return
-        }
-        busy = true
+        inFlight = true
         render()
         val options = Bundle().apply {
             putString(AccountManager.KEY_ACCOUNT_NAME, name)
@@ -85,23 +247,20 @@ class GoogleAccountsActivity : Activity() {
         }
         try {
             manager.addAccount(GoogleAccountQueue.TYPE, null, null, options, this, { future ->
-                // Read only the returned account identity. Never ask for an auth token.
-                val match = runCatching {
+                val confirmed = runCatching {
                     val result = future.result
-                    result.getString(AccountManager.KEY_ACCOUNT_NAME) == name &&
-                        result.getString(AccountManager.KEY_ACCOUNT_TYPE) == GoogleAccountQueue.TYPE
+                    GoogleAccountQueue.confirmed(name, result.getString(AccountManager.KEY_ACCOUNT_NAME),
+                        result.getString(AccountManager.KEY_ACCOUNT_TYPE))
                 }.getOrDefault(false)
-                if (match) GoogleAccountInbox.remove(applicationContext, name)
-                if (!isDestroyed) {
-                    busy = false
-                    message = if (match) "Account added." else "Sign-in not confirmed for this address. It remains in the list."
-                    render()
+                // Persist an explicit result even if the activity was recreated while signing in.
+                if (confirmed) {
+                    GoogleAccountInbox.remove(applicationContext, name)
+                    GoogleAccountNotifications.refresh(applicationContext)
                 }
-            }, null)
+                finishAttempt(name, confirmed)
+            }, handler)
         } catch (_: Exception) {
-            busy = false
-            message = "Could not open Google's sign-in screen."
-            render()
+            finishAttempt(name, false)
         }
     }
 }
