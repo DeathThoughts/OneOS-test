@@ -115,6 +115,12 @@ def main():
                  "app-android/app/src/main/kotlin/com/fahadali/oneos/ui/FindingsActivity.kt"):
         p = Path(path); data = p.read_text()
         data = re.sub(r"(?m)^import com\.fahadali\.oneos\.report\.ReportSender\n", "", data)
+        if path.endswith("/FindingsActivity.kt"):
+            # Upstream made the preview row clickable, but still tied it to Telegram.
+            # Our SendReportActivity opens fork GitHub issues, with no service gate.
+            data = data.replace("        // 0.5.46: this row looked like a greyed-out button; it opens Send to the OneOS team now.\n", "        // Open the fork's GitHub report flow from the preview row.\n")
+            data = data.replace("        val canSend = ReportSender.telegramSendOffered\n", "")
+            data = data.replace("onClick = if (canSend) ({ startActivity(SendReportActivity.intent(requireContext(), zip)) }) else null,", "onClick = { startActivity(SendReportActivity.intent(requireContext(), zip)) },")
         if "ReportSender." in data or "SendReportActivity.sentCode(" in data: raise ValueError("Unexpected report reference: " + path)
         p.write_text(data); stage(path)
     path = "app-android/app/build.gradle.kts"
