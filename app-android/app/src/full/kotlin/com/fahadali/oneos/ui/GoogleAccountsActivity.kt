@@ -6,7 +6,6 @@ import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
@@ -52,7 +51,6 @@ class GoogleAccountsActivity : Activity() {
         textSize = if (heading) 23f else 16f
         if (heading) setTypeface(typeface, android.graphics.Typeface.BOLD)
         setPadding(0, dp(8), 0, dp(8))
-        setTextIsSelectable(false)
     }
 
     private fun dialog(): AlertDialog.Builder = AlertDialog.Builder(this,
@@ -60,13 +58,9 @@ class GoogleAccountsActivity : Activity() {
     private var message = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        setTheme(if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
+        // Keep the app's existing OneUITheme; replacing the Activity theme at
+        // runtime can break OEM window initialization. Apply colors to views.
         super.onCreate(savedInstanceState)
-        window.setDecorFitsSystemWindows(false)
-        window.insetsController?.setSystemBarsAppearance(
-            if (dark) 0 else WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-        )
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         title = "Import Google accounts"
         names.addAll(visible())
@@ -81,14 +75,15 @@ class GoogleAccountsActivity : Activity() {
             setBackgroundColor(this@GoogleAccountsActivity.background)
             isFillViewport = true
             addView(column)
-            setOnApplyWindowInsetsListener { v, insets ->
-                val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-                v.setPadding(safe.left, safe.top, safe.right, safe.bottom)
-                insets
-            }
         }
         setContentView(scroll)
-        scroll.requestApplyInsets()
+        // Install the inset listener after the content and decor exist.
+        scroll.setOnApplyWindowInsetsListener { v, insets ->
+            val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            v.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            WindowInsets.CONSUMED
+        }
+        scroll.post { scroll.requestApplyInsets() }
         render()
     }
 
