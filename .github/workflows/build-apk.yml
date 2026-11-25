@@ -32,31 +32,29 @@ permissions:
 
 jobs:
   migrate-patch-payloads:
-    # Only the owner's integration branch may perform the initial copy. Other PRs verify it.
-    if: >-
-      github.repository == 'DeathThoughts/OneOS-test' && github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.head_ref == 'fix/restart-home-and-bundled-script'
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref_name == 'debug' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
     concurrency:
       group: fork-patch-payload-migration
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Verify and migrate pinned patch payloads
+      - name: Migrate all active pinned patch payloads
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/migrate-patch-payloads.py --publish --target "$GITHUB_SHA"
+        run: python3 scripts/migrate-all-patch-payloads.py --publish --target "$GITHUB_SHA"
 
   build:
+    needs: migrate-patch-payloads
     if: >-
-      github.ref_name == 'release' || github.ref_name == 'debug' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      !cancelled() && (needs.migrate-patch-payloads.result == 'success' || needs.migrate-patch-payloads.result == 'skipped') &&
+      (github.ref_name == 'release' || github.ref_name == 'debug' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +70,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ matrix.variant == 'debug' && github.ref_name == 'release' && 'debug' || github.sha }}
           persist-credentials: false
+
+      - name: Verify every active fork patch source before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/migrate-all-patch-payloads.py --check-catalog
+          python3 scripts/migrate-all-patch-payloads.py --verify
 
       - name: Check debug branch is based on this release
         if: matrix.variant == 'debug' && github.ref_name == 'release'
