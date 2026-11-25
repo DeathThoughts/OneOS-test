@@ -407,7 +407,7 @@ object ShellScan {
  * phone's user data, reboots, settings, package wipes or mounts.
  */
 object StageAudit {
-    val VERBS = listOf("guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "oneui-media", "debloat")
+    val VERBS = listOf("stock-parts", "guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "oneui-media", "debloat")
 
     val ALLOWED: Set<String> = setOf(
         "umask", "[", "echo", "printf", "id", "stat", "awk", "sed", "grep", "sort", "head", "tail", "cut", "tr", "wc",
@@ -483,6 +483,13 @@ object StageAudit {
         listOf("disable-user", "--user", "0", "\"\$2\""),
         listOf("enable", "--user", "0", "\"\$2\""),
     )
+
+    /**
+     * Bring apps' system apps (0.5.35, PR #328): bring_system_records lists One UI's system packages with
+     * their APK paths and uids (`pm list packages -s -f -U --user 0 "$@"`), a read; nothing else of pm.
+     */
+    private const val BRING_SYSTEM_FUNCTION = "bring_system_records"
+    private val BRING_SYSTEM_PM = listOf("list", "packages", "-s", "-f", "-U", "--user", "0", "\"\$@\"")
 
     /**
      * Bring apps (0.4.75): the script's reads of One UI's app data, never a
@@ -723,6 +730,7 @@ object StageAudit {
             val args = c.args
             val bringHost = c.function == BRING_HOST_VIEW_FUNCTION
             val bbOk = when (args.firstOrNull()) {
+                "sh" -> c.function == "do_stock_parts" && args == listOf("sh", "\"\$STAGE/stock_parts.sh\"", "\"\$STAGE\"", "\"\$BB\"")
                 "--list" -> true
                 "nsenter" -> args.subList(1, minOf(4, args.size)) == listOf("-t", "1", "-m")
                 "mount" -> bringHost && args.drop(1) in BB_BRING_MOUNTS
@@ -736,7 +744,8 @@ object StageAudit {
                     if (!purge) args.filter { it.startsWith("-") }.forEach { if (it != "-f") p += "line ${c.line}: rm $it" }
                 }
                 "pm" -> if (!(args.firstOrNull() == "path" && args.size == 2) && !(args == SELFUPDATE_PM && c.function == SELFUPDATE_FUNCTION) &&
-                    !(args in TOOL_APP_PM && c.function == TOOL_APP_FUNCTION)) {
+                    !(args in TOOL_APP_PM && c.function == TOOL_APP_FUNCTION) &&
+                    !(args == BRING_SYSTEM_PM && c.function == BRING_SYSTEM_FUNCTION)) {
                     p += "line ${c.line}: pm ${args.joinToString(" ")}"
                 }
                 "am" -> if (args != SELFUPDATE_AM || c.function != SELFUPDATE_FUNCTION) p += "line ${c.line}: am ${args.joinToString(" ")}"

@@ -78,6 +78,17 @@ jobs:
           python3 scripts/migrate-all-patch-payloads.py --check-catalog
           python3 scripts/migrate-all-patch-payloads.py --verify
 
+      - name: Verify optional guest partition image safety
+        run: |
+          python3 scripts/test-guest-refresh-rate.py
+          python3 scripts/test-guest-partitions.py
+          python3 scripts/test-guest-vendor.py
+          python3 scripts/test-stock-vendor.py
+          python3 scripts/test-stock-odm.py
+          python3 scripts/test-stock-parts-setup.py
+          sh -n switcher/assets/guest_partitions.sh
+          sh -n scripts/inspect-guest-vendor.sh
+
       - name: Check debug branch is based on this release
         if: matrix.variant == 'debug' && github.ref_name == 'release'
         env:

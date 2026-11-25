@@ -46,7 +46,7 @@ def cut(src, a, b):
 
 
 NOSYM = cut(PREP, 'no_symlink() {', '\n}\n') + '\n}\n'
-PREP_BLOCK = cut(PREP, 'PF_DIR="$STAGE/data/oneos_prof"\n', 'if [ -f "$STAGE/services_patched.jar" ]; then\n    $BB umount')
+PREP_BLOCK = cut(PREP, 'PF_DIR="$STAGE/data/oneos_prof"\n', 'guarded_services="$STAGE/services_patched.jar"')
 START_BLOCK = cut(START, '    P=/data/oneos_prof\n', '    t0=$(date +%s)\n    timeout 300 "$ODR"')
 
 

@@ -77,10 +77,28 @@ svc_pid() {
 # vold cannot be restarted (init.rc: reboot_on_failure), keystore2 is critical.
 HOST_NAMES="vold android.system.vold.IVold/default android.system.keystore2.IKeystoreService/default installd android.service.gatekeeper.IGateKeeperService"
 
+# Look at the services One UI actually registered before stopping it. Vendor
+# XML may also list an inactive SKU or a framework compatibility requirement.
+host_hal_backends() {
+    aidl=$("$BB" timeout 4 /system/bin/service list 2>/dev/null) || aidl=
+    printf '%s\n' "$aidl" | grep -qE '^[[:space:]]*[0-9]+[[:space:]]' || return 0
+    composer=; audio=
+    printf '%s\n' "$aidl" | grep -qE '[[:space:]]android\.hardware\.graphics\.composer3\.IComposer/default:' && composer=aidl
+    printf '%s\n' "$aidl" | grep -qE '[[:space:]]android\.hardware\.audio\.core\.IModule/default:' && audio=aidl
+    if [ -z "$composer" ] || [ -z "$audio" ]; then
+        hidl=$("$BB" timeout 4 /system/bin/lshal list -i --types=b 2>/dev/null) || hidl=
+        if [ -z "$composer" ] && printf '%s\n' "$hidl" | grep -qE '(^|[[:space:]])android\.hardware\.graphics\.composer@[0-9.]+::IComposer/default([[:space:]]|$)'; then composer=hidl; fi
+        if [ -z "$audio" ] && printf '%s\n' "$hidl" | grep -qE '(^|[[:space:]])android\.hardware\.audio@[0-9.]+::IDevicesFactory/default([[:space:]]|$)'; then audio=hidl; fi
+    fi
+    [ -z "$composer" ] || echo "composer=$composer"
+    [ -z "$audio" ] || echo "audio=$audio"
+}
+
 if [ "$1" = baseline ]; then
     [ -n "$BB" ] || { echo "In-place baseline: no busybox, not taken (the return will reboot)"; exit 0; }
     rm -rf "$BASE"; mkdir -p "$BASE" || exit 0
     cat /proc/sys/kernel/random/boot_id > "$BASE/boot_id" 2>/dev/null
+    ( host_hal_backends > "$BASE/hal_backends" ) &
     ( getprop > "$BASE/props" ) &
     ( getenforce > "$BASE/selinux" 2>&1 ) &
     ( apex_state > "$BASE/apex" ) &
@@ -140,7 +158,7 @@ fi
 # can fail the return.
 LOGS=/data/local/tmp/oneos_logs
 if [ -d "$LOGS" ] && [ ! -L "$LOGS" ]; then
-    for f in call_audio.log audio_keeper.log oneos_a2dp.log hyos_spawner.log dt2w.log; do
+    for f in call_audio.log audio_keeper.log oneos_a2dp.log hyos_spawner.log dt2w.log oneos_reverse_wireless.log oneos_guest_adbd.log; do
         [ -f "$S/data/$f" ] && [ ! -L "$S/data/$f" ] || continue
         rm -f "$LOGS/$f" 2>/dev/null
         cp "$S/data/$f" "$LOGS/$f" 2>/dev/null
@@ -275,6 +293,35 @@ kill -9 $(pidof surfaceflinger) 2>/dev/null || true
 # the pkill above may have done it already) before the CPU policies get their
 # full clock back, for One UI's SSRM to set its own.
 pkill -9 -f "oneos_heat_cap" 2>/dev/null || true
+# The ColorOS charging bridge (guest_start.sh): stopped first, then One UI's own values put back, the
+# ones guest_start.sh saved before the bridge started (oneos_charge_orig: "<node> <value>"), and only
+# where the session changed them. No saved file: the bridge never ran, nothing is written.
+pkill -9 -f oneos_charging_bridge.sh 2>/dev/null || true
+if [ -f "$S/data/oneos_charge_orig" ]; then
+    while read -r node val; do
+        case "$node" in
+            /sys/class/power_supply/battery/wc_tx_en|/sys/class/power_supply/battery/wc_tx_stop_capacity|\
+            /sys/class/power_supply/battery/pass_through|/sys/class/power_supply/battery/batt_hv_wireless_pad_ctrl) ;;
+            *) continue ;;
+        esac
+        case "$val" in ''|*[!0-9]*) continue ;; esac
+        [ -w "$node" ] && [ "$(cat "$node" 2>/dev/null)" != "$val" ] && echo "$val" > "$node" 2>/dev/null &&
+            echo "Charging: $node back to One UI's $val"
+    done < "$S/data/oneos_charge_orig"
+    rm -f "$S/data/oneos_charge_orig"
+fi
+rm -f "$S/data/oneos_qc_last"
+gpid=""
+[ -f "$S/data/oneos_guest_adbd.pid" ] && gpid=$(cat "$S/data/oneos_guest_adbd.pid" 2>/dev/null)
+rm -f "$S/data/oneos_guest_adbd.pid"
+pkill -9 -f oneos_guest_adbd.sh 2>/dev/null || true
+case "$gpid" in ""|*[!0-9]*) ;; *)
+    # Only the guest's own adbd: a reused pid could be One UI's adbd, which also matches '/adbd'.
+    if tr '\0' ' ' < "/proc/$gpid/cmdline" 2>/dev/null | grep -q '/adbd' &&
+       [ "$(readlink "/proc/$gpid/ns/mnt" 2>/dev/null)" != "$(readlink /proc/1/ns/mnt 2>/dev/null)" ]; then
+        kill -9 "$gpid" 2>/dev/null || true
+    fi ;;
+esac
 if [ -f $S/heat_cap.active ]; then
     hc=""
     # Samsung's CPU ceiling vote, if the heat cap released it (power saving was
@@ -443,6 +490,12 @@ done
 if [ -n "$zs_left" ]; then
     echo "!!! still bound:$zs_left (One UI's zygote could not make its sockets); rebooting"
     ONEOS_RETURN_MODE=reboot
+fi
+
+# The guest's adb keys, bound over One UI's /data/misc/adb by guest_prepare.sh.
+if zs_bound /data/misc/adb; then
+    if [ -n "$BB" ]; then in_init_ns "$BB" umount -l /data/misc/adb 2>/dev/null; else in_init_ns umount -D -l /data/misc/adb 2>/dev/null; fi
+    zs_bound /data/misc/adb || echo "Took the guest's adb keys off /data/misc/adb"
 fi
 
 # The Bluetooth audio bridge (oneos_switch.sh, Samsung-only HAL phones): stop
@@ -749,6 +802,74 @@ done
 # which would otherwise see /local/tmp/oneos/ in field 4 and reboot.
 /system/bin/sh "$S/libsec-ril-patch.sh" restore >>"$IPLOG" 2>&1 || \
     say "!!! inbound SMS: the vendor RIL patch was not removed; see return_inplace.log"
+SENSORS_HAL_RESTORED=0
+restore_hover_prox_patch() {
+    HPROX_LIB=/vendor/lib64/sensors.inputvirtual.so
+    HPROX_SRC=$("$BB" awk -v mp="$HPROX_LIB" '$5 == mp { print $4; exit }' /proc/1/mountinfo 2>/dev/null)
+    if [ -n "$HPROX_SRC" ]; then
+        case "$HPROX_SRC" in
+            *sensors.inputvirtual.session.so)
+                "$BB" umount "$HPROX_LIB" 2>/dev/null || "$BB" umount -l "$HPROX_LIB" 2>/dev/null
+                if "$BB" grep -Fq " $HPROX_LIB " /proc/1/mountinfo 2>/dev/null; then
+                    say "!!! Proximity: $HPROX_LIB is still bind-mounted; leaving for next return"
+                    return 1
+                fi
+                SENSORS_HAL_RESTORED=1
+                say "Proximity: removed $HPROX_LIB patch"
+                ;;
+        esac
+    fi
+    # The touch panel's ear detection only if this session's proximity patch was in place (it turns it on).
+    if [ -f "$S/session/prox_patch.active" ]; then
+        [ -w /sys/class/sec/tsp/cmd ] && echo "ear_detect_enable,0" > /sys/class/sec/tsp/cmd 2>/dev/null || true
+    fi
+    rm -f "$S/session/sensors.inputvirtual.session.so" "$S/session/prox_patch.active"
+}
+restore_cam_sensors_patch() {
+    CS_LIST="$S/session/cam_sensors_patch.list"
+    CS_MPS=""
+    cs_add_mp() {
+        case " $CS_MPS " in *" $1 "*) ;; *) CS_MPS="${CS_MPS:+$CS_MPS }$1" ;; esac
+    }
+    if [ -f "$CS_LIST" ]; then
+        while read -r mp patched || [ -n "$mp" ]; do
+            [ -n "$mp" ] && [ "$mp" != "/vendor/lib64/sensors.inputvirtual.so" ] && cs_add_mp "$mp"
+        done < "$CS_LIST"
+    fi
+    for mp in $("$BB" awk '$5 ~ /^\/vendor\/lib64\// && $5 != "/vendor/lib64/sensors.inputvirtual.so" && $4 ~ /\.session\.so$/ { print $5 }' /proc/1/mountinfo 2>/dev/null); do
+        [ -n "$mp" ] && cs_add_mp "$mp"
+    done
+    for mp in $CS_MPS; do
+        src=$("$BB" awk -v mp="$mp" '$5 == mp { print $4; exit }' /proc/1/mountinfo 2>/dev/null)
+        case "$src" in
+            *.session.so)
+                "$BB" umount "$mp" 2>/dev/null || "$BB" umount -l "$mp" 2>/dev/null
+                if "$BB" grep -Fq " $mp " /proc/1/mountinfo 2>/dev/null; then
+                    say "!!! Camera sensors: $mp is still bind-mounted; leaving for next return"
+                else
+                    SENSORS_HAL_RESTORED=1
+                    say "Camera sensors: removed $mp patch"
+                fi
+                ;;
+        esac
+    done
+    # Only this patch's own copies, and only those nothing has bound any more: a mounted copy deleted here would
+    # show as "//deleted" and no longer be recognised; the inbound SMS (libsec-ril.session.so) and proximity
+    # (sensors.inputvirtual.session.so) copies are their own restores' business.
+    for cf in "$S/session/"*.session.so; do
+        [ -f "$cf" ] || continue
+        case "${cf##*/}" in libsec-ril.session.so|sensors.inputvirtual.session.so) continue ;; esac
+        "$BB" awk -v n="/${cf##*/}" 'substr($4, length($4) - length(n) + 1) == n { f = 1 } END { exit !f }' /proc/1/mountinfo 2>/dev/null && continue
+        rm -f "$cf"
+    done
+    rm -f "$CS_LIST"
+}
+restore_hover_prox_patch >>"$IPLOG" 2>&1 || true
+restore_cam_sensors_patch >>"$IPLOG" 2>&1 || true
+if [ "$SENSORS_HAL_RESTORED" = 1 ]; then
+    /system/bin/setprop ctl.restart vendor.sensors-hal-multihal 2>/dev/null || true
+    say "Sensors HAL: vendor.sensors-hal-multihal restarted after removing session sensor patches" >>"$IPLOG" 2>&1
+fi
 sleep 0.5
 # Stage mounts another mount namespace still holds (run 45): Android's bootstrap
 # namespace (early vendor daemons, kernel threads) gets its own copy of what the
@@ -765,6 +886,33 @@ sleep 0.5
 # same with mount --make-rprivate in [2/4]. And selinuxfs is checked after.
 SEFS_BEFORE=0; [ -e /sys/fs/selinux/enforce ] && SEFS_BEFORE=1
 I_NS=$(readlink /proc/1/ns/mnt 2>/dev/null)
+# The bootstrap namespace (kernel threads, One UI's early vendor daemons): never killed in.
+B_NS=$(readlink /proc/2/ns/mnt 2>/dev/null)
+SELF_NS=$(readlink /proc/$$/ns/mnt 2>/dev/null)
+# 0.5.36 (0.5.35 report 9e91c506, A57 on ColorOS): a guest dex2oat (an app compile, hung for two hours,
+# frozen and thawed by ColorOS's HANS) in a mount namespace of its own outlived the kill loop, kept three
+# samcam binds from the stage, and the check below rebooted the phone. A namespace other than init's
+# and the bootstrap one that holds the stage was made in the session: its processes are killed (thawed
+# first: a frozen cgroup holds back the kill) and its stage mounts tried again. The alternative is the
+# failsafe reboot.
+kill_ns() { # <mnt ns>: kills every process in it, waits up to 3 s; prints what it killed
+    kl=""
+    for q in /proc/[0-9]*; do
+        [ "$(readlink "$q/ns/mnt" 2>/dev/null)" = "$1" ] || continue
+        cg=$("$BB" awk -F: '$1 == "0" { print $3; exit }' "$q/cgroup" 2>/dev/null)
+        case "$cg" in /*) [ -f "/sys/fs/cgroup$cg/cgroup.freeze" ] && echo 0 > "/sys/fs/cgroup$cg/cgroup.freeze" 2>/dev/null ;; esac
+        kl="$kl ${q##*/}:$(cat "$q/comm" 2>/dev/null)"
+        kill -9 "${q##*/}" 2>/dev/null
+    done
+    w=0
+    while [ $w -lt 15 ]; do
+        al=0
+        for q in /proc/[0-9]*; do [ "$(readlink "$q/ns/mnt" 2>/dev/null)" = "$1" ] && { al=1; break; }; done
+        [ $al = 0 ] && break
+        sleep 0.2; w=$((w + 1))
+    done
+    echo "${kl# }"
+}
 seen=" "
 for p in /proc/[0-9]*; do
     n=$(readlink "$p/ns/mnt" 2>/dev/null) || continue
@@ -783,6 +931,9 @@ for p in /proc/[0-9]*; do
     done
     if [ $pv != $t ]; then
         say "stage mounts in another mount namespace ($n, pid ${p##*/} $(cat "$p/comm" 2>/dev/null)): only $pv of $t could be made private, none unmounted there"
+        if [ -n "$B_NS" ] && [ "$n" != "$B_NS" ] && [ "$n" != "$SELF_NS" ]; then
+            say "  killed the session's processes in it: $(kill_ns "$n")"
+        fi
         continue
     fi
     err=""
@@ -793,7 +944,10 @@ for p in /proc/[0-9]*; do
     # 0.4.50: who holds what stays (owner's Fold, 2026-11-04 22:02: a long-lived sh kept rootfs, proc and
     # sys, and the failsafe below rebooted): the namespace's processes by name, parent, uid, and the
     # first unmount error. Read from /proc only (no binder, no ps).
-    if [ $u != $t ]; then
+    if [ $u != $t ] && [ -n "$B_NS" ] && [ "$n" != "$B_NS" ] && [ "$n" != "$SELF_NS" ]; then
+        say "  first unmount error there: $err"
+        say "  killed the session's processes in it: $(kill_ns "$n")"
+    elif [ $u != $t ]; then
         say "  first unmount error there: $err"
         for q in /proc/[0-9]*; do
             [ "$(readlink "$q/ns/mnt" 2>/dev/null)" = "$n" ] || continue
@@ -1028,7 +1182,9 @@ setprop ctl.restart "$COMPOSER_SVC"
 # (android.hardware.graphics.composer@2.x): waiting for the AIDL one rebooted
 # every return there (1f4f0c7f). The vendor manifest says which one this phone
 # serves; lshal, bounded, for the HIDL one.
-if "$BB" grep -rqs 'android.hardware.graphics.composer3' /vendor/etc/vintf/; then
+if grep -qx 'composer=aidl' "$BASE/hal_backends" 2>/dev/null ||
+   { ! grep -qx 'composer=hidl' "$BASE/hal_backends" 2>/dev/null &&
+     "$BB" grep -rqs 'android.hardware.graphics.composer3' /vendor/etc/vintf/; }; then
     wait_found android.hardware.graphics.composer3.IComposer/default 10 || failsafe "the display composer did not come back"
 else
     sleep 1  # past the old instance's registration

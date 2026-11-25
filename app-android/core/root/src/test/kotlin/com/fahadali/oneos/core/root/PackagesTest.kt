@@ -83,9 +83,13 @@ class PackagesTest {
         // The manager is built from :guest; it is deliberately absent in a clean
         // source checkout. Full APK assembly separately requires its real bytes.
         val generated = setOf("guest_manager.apk")
-        assertEquals((names - setOf("oneos_tunnel.sh", "7zz")) + generated, shipped.toSet())
+        val externalScripts = setOf("pyb110-scheduler-trial.sh")
+        assertEquals((names - setOf("oneos_tunnel.sh", "7zz")) + generated + externalScripts, shipped.toSet())
         val build = File(Shipped.appAssets, "../../../build.gradle.kts").readText()
-        for (n in shipped) assertTrue("app/build.gradle.kts does not ship $n", build.contains("\"$n\" to File(repoRoot, \"switcher/assets/$n\")"))
+        for (n in shipped) {
+            val folder = if (n in externalScripts) "scripts" else "switcher/assets"
+            assertTrue("app/build.gradle.kts does not ship $n", build.contains("\"$n\" to File(repoRoot, \"$folder/$n\")"))
+        }
         assertTrue(build.contains("val switcherNotShipped = setOf(\"oneos_tunnel.sh\", \"7zz\")"))
     }
 }

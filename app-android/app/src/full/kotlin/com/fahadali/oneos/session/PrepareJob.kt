@@ -541,7 +541,7 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
 
     /**
      * The picked archive, unpacked on the fly into root's stdin: SHA-256 and size
-     * of the archive and of the unpacked bytes, the ext4 magic at byte 1080,
+     * of the archive and of the unpacked bytes, the raw filesystem header,
      * and the archive decoder's CRC and size checks at the end. Anything wrong
      * stops the stream (RootShell then kills su, so root never keeps a short
      * image; its own size and hash checks refuse it anyway).
@@ -587,28 +587,26 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                     SingleImageZipInputStream(counting, entryName, image.rawBytes)
                 }
                 val buf = ByteArray(1 shl 18)
-                val head = ByteArray(2)
+                val head = ByteArray(Images.RAW_HEADER_BYTES)
                 decoded.use {
                     while (true) {
                         if (cancelled) throw IOException("stopped")
                         val n = decoded.read(buf)
                         if (n < 0) break
-                        // ext4 superblock magic 0xEF53, little endian at byte 1080.
-                        for (k in 0 until n) {
-                            val at = rawBytes + k
-                            if (at == Images.EXT4_MAGIC_OFFSET) head[0] = buf[k]
-                            if (at == Images.EXT4_MAGIC_OFFSET + 1) {
-                                head[1] = buf[k]
-                                val magic = (head[0].toInt() and 0xff) or ((head[1].toInt() and 0xff) shl 8)
-                                if (magic != Images.EXT4_MAGIC) throw IOException("not an ext4 image")
+                        if (rawBytes < head.size) {
+                            val start = rawBytes.toInt()
+                            val count = minOf(n, head.size - start)
+                            buf.copyInto(head, start, 0, count)
+                            if (start + count == head.size && Images.rawFilesystem(head) == null) {
+                                throw IOException("expected a raw ext4 or EROFS image")
                             }
-                            if (at > Images.EXT4_MAGIC_OFFSET + 1) break
                         }
                         rawMd.update(buf, 0, n)
                         rawBytes += n
                         if (rawBytes > image.rawBytes) throw IOException("the image unpacks to more than ${image.rawBytes} bytes")
                         out.write(buf, 0, n)
                     }
+                    if (rawBytes < head.size) throw IOException("truncated raw image header")
                     // The ZIP central directory and any unread trailing bytes count for the archive hash.
                     // Drain before closing the decoder, which closes the counting stream too.
                     do {

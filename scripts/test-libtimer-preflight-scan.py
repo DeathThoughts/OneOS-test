@@ -6,7 +6,7 @@ one awk, not a readlink fork per process (S25 Ultra session c2d30e95cde9775b: 9 
 the same scan (lt_list), every 6th round. Runs the real snippets against a fake proc tree with kill
 and sleep stubbed (no process is touched), in every shell present, with the system and busybox ls/awk."""
 from pathlib import Path
-import os, shutil, subprocess, tempfile, unittest
+import os, shlex, shutil, subprocess, tempfile, unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / 'switcher/assets/oneos_switch.sh').read_text()
 START = SCRIPT.index('libtimer_exe() {')
@@ -46,7 +46,15 @@ def run(shell, code, proc, path=None, stop=True):
     env = {**os.environ, 'P': './' + proc.name, 'STOP': '1' if stop else '0'}
     if path:
         env['PATH'] = path + os.pathsep + env['PATH']
-    r = subprocess.run(argv + ['-uc', PRE + code + 'echo no refusal\n'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=proc.parent)
+    # BusyBox ash may prefer compiled-in applets over PATH. Explicit functions
+    # keep the selected test tools (including broken ls/readlink) in every shell.
+    dispatch = ''
+    if path:
+        for name in ('ls', 'awk', 'readlink'):
+            tool = Path(path) / name
+            if tool.is_file():
+                dispatch += f'{name}() {{ {shlex.quote(str(tool))} "$@"; }}\n'
+    r = subprocess.run(argv + ['-uc', PRE + dispatch + code + 'echo no refusal\n'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=proc.parent)
     return r.returncode, r.stdout.strip()
 
 

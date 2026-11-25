@@ -22,6 +22,20 @@ class StageAuditTest {
     }
 
     @Test
+    fun stockSnapshotsDelegateOnlyToTheVerifiedStageHelper() {
+        for (mode in listOf("on", "off")) assertTrue(RootScript.problems(RootScript.Verb.STOCK_PARTS, listOf(mode)).isEmpty())
+        for (args in listOf(emptyList(), listOf("on", "off"), listOf("/vendor"), listOf("on;reboot"))) {
+            assertTrue(RootScript.problems(RootScript.Verb.STOCK_PARTS, args).isNotEmpty())
+        }
+        val call = "\"\$BB\" sh \"\$STAGE/stock_parts.sh\" \"\$STAGE\" \"\$BB\""
+        assertTrue(script.contains(call))
+        for (bad in listOf(
+            "\"\$BB\" sh \"/tmp/stock_parts.sh\" \"\$STAGE\" \"\$BB\"",
+            "\"\$BB\" sh \"\$STAGE/stock_parts.sh\" /vendor \"\$BB\"",
+        )) assertTrue(StageAudit.audit(script.replace(call, bad)).isNotEmpty())
+    }
+
+    @Test
     fun selfUpdateGetsNoMoreThanItsOwnInstall() {
         fun bad(from: String, to: String) {
             assertTrue("no '$from' in the script", script.contains(from))
@@ -341,7 +355,9 @@ class StageAuditTest {
         assertTrue(data.indexOf(StageStatus.PIXEL_WORD) < data.indexOf("\"${StageStatus.HYPEROS_WORD}\""))
         assertTrue(data.contains("com.coloros."))
         val status = File(Shipped.fullAssets, "root/status.list").readText()
-        assertTrue(status.contains("for w in com.oplus. com.coloros. org.lineageos. ${StageStatus.PIXEL_WORD} ${StageStatus.INFINITYX_WORD} ${StageStatus.HYPEROS_WORD} ${StageStatus.OXYGENOS_WORD} ${StageStatus.ORIGINOS_WORD}; do"))
+        assertTrue(status.contains("for w in com.oplus. com.coloros. org.lineageos. ${StageStatus.PIXEL_WORD} ${StageStatus.INFINITYX_WORD} ${StageStatus.HYPEROS_WORD} ${StageStatus.OXYGENOS_WORD} ${StageStatus.ORIGINOS_WORD} ${StageStatus.PIXELOS_WORD}; do"))
+        // 0.5.35: PixelOS's updater first (its data has Pixel's launcher and LineageOS packages too).
+        assertTrue(data.indexOf(StageStatus.PIXELOS_WORD) in 0 until data.indexOf(StageStatus.INFINITYX_WORD))
         // 0.4.67: OxygenOS's word right after Infinity-X's and before ColorOS's (its data has com.oplus. too).
         assertTrue(data.indexOf(StageStatus.INFINITYX_WORD) < data.indexOf(StageStatus.OXYGENOS_WORD))
         assertTrue(data.indexOf(StageStatus.OXYGENOS_WORD) in 0 until data.indexOf("com.oplus."))
@@ -361,7 +377,8 @@ class StageAuditTest {
             PackageSets.X9U_IN_1105_SULTRA.names.toSet() - common.toSet(),
         )
         // 0.4.59: the bar Pixel sets add double tap to sleep (their own SystemUI and launcher) to SET_PIXEL.
-        assertEquals(PackageSets.PIXEL_SULTRA.names.toSet() - setOf("OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk"),
+        assertEquals(PackageSets.PIXEL_SULTRA.names.toSet() - setOf("OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk",
+                "framework_patched_oneui95.jar", "libcamera_client_patched_oneui95.so"),
             shVar("SET_PIXEL").split(' ').toSet())
         val setFiles = Regex("""^\s+([a-z0-9-]+)\) echo "\${'$'}(SET_[A-Z]+)([^"]*)" ;;$""", RegexOption.MULTILINE)
             .findAll(script).associate { it.groupValues[1] to (shVar(it.groupValues[2]).split(' ') + it.groupValues[3].split(' ').filter { n -> n.isNotEmpty() }) }
@@ -374,7 +391,7 @@ class StageAuditTest {
         val exec = Regex("""^\s+(\S+)\) echo 0755 ;;$""", RegexOption.MULTILINE).find(function("file_mode"))!!.groupValues[1].split('|')
         fun mode(n: String) = if (exec.any { glob(it, n) }) "0755" else "0644"
         for (set in PackageSets.ALL) for (f in set.files) assertEquals("${set.id} ${f.name}", f.mode, mode(f.name))
-        val notExecutable = setOf("guest_zygisk.so", "guest_vector.bundle", "guest_manager.apk", "oneos_boot_icon.png", "OneOSBootStatus.dex", "host_installd.txt", "OneOSEdmStub.dex", "OneOSOverlayDimen.dex", "OneOSFold8Geometry.dex")
+        val notExecutable = setOf("guest_zygisk.so", "guest_vector.bundle", "guest_manager.apk", "oneos_boot_icon.png", "OneOSBootStatus.dex", "host_installd.txt", "OneOSEdmStub.dex", "OneOSOverlayDimen.dex", "OneOSPixelCorners.apk", "OneOSFold8Geometry.dex", "OneOSGalleryStub.apk", "OneOSRcdCorners.apk")
         for (n in RootScript.SCRIPTS) assertEquals(n, if (n in notExecutable) "0644" else "0755", mode(n))
         // session.env values: what root accepts is what the app generates (StageScriptTest runs it).
         for (p in enabled) SessionEnv.generate(p)

@@ -222,8 +222,8 @@ fi
 if [ "$1" != "--scripts-only" ]; then
     IMG="$1"
     [ -f "$IMG" ] || { echo "image not found: $IMG" >&2; exit 1; }
-    # ext4 only: guest_prepare.sh loop-mounts system.raw as ext4.
-    file -L "$IMG" | grep -q "ext[234]" || { echo "$IMG is not an ext4 image" >&2; exit 1; }
+    . "$ROOT/switcher/assets/guest_partitions.sh"
+    oneos_image_fs "$IMG" >/dev/null || { echo "$IMG must be a raw ext4 or EROFS image" >&2; exit 1; }
     GZ="$IMG.gz"
     [ -f "$GZ" ] || gzip -6 -c "$IMG" > "$GZ"
     want=$(sha256sum "$IMG" | cut -d' ' -f1)

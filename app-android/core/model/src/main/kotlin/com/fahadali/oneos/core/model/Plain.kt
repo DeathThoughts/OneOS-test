@@ -493,7 +493,7 @@ object Plain {
                 "One UI changed during setup", "Restart your phone and try again.", FixAction.NONE, null,
             )
             "sha-256 differs" in p || "the .gz has" in p || "unpacked to" in p || "unpacks to more" in p ||
-                "not an ext4 image" in p || "corrupt" in p || "crc" in p || "unexpected end" in p ->
+                "raw ext4 or erofs image" in p || "truncated raw image" in p || "not an ext4 image" in p || "corrupt" in p || "crc" in p || "unexpected end" in p ->
                 PlainMessage("The download is damaged", "It may not have finished. Download $system again.", FixAction.DOWNLOAD_AGAIN, defaultLabel(FixAction.DOWNLOAD_AGAIN))
             "ioexception" in p || "could not read" in p || "cannot open the picked file" in p -> PlainMessage(
                 "Couldn't read the download", "Choose the file again.", FixAction.CHOOSE_FILE, defaultLabel(FixAction.CHOOSE_FILE),
