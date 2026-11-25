@@ -3,6 +3,11 @@ package com.fahadali.oneos.guest
 import android.Manifest
 import android.accounts.AccountManager
 import android.app.Activity
+import android.content.res.Configuration
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -24,6 +29,27 @@ import com.fahadali.oneos.core.model.GoogleAccountQueue
 /** A foreground queue, not a login service. Google owns all password/passkey/security UI. */
 class GoogleAccountsActivity : Activity() {
     private lateinit var column: LinearLayout
+    private val dark: Boolean get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    private val foreground: Int get() = if (dark) Color.rgb(242, 242, 242) else Color.rgb(25, 25, 25)
+    private val background: Int get() = if (dark) Color.rgb(18, 18, 18) else Color.rgb(250, 250, 250)
+    private val accent: Int get() = if (dark) Color.rgb(150, 192, 255) else Color.rgb(25, 76, 170)
+    private fun dp(n: Int): Int = (n * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun textColors(): ColorStateList = ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(if (dark) Color.rgb(173, 173, 173) else Color.rgb(95, 95, 95), foreground)
+    )
+    private fun line(value: String, heading: Boolean = false): TextView = TextView(this).apply {
+        text = value
+        setTextColor(this@GoogleAccountsActivity.foreground)
+        textSize = if (heading) 23f else 16f
+        if (heading) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(8), 0, dp(8))
+        isTextSelectable = false
+    }
+
+    private fun dialog(): AlertDialog.Builder = AlertDialog.Builder(this,
+        if (dark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert)
     private val handler = Handler(Looper.getMainLooper())
     private val attempted = linkedSetOf<String>()
     private var batch = false
@@ -35,7 +61,13 @@ class GoogleAccountsActivity : Activity() {
     private var message = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(savedInstanceState)
+        window.setDecorFitsSystemWindows(false)
+        window.insetsController?.setSystemBarsAppearance(
+            if (dark) 0 else WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        )
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         title = "Import Google accounts"
         // After a process recreation, keep the persisted queue but require an explicit resume.
@@ -46,7 +78,18 @@ class GoogleAccountsActivity : Activity() {
             val pad = (20 * resources.displayMetrics.density).toInt()
             setPadding(pad, pad, pad, pad)
         }
-        setContentView(ScrollView(this).apply { addView(column) })
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(this@GoogleAccountsActivity.background)
+            isFillViewport = true
+            addView(column)
+            setOnApplyWindowInsetsListener { v, insets ->
+                val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                v.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+                insets
+            }
+        }
+        setContentView(scroll)
+        scroll.requestApplyInsets()
     }
 
     override fun onResume() {
@@ -90,28 +133,39 @@ class GoogleAccountsActivity : Activity() {
     }
 
     private fun button(label: String, enabled: Boolean = !inFlight, action: () -> Unit) {
-        column.addView(Button(this).apply { text = label; isEnabled = enabled; setOnClickListener { action() } })
+        column.addView(Button(this).apply {
+            text = label
+            isAllCaps = false
+            isEnabled = enabled
+            setTextColor(textColors())
+            backgroundTintList = ColorStateList.valueOf(if (dark) Color.rgb(49, 49, 49) else Color.rgb(226, 233, 245))
+            minHeight = dp(48)
+            setOnClickListener { action() }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(2) })
     }
 
     private fun render() {
         if (isDestroyed || !::column.isInitialized) return
         column.removeAllViews()
         val accounts = GoogleAccountInbox.load(this)
-        column.addView(TextView(this).apply {
-            text = "${accounts.size} Google accounts pending. Google handles sign-in, passkeys and security confirmations. If a login hint is ignored, use Copy email."
-        })
-        if (message.isNotEmpty()) column.addView(TextView(this).apply { text = message })
+        column.addView(line("Import Google accounts", heading = true))
+        column.addView(line("${accounts.size} Google accounts pending. Google handles sign-in, passkeys and security confirmations. If a login hint is ignored, use Copy email."))
+        if (message.isNotEmpty()) column.addView(line(message))
+        if (inFlight) column.addView(android.widget.ProgressBar(this).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(accent)
+        }, LinearLayout.LayoutParams(dp(28), dp(28)))
         if (accounts.isNotEmpty()) {
             button("Sign in all", !inFlight && !batch) { beginBatch(false) }
             button("Sign in all + copy each email", !inFlight && !batch) {
-                AlertDialog.Builder(this@GoogleAccountsActivity)
+                dialog()
                     .setMessage("Copy each address to the clipboard immediately before opening Google's sign-in. Paste it if needed. No passwords are copied.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Continue") { _, _ -> beginBatch(true) }.show()
             }
         }
         val paused = pausedOn
         if (batch && paused != null) {
-            column.addView(TextView(this).apply { text = "Not confirmed: $paused" })
+            column.addView(line("Not confirmed: $paused"))
             button("Retry this account") {
                 pausedOn = null
                 login(paused)
@@ -127,7 +181,7 @@ class GoogleAccountsActivity : Activity() {
             refresh()
         }
         for (name in accounts) {
-            column.addView(TextView(this).apply { text = name; textSize = 17f })
+            column.addView(line(name).apply { textSize = 17f; setTypeface(typeface, android.graphics.Typeface.BOLD) })
             button("Sign in with Google", !inFlight && !batch) { login(name) }
             button("Copy email and open Google sign-in", !inFlight && !batch) { copy(name); login(name) }
             button("Copy email", !inFlight) { copy(name); render() }
@@ -136,7 +190,7 @@ class GoogleAccountsActivity : Activity() {
                 openAccountSettings(true)
             }
             button("Already signed in / remove from queue", !inFlight && !batch) {
-                AlertDialog.Builder(this@GoogleAccountsActivity)
+                dialog()
                     .setMessage("Remove this address from the pending list? This does not change the Google account itself.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
                         GoogleAccountInbox.remove(this, name); refresh()
@@ -154,7 +208,7 @@ class GoogleAccountsActivity : Activity() {
                 refresh()
             }
             button("Clear pending accounts", !inFlight && !batch) {
-                AlertDialog.Builder(this@GoogleAccountsActivity).setMessage("Delete all pending addresses? Signed-in accounts are not removed.")
+                dialog().setMessage("Delete all pending addresses? Signed-in accounts are not removed.")
                     .setNegativeButton("Cancel", null).setPositiveButton("Clear") { _, _ -> GoogleAccountInbox.clear(this); refresh() }.show()
             }
         }

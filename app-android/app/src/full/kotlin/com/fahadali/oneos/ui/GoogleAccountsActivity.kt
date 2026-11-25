@@ -2,6 +2,11 @@ package com.fahadali.oneos.ui
 
 import android.accounts.AccountManager
 import android.app.Activity
+import android.content.res.Configuration
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
@@ -31,10 +36,37 @@ class GoogleAccountsActivity : Activity() {
     private val names = linkedSetOf<String>()
     private var busy = false
     private lateinit var column: LinearLayout
+    private val dark: Boolean get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    private val foreground: Int get() = if (dark) Color.rgb(242, 242, 242) else Color.rgb(25, 25, 25)
+    private val background: Int get() = if (dark) Color.rgb(18, 18, 18) else Color.rgb(250, 250, 250)
+    private val accent: Int get() = if (dark) Color.rgb(150, 192, 255) else Color.rgb(25, 76, 170)
+    private fun dp(n: Int): Int = (n * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun textColors(): ColorStateList = ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(if (dark) Color.rgb(173, 173, 173) else Color.rgb(95, 95, 95), foreground)
+    )
+    private fun line(value: String, heading: Boolean = false): TextView = TextView(this).apply {
+        text = value
+        setTextColor(this@GoogleAccountsActivity.foreground)
+        textSize = if (heading) 23f else 16f
+        if (heading) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(8), 0, dp(8))
+        isTextSelectable = false
+    }
+
+    private fun dialog(): AlertDialog.Builder = AlertDialog.Builder(this,
+        if (dark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert)
     private var message = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
         super.onCreate(savedInstanceState)
+        window.setDecorFitsSystemWindows(false)
+        window.insetsController?.setSystemBarsAppearance(
+            if (dark) 0 else WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        )
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         title = "Import Google accounts"
         names.addAll(visible())
@@ -45,7 +77,18 @@ class GoogleAccountsActivity : Activity() {
             val pad = (20 * resources.displayMetrics.density).toInt()
             setPadding(pad, pad, pad, pad)
         }
-        setContentView(ScrollView(this).apply { addView(column) })
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(this@GoogleAccountsActivity.background)
+            isFillViewport = true
+            addView(column)
+            setOnApplyWindowInsetsListener { v, insets ->
+                val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                v.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+                insets
+            }
+        }
+        setContentView(scroll)
+        scroll.requestApplyInsets()
         render()
     }
 
@@ -60,31 +103,56 @@ class GoogleAccountsActivity : Activity() {
     }
 
     private fun button(label: String, action: () -> Unit) {
-        column.addView(Button(this).apply { text = label; isEnabled = !busy; setOnClickListener { action() } })
+        column.addView(Button(this).apply {
+            text = label
+            isAllCaps = false
+            isEnabled = !busy
+            setTextColor(textColors())
+            backgroundTintList = ColorStateList.valueOf(if (dark) Color.rgb(49, 49, 49) else Color.rgb(226, 233, 245))
+            minHeight = dp(48)
+            setOnClickListener { action() }
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6); bottomMargin = dp(2) })
     }
 
     private fun render() {
         column.removeAllViews()
-        column.addView(TextView(this).apply {
-            text = "Import account addresses to the prepared guest. Google will handle authentication there. No passwords or tokens are copied. Accounts not visible to OneOS can be selected using Android's account picker."
-        })
-        val count = TextView(this)
+        column.addView(line("Import Google accounts", heading = true))
+        column.addView(line("Select the accounts to use in the guest. Google handles authentication; no passwords or tokens are copied."))
+        if (message.isNotEmpty()) column.addView(line(message))
+        if (busy) column.addView(android.widget.ProgressBar(this).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(accent)
+        }, LinearLayout.LayoutParams(dp(28), dp(28)))
+        val count = line("")
         fun updateCount() {
-            count.text = if (names.isEmpty()) "No accounts are visible yet. Tap Choose another Google account to select an existing account in Android's picker."
-                else "${selected.size} selected / ${names.size} available. Select any additional accounts with the picker."
+            count.text = if (names.isEmpty()) "No accounts are visible yet. Use the Android account picker below to grant visibility."
+                else "${selected.size} selected / ${names.size} available. Tap any account to select or deselect it."
         }
         updateCount()
         column.addView(count)
+        if (names.isNotEmpty()) {
+            button("Select all accounts") { selected.addAll(names); render() }
+            button("Deselect all accounts") { selected.clear(); render() }
+        }
         for (name in names.sorted()) {
             column.addView(CheckBox(this).apply {
                 text = name
+                setTextColor(textColors())
+                buttonTintList = ColorStateList.valueOf(accent)
+                minHeight = dp(48)
+                setPadding(dp(4), dp(4), dp(4), dp(4))
                 isChecked = name in selected
                 isEnabled = !busy
                 setOnCheckedChangeListener { _, checked -> if (checked) selected.add(name) else selected.remove(name); updateCount() }
             })
         }
-        button("Select all visible accounts") { names.addAll(visible()); selected.addAll(names); render() }
-        button("Choose another Google account") {
+        button("Refresh visible accounts") {
+            val newlyVisible = visible().filter { it !in names }
+            names.addAll(newlyVisible)
+            selected.addAll(newlyVisible)
+            render()
+        }
+        button(if (names.isEmpty()) "Choose Google account in Android" else "Choose additional account in Android") {
             runCatching {
                 startActivityForResult(AccountManager.newChooseAccountIntent(null, null,
                     arrayOf(GoogleAccountQueue.TYPE), null, null, null, null), 701)
@@ -95,11 +163,9 @@ class GoogleAccountsActivity : Activity() {
             else submit(false)
         }
         button("Cancel pending transfer") { submit(true) }
-        column.addView(TextView(this).apply {
-            text = "You can select accounts before setup. To transfer, prepare or update the guest in OneOS first; no reset is required just to open this screen."
-        })
+        column.addView(line("The Android picker selects one account at a time. You can select all visible accounts together here. A prepared, updated guest is required to transfer."))
         button("Back") { finish() }
-        if (message.isNotEmpty()) column.addView(TextView(this).apply { text = message })
+
     }
 
     @Deprecated("Android account picker result")
@@ -109,7 +175,10 @@ class GoogleAccountsActivity : Activity() {
             data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE) == GoogleAccountQueue.TYPE) {
             val name = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
             if (name != null && GoogleAccountQueue.valid(name)) { names.add(name); selected.add(name) }
-            names.addAll(visible())
+            val newlyVisible = visible().filter { it !in names }
+            names.addAll(newlyVisible)
+            selected.addAll(newlyVisible)
+            message = if (names.isEmpty()) "No account was made visible." else "Select all accounts you want to transfer."
             render()
         }
     }
@@ -158,7 +227,7 @@ class GoogleAccountsActivity : Activity() {
                 val name = Images.byId(image)?.nameWithVariant ?: image
                 message = "Prepared guest: " + name
                 render()
-                AlertDialog.Builder(this)
+                dialog()
                     .setTitle(if (clear) "Clear pending transfer?" else "Import account addresses?")
                     .setMessage(if (clear) "Clear the pending transfer for " + name + "? Existing signed-in accounts will not be changed."
                         else "Queue " + count + " selected accounts for " + name + " only. The accounts in One UI remain unchanged.")
