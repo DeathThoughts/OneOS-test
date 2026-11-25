@@ -135,15 +135,20 @@ class BringAppsFragment : CardsFragment() {
         CardRows.text(about, getString(R.string.bring_about_body, system))
         CardRows.text(about, getString(R.string.bring_about_one_way, system), R.style.OneOS_Text_Caption)
 
-        if (prepared && !stale && !st.busy) {
-            val marker = status?.marker
-            if (marker != null) {
-                Cards.row(about, OuiIcons.drawable.ic_oui_refresh, "Import Google accounts",
-                    "Choose account addresses to use in this guest") {
-                    startActivity(Intent(ctx, GoogleAccountsActivity::class.java)
-                        .putExtra("image", marker.imageId).putExtra("created", marker.createdEpoch.toString()))
-                }
+        // Do not hide account selection while the stage is stale or apps are loading.
+        // The account screen checks the destination again before committing anything.
+        val accountMarker = status?.marker?.takeIf { prepared }
+        Cards.row(about, OuiIcons.drawable.ic_oui_refresh, "Import Google accounts",
+            when {
+                stale -> "Select accounts; update the prepared guest before importing."
+                accountMarker == null -> "Select accounts; a prepared guest is required to transfer."
+                else -> "Choose account addresses to use in this guest"
+            }) {
+            val target = Intent(ctx, GoogleAccountsActivity::class.java)
+            if (accountMarker != null) {
+                target.putExtra("image", accountMarker.imageId).putExtra("created", accountMarker.createdEpoch.toString())
             }
+            startActivity(target)
         }
 
         // The apps on One UI, a box each. The header counts the ticks.
