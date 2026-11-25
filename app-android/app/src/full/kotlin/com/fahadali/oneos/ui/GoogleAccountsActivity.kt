@@ -52,7 +52,7 @@ class GoogleAccountsActivity : Activity() {
         textSize = if (heading) 23f else 16f
         if (heading) setTypeface(typeface, android.graphics.Typeface.BOLD)
         setPadding(0, dp(8), 0, dp(8))
-        isTextSelectable = false
+        setTextIsSelectable(false)
     }
 
     private fun dialog(): AlertDialog.Builder = AlertDialog.Builder(this,
