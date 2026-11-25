@@ -28,6 +28,7 @@ jobs:
     outputs:
       candidate: ${{ steps.sync.outputs.candidate }}
       pr: ${{ steps.sync.outputs.pr }}
+      base: ${{ steps.sync.outputs.base }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -51,6 +52,7 @@ jobs:
           base=$(git rev-parse refs/remotes/origin/debug)
           upstream=$(git rev-parse FETCH_HEAD)
           echo "Debug: $base | upstream: $upstream" >> "$GITHUB_STEP_SUMMARY"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor "$upstream" "$base"; then
             echo "Debug already contains upstream." >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -62,19 +64,27 @@ jobs:
             --json number,headRefName,headRefOid,isDraft \
             --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))] | first // empty')
           gh auth setup-git
+          existing_pr=""
+          existing_head=""
+          expected_branch="sync/upstream-${upstream:0:12}"
           if [[ -n "$open" ]]; then
             number=$(jq -r .number <<< "$open")
             branch=$(jq -r .headRefName <<< "$open")
             old=$(jq -r .headRefOid <<< "$open")
-            if [[ $(jq -r .isDraft <<< "$open") == true ]] && [[ "$old" != "$upstream" ]] &&
+            if [[ $(jq -r .isDraft <<< "$open") == false && "$branch" == "$expected_branch" ]]; then
+              existing_pr="$number"
+              existing_head="$old"
+            elif [[ $(jq -r .isDraft <<< "$open") == true ]] && [[ "$old" != "$upstream" ]] &&
                git cat-file -e "$old^{commit}" 2>/dev/null && git merge-base --is-ancestor "$old" "$upstream"; then
               git push origin "$upstream:refs/heads/$branch"
               echo "Updated untouched upstream draft #$number to $upstream." >> "$GITHUB_STEP_SUMMARY"
+              echo "pr=$number" >> "$GITHUB_OUTPUT"
+              exit 0
             else
               echo "Existing integration PR #$number retained (no overwrite of manual work)." >> "$GITHUB_STEP_SUMMARY"
+              echo "pr=$number" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-            echo "pr=$number" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
 
           branch="sync/upstream-${upstream:0:12}"
@@ -114,6 +124,19 @@ jobs:
               printf '%s\n' "$conflicts"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [[ -n "$existing_pr" ]]; then
+            # Recompute the merge against today's exact base and upstream.
+            # Never auto-promote manually edited commits or stale candidates.
+            if [[ -n "$reason" ]] || ! git cat-file -e "$existing_head^{commit}" 2>/dev/null ||
+               [[ "$(git show -s --format=%P "$existing_head")" != "$base $upstream" ]] ||
+               [[ "$(git rev-parse "$existing_head^{tree}")" != "$(git rev-parse "$candidate^{tree}")" ]]; then
+              echo "Existing PR #$existing_pr no longer matches a clean reproducible integration; manual review." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "pr=$existing_pr" >> "$GITHUB_OUTPUT"
+            echo "candidate=$existing_head" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # A normal non-forced push is deliberate. Existing branches are not replaced.
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
             existing=$(git ls-remote --heads origin "$branch" | cut -f1)
@@ -128,7 +151,7 @@ jobs:
             echo "Upstream: fahadalijaved/OneOS@$upstream"
             echo "Debug base: $base"
             echo ""
-            echo "Automated integration only; no merge or release promotion."
+            echo "Clean candidates may be promoted to debug only after isolated full CI and patch verification. Release remains manual."
             echo "Keep fork-only device support, signed patch updates, guarded root/staging code and fork-owned payload sources."
             echo "Any new pinned payloads must pass the migration and APK build on debug."
             if [[ -n "$reason" ]]; then
@@ -145,39 +168,259 @@ jobs:
             echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
           fi
 
-  preflight:
+  gate:
     needs: prepare
     if: needs.prepare.outputs.candidate != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      eligible: ${{ steps.check.outputs.eligible }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check integration scope without executing candidate code
+        id: check
+        env:
+          BASE: ${{ needs.prepare.outputs.base }}
+          CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$CANDIDATE"
+          [[ "$(git rev-parse HEAD)" == "$BASE" ]]
+          [[ "$(git rev-parse "$CANDIDATE^1")" == "$BASE" ]]
+          # Protect the automation, signing/build chain, security checks and test
+          # gates from automatic changes. The owner can review those manually.
+          python3 - <<'PYTHON'
+          import os, re, subprocess
+          base, candidate = os.environ["BASE"], os.environ["CANDIDATE"]
+          paths = subprocess.check_output(["git", "diff", "--name-only", "-z", base, candidate]).decode().split("\0")
+          protected = []
+          for p in filter(None, paths):
+              if (p.startswith((".github/", "scripts/", "patches/", "switcher/assets/")) and
+                  p != "scripts/patch-migration/fork-payloads-v2.json") or re.search(
+                      r"(^|/)(gradle/|gradlew(?:\.bat)?$|settings\.gradle(?:\.kts)?$|gradle\.properties$|src/test/|src/androidTest/|src/full/assets/root/)", p):
+                  protected.append(p)
+              elif p.endswith("build.gradle.kts"):
+                  before = subprocess.check_output(["git", "show", f"{base}:{p}"], text=True)
+                  after = subprocess.check_output(["git", "show", f"{candidate}:{p}"], text=True)
+                  def stripped(s):
+                      return re.sub(r'(?m)^\s*version(?:Code|Name)\s*=.*$', '', s)
+                  if stripped(before) != stripped(after):
+                      protected.append(p)
+          # No downgrade or reused Android versionCode.
+          for p in ("app-android/app/build.gradle.kts", "app-android/guest/build.gradle.kts"):
+              old = subprocess.check_output(["git", "show", f"{base}:{p}"], text=True)
+              new = subprocess.check_output(["git", "show", f"{candidate}:{p}"], text=True)
+              a = re.search(r'(?m)^\s*versionCode\s*=\s*(\d+)\s*$', old)
+              b = re.search(r'(?m)^\s*versionCode\s*=\s*(\d+)\s*$', new)
+              if not a or not b or int(b[1]) <= int(a[1]):
+                  protected.append(p + " (versionCode must increase)")
+          if protected:
+              print("Manual review required:", *protected, sep="\n")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                  f.write("Protected changes require manual review:\n\n" + "\n".join("- " + p for p in protected) + "\n")
+              raise SystemExit(1)
+          PYTHON
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+  preflight:
+    needs: [prepare, gate]
+    if: needs.gate.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.candidate }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Check fork patch pins and focused regression tests
+      - name: Verify all patch assets exist in the fork
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -eu
           python3 scripts/migrate-all-patch-payloads.py --check-catalog
-          python3 scripts/test-patch-migration.py
-          python3 scripts/test-patch-channel.py
-          python3 scripts/test-guest-manager-update.py
-          sh -n app-android/app/src/full/assets/root/oneos_root.sh
-          sh -n switcher/assets/guest_prepare.sh
-      - name: Install JDK
-        uses: actions/setup-java@v5
+          python3 scripts/migrate-all-patch-payloads.py --verify
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-      - name: Check model tests (no signing secrets)
+      - name: Install Android SDK packages
+        run: |
+          set -eu
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK on the runner}}
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -n 1)
+          fi
+          [ -x "$sdkmanager" ] || { echo "no sdkmanager under $sdk/cmdline-tools" >&2; exit 1; }
+          echo "Using $sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+
+      - name: Build guest manager (ephemeral debug signing key)
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: sh scripts/build-guest-manager.sh debug
+
+      - name: Verify update handling
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/test-guest-manager-update.py
+          python3 scripts/test-patch-channel.py
+          python3 scripts/test-patch-migration.py
+          python3 scripts/migrate-patch-payloads.py --check-inventory
+          cd app-android
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
+            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \
+            --tests '*StageScriptTest.a55VulkanUsesTheColorOsStage'
+
+      - name: Verify HyperOS Popsicle image and staging
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/test-popsicle-framework-dex.py
+          python3 scripts/test-popsicle-guards.py
+          python3 scripts/test-popsicle-native.py
+          python3 scripts/test-popsicle-publisher.py
+          cd app-android
+          ./gradlew --console=plain :core:model:test \
+            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.popsicleStagingSetMatchesItsPayloadAndGuardPins' \
+            --tests '*SingleImageZipInputStreamTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnTheBaseGalaxyS23'
+
+      - name: Verify ColorOS Twinity image and staging
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/test-twinity-image.py
+          python3 scripts/test-twinity-services-dex.py
+          python3 scripts/test-twinity-surfaceflinger.py
+          python3 scripts/test-twinity-package.py
+          python3 scripts/test-twinity-publisher.py
+          cd app-android
+          ./gradlew --console=plain :core:model:test \
+            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.twinityStagingSetMatchesItsPayloadAndGuardPins' \
+            --tests '*ProfilesTest.twinityIsOfferedOnTheBaseGalaxyS23AndS26Fe' --tests '*SingleImageZipInputStreamTest' \
+            --tests '*DeviceListTest' --tests '*ImageGuideTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.twinityStagesAndPassesLaunchChecksOnTheBaseGalaxyS23' \
+            --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
+
+      - name: Verify signed guest startup patch lifecycle
+        run: |
+          classes=$(mktemp -d)
+          javac -d "$classes" app-android/patch-protocol/src/main/java/com/fahadali/oneos/patch/*.java \
+            scripts/GuestStartPatchTest.java scripts/PatchDownloadTest.java scripts/PatchTrialTest.java scripts/SignGuestStartPatch.java
+          java -cp "$classes" GuestStartPatchTest
+          java -cp "$classes" com.fahadali.oneos.patch.PatchDownloadTest
+          java -cp "$classes" PatchTrialTest
+          python3 scripts/test-guest-patch-handoff.py
+
+      - name: Verify restart Home acknowledgement
+        run: |
+          sh -n switcher/assets/oneos_switch.sh
+          sh -n switcher/assets/guest_prepare.sh
+          sh -n switcher/assets/guest_patch.sh
+          python3 scripts/test-restart-home.py
+
+      - name: Verify guest media mount safety
+        run: python3 scripts/test-guest-media-share.py
+
+      - name: Verify guest telemetry policy
+        run: |
+          python3 scripts/test-oplus-telemetry.py
+          python3 scripts/test-guest-telemetry.py
+          python3 scripts/test-miui-telemetry.py
+
+      - name: Verify the kernel-tool preflight scanner
+        run: python3 scripts/test-libtimer-preflight-scan.py
+
+      - name: Verify guest audio, Bluetooth, and camera policy
+        run: |
+          python3 scripts/test-guest-audio-policy.py
+          python3 scripts/test-oplus-bt-origin.py
+          python3 scripts/test-samsung-camera-bind.py
+
+      - name: Verify model and root staging after upstream sync
         working-directory: app-android
-        run: ./gradlew --console=plain :core:model:test
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: |
+          ./gradlew --console=plain :core:model:test --tests '*CompatEvaluatorTest' --tests '*GatesTest' --tests '*PackageSetsTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageAuditTest' --tests '*StageScriptTest.launchArgumentsReachRootChecks' --tests '*StageScriptTest.bring*'
+
+      # No -Poneos.series / -Poneos.packSets: the APK carries the session
+      # scripts and each set's lists only, so no out/ set directories are needed.
+      # assembleFullDebug also runs checkFullDebugStagingApk (python3, preinstalled).
+      - name: Build app
+        working-directory: app-android
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: ./gradlew --console=plain :app:assembleFullDebug
+
+      - name: Additional complete model and root test suites
+        working-directory: app-android
+        env:
+          GH_PACKAGES_USER: ${{ github.actor }}
+          GH_PACKAGES_TOKEN: ${{ github.token }}
+        run: ./gradlew --console=plain :core:model:test :core:root:testDebugUnitTest
+
+  promote:
+    needs: [prepare, gate, preflight]
+    if: needs.gate.outputs.eligible == 'true' && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Promote the exact tested commit to debug
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: DeathThoughts/OneOS-test
+          PR: ${{ needs.prepare.outputs.pr }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          [[ "$PR" =~ ^[0-9]+$ && "$BASE" =~ ^[0-9a-f]{40}$ && "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]
+          current=$(gh api "repos/$GH_REPO/git/ref/heads/debug" --jq .object.sha)
+          [[ "$current" == "$BASE" ]] || { echo "Debug advanced; a fresh integration is required."; exit 1; }
+          pr=$(gh api "repos/$GH_REPO/pulls/$PR")
+          jq -e --arg base "$BASE" --arg head "$CANDIDATE" --arg repo "$GH_REPO" \
+            '.state=="open" and .draft==false and .base.ref=="debug" and .base.sha==$base and .head.sha==$head and .head.repo.full_name==$repo and (.head.ref | startswith("sync/upstream-"))' <<< "$pr" >/dev/null
+          # GitHub verifies that this is a fast-forward update. No force push,
+          # and no second untested merge commit. Debug protection still applies.
+          gh api --method PATCH "repos/$GH_REPO/git/refs/heads/debug" -f sha="$CANDIDATE" -F force=false >/dev/null
+          [[ "$(gh api "repos/$GH_REPO/git/ref/heads/debug" --jq .object.sha)" == "$CANDIDATE" ]]
+          # Pushes from GITHUB_TOKEN do not trigger normal workflows.
+          gh workflow run build-apk.yml --ref debug
+          gh pr comment "$PR" --body "Automatically integrated exact tested commit $CANDIDATE into debug. Signed debug build dispatched. Release remains manual." || true
+          echo "Promoted $CANDIDATE to debug; signed build dispatched." >> "$GITHUB_STEP_SUMMARY"
 
   report:
-    needs: [prepare, preflight]
+    needs: [prepare, gate, preflight, promote]
     if: always() && needs.prepare.outputs.candidate != '' && needs.prepare.outputs.pr != ''
     runs-on: ubuntu-latest
     permissions:
@@ -189,6 +432,8 @@ jobs:
           GH_REPO: DeathThoughts/OneOS-test
           PR: ${{ needs.prepare.outputs.pr }}
           RESULT: ${{ needs.preflight.result }}
+          GATE: ${{ needs.gate.result }}
+          PROMOTE: ${{ needs.promote.result }}
           CANDIDATE: ${{ needs.prepare.outputs.candidate }}
         run: |
-          gh pr comment "$PR" --body "Automated preflight for `$CANDIDATE`: **$RESULT**. Full signed APK build, migration and device testing remain required. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh pr comment "$PR" --body "Automated checks for `$CANDIDATE`: scope **$GATE**, tests/build **$RESULT**, debug promotion **$PROMOTE**. Physical device validation and stable release remain manual. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
