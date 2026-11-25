@@ -123,6 +123,9 @@ class MainActivity : AppCompatActivity() {
         cards.row(apps, getString(R.string.bring_entry_title), getString(R.string.bring_entry_summary)) {
             startActivity(Intent(this, BringAppsActivity::class.java))
         }
+        cards.row(apps, "Import Google accounts", "Sign in to the accounts selected in One UI") {
+            startActivity(Intent(this, GoogleAccountsActivity::class.java))
+        }
         soundEffectsCard(list)
         animLevelCard(list)
         fullLogsCard(list)

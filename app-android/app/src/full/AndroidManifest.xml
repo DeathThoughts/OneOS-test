@@ -65,6 +65,7 @@
             android:name=".ui.BringAppsActivity"
             android:exported="false"
             android:parentActivityName=".ui.AdvancedActivity" />
+        <activity android:name=".ui.GoogleAccountsActivity" android:exported="false" />
         <!-- Debloat (0.5.32, each system's page): apps left out at the system's next start. -->
         <activity
             android:name=".ui.DebloatActivity"

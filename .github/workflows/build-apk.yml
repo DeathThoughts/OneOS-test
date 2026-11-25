@@ -252,7 +252,7 @@ jobs:
           python3 scripts/test-patch-migration.py
           python3 scripts/migrate-patch-payloads.py --check-inventory
           cd app-android
-          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
+          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest' --tests '*GoogleAccountQueueTest'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
             --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \

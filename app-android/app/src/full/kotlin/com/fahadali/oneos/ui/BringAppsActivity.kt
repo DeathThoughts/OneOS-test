@@ -135,6 +135,17 @@ class BringAppsFragment : CardsFragment() {
         CardRows.text(about, getString(R.string.bring_about_body, system))
         CardRows.text(about, getString(R.string.bring_about_one_way, system), R.style.OneOS_Text_Caption)
 
+        if (prepared && !stale && !st.busy) {
+            val marker = status?.marker
+            if (marker != null) {
+                Cards.row(about, OuiIcons.drawable.ic_oui_refresh, "Import Google accounts",
+                    "Choose account addresses to use in this guest") {
+                    startActivity(Intent(ctx, GoogleAccountsActivity::class.java)
+                        .putExtra("image", marker.imageId).putExtra("created", marker.createdEpoch.toString()))
+                }
+            }
+        }
+
         // The apps on One UI, a box each. The header counts the ticks.
         val apps = Cards.section(
             column, getString(R.string.bring_card_apps),

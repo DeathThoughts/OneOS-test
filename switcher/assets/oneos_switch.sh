@@ -3753,6 +3753,20 @@ while true; do
             fi
             echo \"[UI Activator] refresh: min \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system min_refresh_rate) peak \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system peak_refresh_rate); brightness \$($BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings get system screen_brightness)\"
             echo '[UI Activator] Home activated!'
+            # Deliver only user-selected account addresses, over stdin to the private guest inbox.
+            # No credentials, account names in command arguments, or account names in logs.
+            if [ -f $STAGE/incoming/google-accounts.pending ] && [ ! -L $STAGE/incoming/google-accounts.pending ] &&
+               [ \"\$(stat -c '%u:%a' $STAGE/incoming/google-accounts.pending 2>/dev/null)\" = '0:600' ]; then
+                aqhash=\$(sha256sum $STAGE/incoming/google-accounts.pending | cut -d ' ' -f 1)
+                if $BB timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/content write --user 0 --uri content://com.fahadali.oneos.guest.accountqueue/queue < $STAGE/incoming/google-accounts.pending >/dev/null 2>&1 &&
+                   $BB timeout 20 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/content call --user 0 --uri content://com.fahadali.oneos.guest.accountqueue/queue --method commit --arg \"\$aqhash\" 2>/dev/null | grep -q 'ok=true'; then
+                    rm -f $STAGE/incoming/google-accounts.pending
+                    echo '[UI Activator] Google account hints delivered'
+                else
+                    echo '[UI Activator] Google account hint transfer not confirmed; queue retained'
+                fi
+            fi
+
             # Exynos native libraries (Samsung Camera MFP30IF/MFP20/SNAP, MediaCodec):
             # guest_props.sh set ro.boot.hardware=qcom solely so ColorOS's zygote64
             # evaluated Build.IS_QCOM_PLATFORM=true and preloaded libqti_performance.so.

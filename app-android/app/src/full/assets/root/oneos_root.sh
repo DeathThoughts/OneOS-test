@@ -3238,17 +3238,45 @@ do_stock_parts() {
     "$BB" sh "$STAGE/stock_parts.sh" "$STAGE" "$BB" || die "stock snapshots were not installed"
 }
 
+# Explicit user-selected account names only. Do not print the list or read host account databases.
+do_google_accounts() {
+    [ $# -eq 3 ] || usage "google-accounts <image> <created> <bytes>"
+    is_id "$1" && is_dec "$2" && is_dec "$3" && ge 32768 "$3" || usage "google-accounts arguments"
+    read_marker || refuse "prepare this guest first"
+    [ "$M_IMAGE" = "$1" ] && [ "$M_CREATED" = "$2" ] || refuse "the guest stage changed"
+    idle_or_refuse
+    [ ! -f "$STAGE/persist_session.active" ] || refuse "restore the last session first"
+    [ -d "$STAGE/incoming" ] && mine "$STAGE/incoming" || refuse "unsafe incoming folder"
+    pending="$STAGE/incoming/google-accounts.pending"
+    if [ -L "$pending" ] || { [ -e "$pending" ] && { [ ! -f "$pending" ] || ! mine "$pending"; }; }; then
+        refuse "unsafe account queue"
+    fi
+    if [ "$3" = 0 ]; then
+        rm -f "$pending" || die "could not clear account queue"
+        say "@@OK google-accounts"
+        return
+    fi
+    part=$(umask 077; mktemp "$STAGE/incoming/google-accounts.XXXXXX") || die "could not prepare account queue"
+    head -c "$3" > "$part" || { rm -f "$part"; die "could not write account queue"; }
+    [ "$(stat -c %s "$part")" = "$3" ] && own "$part" 0600 || { rm -f "$part"; refuse "incomplete account queue"; }
+    # Strict envelope and bounded size. The guest independently validates every address.
+    [ "$(head -n 1 "$part")" = ONEOS-GOOGLE-ACCOUNTS-1 ] &&
+        [ "$(tail -n 1 "$part")" = END ] || { rm -f "$part"; refuse "invalid account queue"; }
+    mv -f "$part" "$pending" || { rm -f "$part"; die "could not publish account queue"; }
+    say "@@OK google-accounts"
+}
+
 # --- Main ---------------------------------------------------------------------
 [ -n "$T" ] || [ "$(id -u)" = 0 ] || refuse "not root"
 verb=$1
 case "$verb" in
-    stock-parts|begin|receive|keep-raw|keep-files|table|env|finish|launch|recover|restore|remove|remove-system|reset-data|selfupdate|guest-runtime|guest-module|guest-module-state|bring-collect|bring-clear|bring-forget|bring-catalog|debloat) migrate_legacy stage ;;
+    stock-parts|begin|receive|keep-raw|keep-files|table|env|finish|launch|recover|restore|remove|remove-system|reset-data|selfupdate|guest-runtime|guest-module|guest-module-state|bring-collect|bring-clear|bring-forget|bring-catalog|google-accounts|debloat) migrate_legacy stage ;;
     old-list|purge) migrate_legacy copies ;;
 esac
 [ -d "$STAGE" ] && mine "$STAGE" || refuse "$STAGE is not root's folder"
 [ -d "$STAGE/bin" ] && mine "$STAGE/bin" || refuse "$STAGE/bin is not root's folder"
 case "$verb" in
-    stock-parts|begin|receive|keep-raw|keep-files|table|env|finish|launch|recover|restore|remove|remove-system|reset-data|tool-app|purge|selfupdate|guest-module|guest-module-state|bring-collect|bring-clear|bring-forget|bring-catalog|bring-add|debloat) take_lock ;;
+    stock-parts|begin|receive|keep-raw|keep-files|table|env|finish|launch|recover|restore|remove|remove-system|reset-data|tool-app|purge|selfupdate|guest-module|guest-module-state|bring-collect|bring-clear|bring-forget|bring-catalog|bring-add|google-accounts|debloat) take_lock ;;
 esac
 [ $# -gt 0 ] && shift
 case "$verb" in
@@ -3278,6 +3306,7 @@ case "$verb" in
     bring-status) do_bring_status "$@" ;;
     bring-forget) do_bring_forget "$@" ;;
     bring-catalog) do_bring_catalog "$@" ;;
+    google-accounts) do_google_accounts "$@" ;;
     bring-add) do_bring_add "$@" ;;
     oneui-media) do_oneui_media "$@" ;;
     debloat) do_debloat "$@" ;;

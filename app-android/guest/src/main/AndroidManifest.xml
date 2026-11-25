@@ -33,6 +33,11 @@
         <activity android:name=".GuestModulesActivity" android:exported="false" />
         <!-- Bring apps from One UI: lists the catalog the OneOS app left, asks the host session for one app. -->
         <activity android:name=".BringAppsActivity" android:exported="false" android:label="@string/bring_title" />
+        <activity android:name=".GoogleAccountsActivity" android:exported="false" />
+        <provider android:name=".GoogleAccountInboxProvider"
+            android:authorities="com.fahadali.oneos.guest.accountqueue"
+            android:exported="true" android:permission="android.permission.DUMP"
+            android:grantUriPermissions="false" />
         <activity android:name=".GuestRootActivity" android:exported="false" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.SEARCH" /></intent-filter>
             <meta-data android:name="android.app.searchable" android:resource="@xml/root_searchable" />
