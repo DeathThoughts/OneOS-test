@@ -123,9 +123,15 @@ object AppAssets {
     fun toDownload(ctx: Context, files: List<Staged>): List<Pair<Staged, List<String>>> {
         val inApk = packed(ctx)
         val ids = remoteIds(ctx)
-        return files.filter { it.sha256 !in inApk && SetDownloader.cached(ctx, it) == null }.map { f ->
-            f to (f.source?.let { (listOf(it) + ids[f.sha256].orEmpty()).distinct() } ?: ids[f.sha256]?.takeIf { it.isNotEmpty() } ?: throw Broken("${f.name} is neither in the app nor on its download list"))
-        }
+        // Different names can have identical content: download by hash once.
+        return files.filter { it.sha256 !in inApk && SetDownloader.cached(ctx, it) == null }
+            .groupBy { it.sha256 }.values.map { group ->
+                val f = group.first()
+                if (group.any { it.bytes != f.bytes }) throw Broken("Conflicting sizes for ${f.sha256}")
+                val sources = (group.mapNotNull { it.source } + ids[f.sha256].orEmpty()).distinct()
+                if (sources.isEmpty()) throw Broken("${f.name} is neither in the app nor on its download list")
+                f to sources
+            }.sortedByDescending { it.first.bytes }
     }
 
     /** Every set file hash any list in this app names: what the download cache may keep. */
