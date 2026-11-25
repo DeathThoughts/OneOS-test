@@ -1,0 +1,194 @@
+name: Auto upstream sync
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [release]
+    paths:
+      - '.github/workflows/auto-upstream.yml'
+      - 'scripts/sync-upstream-catalog.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oneos-auto-upstream
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'DeathThoughts/OneOS-test' && (github.ref_name == 'release' || github.ref_name == 'debug')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      candidate: ${{ steps.sync.outputs.candidate }}
+      pr: ${{ steps.sync.outputs.pr }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare and prepare an integration PR
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: DeathThoughts/OneOS-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_NOSYSTEM=1
+          git config core.hooksPath /dev/null
+          git config user.name 'OneOS upstream sync'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          cp scripts/sync-upstream-catalog.py "$RUNNER_TEMP/sync-upstream-catalog.py"
+          git fetch --no-tags origin refs/heads/debug:refs/remotes/origin/debug
+          git fetch --no-tags https://github.com/fahadalijaved/OneOS.git refs/heads/main
+          base=$(git rev-parse refs/remotes/origin/debug)
+          upstream=$(git rev-parse FETCH_HEAD)
+          echo "Debug: $base | upstream: $upstream" >> "$GITHUB_STEP_SUMMARY"
+          if git merge-base --is-ancestor "$upstream" "$base"; then
+            echo "Debug already contains upstream." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Keep one integration PR at a time. Only fast-forward an untouched
+          # draft that points into upstream history; never overwrite manual fixes.
+          open=$(gh pr list --state open --base debug --limit 100 \
+            --json number,headRefName,headRefOid,isDraft \
+            --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))] | first // empty')
+          gh auth setup-git
+          if [[ -n "$open" ]]; then
+            number=$(jq -r .number <<< "$open")
+            branch=$(jq -r .headRefName <<< "$open")
+            old=$(jq -r .headRefOid <<< "$open")
+            if [[ $(jq -r .isDraft <<< "$open") == true ]] && [[ "$old" != "$upstream" ]] &&
+               git cat-file -e "$old^{commit}" 2>/dev/null && git merge-base --is-ancestor "$old" "$upstream"; then
+              git push origin "$upstream:refs/heads/$branch"
+              echo "Updated untouched upstream draft #$number to $upstream." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Existing integration PR #$number retained (no overwrite of manual work)." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "pr=$number" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          branch="sync/upstream-${upstream:0:12}"
+          git checkout --detach "$base"
+          git merge --no-ff --no-commit "$upstream" || true
+          if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            echo "Merge could not be prepared." >&2
+            exit 1
+          fi
+          conflicts=$(git diff --name-only --diff-filter=U)
+          other=$(printf '%s\n' "$conflicts" | grep -v -E '^(app-android/packages/(remote|sizes)\.txt)?$' || true)
+          # Only the two hash-keyed metadata tables can be reconciled automatically.
+          # Never choose ours/theirs wholesale for executable code, pins or guards.
+          reason=""
+          if [[ -z "$other" ]]; then
+            if ! python3 "$RUNNER_TEMP/sync-upstream-catalog.py" "$base" "$upstream"; then
+              reason="Patch catalog reconciliation failed; manual review required."
+            fi
+          else
+            reason="Overlapping code or manifest changes require manual review."
+          fi
+          if [[ -z "$reason" && -z "$(git diff --name-only --diff-filter=U)" ]]; then
+            git diff --cached --check
+            git commit -m "Merge upstream OneOS ${upstream:0:12} into fork integration"
+            candidate=$(git rev-parse HEAD)
+            draft=()
+            title="Sync upstream OneOS ${upstream:0:12} (clean candidate)"
+          else
+            git merge --abort
+            candidate="$upstream"
+            draft=(--draft)
+            title="Sync upstream OneOS ${upstream:0:12} (manual conflict review)"
+            {
+              echo "$reason"
+              echo ""
+              echo "Conflicting paths:"
+              printf '%s\n' "$conflicts"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # A normal non-forced push is deliberate. Existing branches are not replaced.
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            existing=$(git ls-remote --heads origin "$branch" | cut -f1)
+            if [[ "$existing" != "$candidate" ]]; then
+              echo "Integration branch already exists with different work; refusing to replace it." >&2
+              exit 1
+            fi
+          else
+            git push origin "$candidate:refs/heads/$branch"
+          fi
+          {
+            echo "Upstream: fahadalijaved/OneOS@$upstream"
+            echo "Debug base: $base"
+            echo ""
+            echo "Automated integration only; no merge or release promotion."
+            echo "Keep fork-only device support, signed patch updates, guarded root/staging code and fork-owned payload sources."
+            echo "Any new pinned payloads must pass the migration and APK build on debug."
+            if [[ -n "$reason" ]]; then
+              echo ""
+              echo "$reason"
+              printf '\n~~~text\n%s\n~~~\n' "$conflicts"
+            fi
+          } > "$RUNNER_TEMP/upstream-pr.md"
+          url=$(gh pr create --base debug --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/upstream-pr.md" "${draft[@]}")
+          number=${url##*/}
+          echo "pr=$number" >> "$GITHUB_OUTPUT"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "$reason" ]]; then
+            echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          fi
+
+  preflight:
+    needs: prepare
+    if: needs.prepare.outputs.candidate != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check fork patch pins and focused regression tests
+        run: |
+          set -eu
+          python3 scripts/migrate-all-patch-payloads.py --check-catalog
+          python3 scripts/test-patch-migration.py
+          python3 scripts/test-patch-channel.py
+          python3 scripts/test-guest-manager-update.py
+          sh -n app-android/app/src/full/assets/root/oneos_root.sh
+          sh -n switcher/assets/guest_prepare.sh
+      - name: Install JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Check model tests (no signing secrets)
+        working-directory: app-android
+        run: ./gradlew --console=plain :core:model:test
+
+  report:
+    needs: [prepare, preflight]
+    if: always() && needs.prepare.outputs.candidate != '' && needs.prepare.outputs.pr != ''
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Report the isolated preflight result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: DeathThoughts/OneOS-test
+          PR: ${{ needs.prepare.outputs.pr }}
+          RESULT: ${{ needs.preflight.result }}
+          CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+        run: |
+          gh pr comment "$PR" --body "Automated preflight for `$CANDIDATE`: **$RESULT**. Full signed APK build, migration and device testing remain required. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
