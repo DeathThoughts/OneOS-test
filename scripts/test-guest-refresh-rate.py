@@ -54,6 +54,22 @@ class GuestRefreshRate(unittest.TestCase):
         other = base.replace('displayId 0', 'displayId 3').replace('89.99', '120').replace('INTERNAL', 'EXTERNAL')
         self.assertEqual('90.0', self.rate(other + '\n' + base + '\n' + other))
 
+    def test_mode_at_a_different_resolution_does_not_raise_the_ceiling(self):
+        dump = ('mBaseDisplayInfo=DisplayInfo{"panel", displayId 0, mode 2, supportedModes '
+                '[{id=1, width=720, height=1280, fps=120.0}, '
+                '{id=2, width=1080, height=2340, fps=60.0}, '
+                '{id=3, width=1080, height=2340, fps=90.0}], type INTERNAL}')
+        self.assertEqual('90.0', self.rate(dump))
+
+    def test_restore_accepts_both_surfaceflinger_rate_formats(self):
+        start = (ROOT / 'switcher/assets/guest_start.sh').read_text()
+        line = next(l for l in start.splitlines() if 'pr=$(echo "$pol"' in l)
+        for gap in ('', ' '):
+            pol = f'displayManagerPolicy={{primaryRanges={{physical=[0, 120], render=[30.00{gap}Hz, 90.00{gap}Hz]}}}}'
+            got = subprocess.run(['sh', '-c', line + '\nprintf "%s" "$pr"'], env={**os.environ, 'pol': pol},
+                                 check=True, text=True, capture_output=True)
+            self.assertEqual('30.00 90.00', got.stdout)
+
     def test_sf_uses_present_rate_for_both_modes(self):
         start = (ROOT / 'switcher/assets/guest_start.sh').read_text()
         awk = start.split('sel=$(echo "$D" | awk -v d="$id" ', 1)[1].split("}')", 1)[0] + "}'"

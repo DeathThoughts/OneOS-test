@@ -3371,7 +3371,20 @@ if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" 
                             # start failed with status -38"), while the Pixel system read
                             # this copy and played (0e019498). The same copy goes there
                             # too; other systems never read that path.
-                            for q in ${SKU:+/vendor/etc/audio/sku_${SKU}_qssi/audio_policy_configuration.xml}; do
+                            qssi=""
+                            if [ -n "$SKU" ]; then
+                                qssi="/vendor/etc/audio/sku_${SKU}_qssi/audio_policy_configuration.xml"
+                            else
+                                # Some firmware omits the SKU property. Only one installed
+                                # candidate is unambiguous; use guest paths for discovery.
+                                for candidate in "$ROOTFS"/vendor/etc/audio/sku_*_qssi/audio_policy_configuration.xml; do
+                                    [ -f "$candidate" ] || continue
+                                    [ -z "$qssi" ] || { qssi=""; break; }
+                                    qssi=${candidate#"$ROOTFS"}
+                                done
+                            fi
+                            for q in "$qssi"; do
+                                [ -n "$q" ] || break
                                 [ "$GAPM" = /vendor/etc/audio_policy_configuration.xml ] || break
                                 [ -f "$ROOTFS$q" ] && [ "$(readlink -f "$ROOTFS$q")" = "$ROOTFS$q" ] || continue
                                 mount | grep -q " $ROOTFS$q " && break

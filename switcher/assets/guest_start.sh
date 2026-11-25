@@ -1947,7 +1947,7 @@ for id in $(dumpsys SurfaceFlinger --display-id 2>/dev/null | sed -n 's/^Display
         pol=$(echo "$D" | awk -v d="$id" '$0 == "Display " d { f = 1; next } f && /^Display / { f = 0 }
             f && /displayManagerPolicy=/ { print; exit }')
         pm=$(echo "$pol" | sed -n 's/.*defaultModeId=\([0-9][0-9]*\).*/\1/p')
-        pr=$(echo "$pol" | sed -n 's/.*primaryRanges={[^}]*render=\[\([0-9.]*\)Hz, \([0-9.]*\)Hz\].*/\1 \2/p')
+        pr=$(echo "$pol" | sed -nE 's/.*primaryRanges=\{[^}]*render=\[[[:space:]]*([0-9]+([.][0-9]+)?)[[:space:]]*Hz,[[:space:]]*([0-9]+([.][0-9]+)?)[[:space:]]*Hz\].*/\1 \3/p')
         if [ -n "$pm" ] && [ -n "$pr" ]; then tm=$pm; tlo=${pr%% *}; thi=${pr##* }; fi
         # DisplayManager on the other mode (a 60 Hz choice): through the top one instead.
         [ "$tm" = "$3" ] && set -- "$1" "$2" "$1" "$2"
@@ -1955,7 +1955,7 @@ for id in $(dumpsys SurfaceFlinger --display-id 2>/dev/null | sed -n 's/^Display
     # Each call waits on SurfaceFlinger's main thread: never longer than 5 s.
     [ "$3" = -1 ] || { timeout 5 service call SurfaceFlinger 1035 i32 "$3" i64 "$id" f "$4" f "$4" >/dev/null 2>&1; sleep 0.4; }
     # Upstream 0.5.35 adaptive rendering, retaining the ColorOS mode handoff.
-    if [ -f /data/oneos_adaptive ] && [ "$4" -ge 48 ] && [ "$4" -lt "$thi" ]; then tlo=$4; fi
+    if [ "$OPLUS" = 0 ] && [ -f /data/oneos_adaptive ] && [ "$4" -ge 48 ] && [ "$4" -lt "$thi" ]; then tlo=$4; fi
     r=$(timeout 5 service call SurfaceFlinger 1035 i32 "$tm" i64 "$id" f "$tlo" f "$thi" 2>&1 | tr -s ' \n' ' ' | cut -c1-120)
     if [ $OPLUS = 1 ] && [ "$tm:$tlo:$thi" != "$1:$2:$2" ] && ! echo "$r" | grep -q 'Parcel(00000000'; then
         # Not taken (a range it refuses): never leave the display on the bounce mode.

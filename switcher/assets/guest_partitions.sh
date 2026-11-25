@@ -19,6 +19,11 @@ oneos_image_fs() {
 # valid modes for an entirely different display. Read fps, never the vsync clock.
 oneos_panel_rates() {
     awk '
+        function field(s, name,    pat) {
+            pat="(^|[,{ ])" name "=[0-9]+"
+            if (!match(s,pat)) return ""
+            s=substr(s,RSTART,RLENGTH); sub(/^.*=/,"",s); return s
+        }
         /mBaseDisplayInfo=DisplayInfo\{/ && /displayId 0,/ && /type INTERNAL[,}]/ { base=$0 }
         /DisplayDeviceInfo\{/ && /type INTERNAL[,}]/ && /state ON[,}]/ {
             if (!seen[$0]++) { devices++; device=$0 }
@@ -28,12 +33,20 @@ oneos_panel_rates() {
             line=base
             if (!line && devices==1) line=device
             if (!line && !devices && legacy_count==1) line=legacy
+            active=""
+            if (match(line, /, mode(Id)? [0-9]+,/)) {
+                active=substr(line,RSTART,RLENGTH); gsub(/[^0-9]/,"",active)
+            }
             if (!sub(/^.*supportedModes[= ]+\[/, "", line)) exit
             # Child arrays can contain brackets. The list ends after the final mode object.
             if (match(line, /\}[[:space:]]*\]/)) line=substr(line,1,RSTART)
             else exit
             n=split(line, modes, /\}[[:space:]]*,[[:space:]]*\{/)
+            for (i=1;i<=n;i++) if (active!="" && field(modes[i],"id")==active) {
+                width=field(modes[i],"width"); height=field(modes[i],"height"); break
+            }
             for (i=1;i<=n;i++) {
+                if (width && height && (field(modes[i],"width")!=width || field(modes[i],"height")!=height)) continue
                 if (!match(modes[i], /(^|[ ,{])fps=[0-9]+([.][0-9]+)?([,} ]|$)/)) continue
                 s=substr(modes[i],RSTART,RLENGTH); sub(/^.*fps=/,"",s)
                 hz=int(s+0.5); if (hz>=30 && hz<=120) rates[hz]=1
