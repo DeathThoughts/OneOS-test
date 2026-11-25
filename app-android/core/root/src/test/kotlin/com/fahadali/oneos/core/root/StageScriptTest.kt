@@ -248,11 +248,21 @@ class StageScriptTest {
             assertEquals("$min $max: $r", RootScript.EXIT_USAGE, r.exit)
             assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf(min, max)).isNotEmpty())
         }
-        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, good + listOf("0", "0", "0", "0")).exit)
+        // Four optional flags now follow the battery limits: patchAuto, guestVulkan,
+        // shareFiles and schedulerTrials. All are validated as booleans.
+        val extended = good + listOf("0", "0", "0", "0")
+        assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, extended))
+        for (index in 11..14) {
+            val invalid = extended.toMutableList().apply { this[index] = "2" }
+            assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, invalid).exit)
+            assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, invalid).isNotEmpty())
+        }
+        val excessive = extended + "0"
+        assertEquals(RootScript.EXIT_USAGE, fr.runUncheckedArgs(RootScript.Verb.LAUNCH, good, excessive).exit)
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(10)))
         assertEquals(emptyList<String>(), RootScript.problems(RootScript.Verb.LAUNCH, good.take(9) + listOf("100", "300")))
-        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, good + listOf("0", "0", "0", "0")).isNotEmpty())
+        assertTrue(RootScript.problems(RootScript.Verb.LAUNCH, excessive).isNotEmpty())
     }
 
     @Test
