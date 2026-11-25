@@ -3312,20 +3312,22 @@ fi
 # ONEOS_GUEST_APM_A2DP=0 and ONEOS_GUEST_APM_USB=0 together leave the vendor's
 # file; each alone leaves out its own outputs.
 GAPM=/vendor/etc/audio_policy_configuration.xml
+SKU=$(getprop ro.boot.product.vendor.sku)
+case "$SKU" in *[!a-zA-Z0-9._-]*|.|..) SKU= ;; esac
+for f in /odm/etc/audio_policy_configuration.xml ${SKU:+/vendor/etc/audio/sku_$SKU/audio_policy_configuration.xml}; do
+    if [ -e "$ROOTFS$f" ] || [ -L "$ROOTFS$f" ]; then GAPM=$f; break; fi
+done
 if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" ] \
    && { [ "${ONEOS_GUEST_APM_A2DP:-1}" = 1 ] || [ "${ONEOS_GUEST_APM_USB:-1}" = 1 ] || [ "${ONEOS_GUEST_APM_DEEP_BUFFER:-1}" = 1 ]; } \
-   && [ -f "$GAPM" ] && [ -f "$ROOTFS$GAPM" ] && [ ! -L "$ROOTFS$GAPM" ] \
+   && [ -f "$ROOTFS$GAPM" ] && [ "$(readlink -f "$ROOTFS$GAPM")" = "$ROOTFS$GAPM" ] \
    && ! host_has_aidl audio android.hardware.audio.core; then
-    SKU=$(getprop ro.boot.product.vendor.sku)
     GAPM_OV="$STAGE/guest_apm"
-    GAPM_FIRST=""
-    for f in /odm/etc/audio_policy_configuration.xml ${SKU:+/vendor/etc/audio/sku_$SKU/audio_policy_configuration.xml}; do
-        [ -e "$ROOTFS$f" ] && { GAPM_FIRST=$f; break; }
-    done
-    if [ -n "$GAPM_FIRST" ]; then
-        echo "Guest audio policy: the guest reads $GAPM_FIRST; left alone"
+    if [ ! -f "$GAPM" ] || [ "$(readlink -f "$GAPM")" != "$GAPM" ]; then
+        echo "Guest audio policy: no matching host policy at $GAPM"
     elif mount | grep -q " $ROOTFS$GAPM "; then
         echo "Guest audio policy: copy on $GAPM already there"
+    elif ! cmp -s "$GAPM" "$ROOTFS$GAPM"; then
+        echo "Guest audio policy: $GAPM already differs from the host; keeping the ROM policy"
     else
         mkdir -p "$GAPM_OV" && { mount | grep -q " $GAPM_OV " || $BB mount -t tmpfs -o size=2m,mode=755 tmpfs "$GAPM_OV"; } &&
             $BB mount --make-private "$GAPM_OV" 2>/dev/null
@@ -3355,7 +3357,8 @@ if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" 
                 if $BB mount --bind "$GAPM_OV/audio_policy_configuration.xml" "$ROOTFS$GAPM"; then
                     $BB mount -o remount,ro,bind "$ROOTFS$GAPM" 2>/dev/null || true
                     echo "Guest audio policy: $GAPM with $GAPM_SAID (no AIDL audio HAL)"
-                    apm_variants "$GAPM_OV/audio_policy_configuration.xml"
+                    # Other SKU and ODM policies can contain different module definitions.
+                    [ "$GAPM" != /vendor/etc/audio_policy_configuration.xml ] || apm_variants "$GAPM_OV/audio_policy_configuration.xml"
                     case "$APM_NOTE" in
                         *"vendor's Bluetooth module"*)
                             # Software A2DP for the module's stream on Qualcomm (see apm_a2dp).
@@ -3368,9 +3371,9 @@ if [ ! -e "$MIUI_FW/miui-services.jar" ] && [ ! -L "$MIUI_FW/miui-services.jar" 
                             # start failed with status -38"), while the Pixel system read
                             # this copy and played (0e019498). The same copy goes there
                             # too; other systems never read that path.
-                            for q in ${SKU:+/vendor/etc/audio/sku_${SKU}_qssi/audio_policy_configuration.xml} \
-                                     /vendor/etc/audio/sku_*_qssi/audio_policy_configuration.xml; do
-                                [ -f "$ROOTFS$q" ] && [ ! -L "$ROOTFS$q" ] || continue
+                            for q in ${SKU:+/vendor/etc/audio/sku_${SKU}_qssi/audio_policy_configuration.xml}; do
+                                [ "$GAPM" = /vendor/etc/audio_policy_configuration.xml ] || break
+                                [ -f "$ROOTFS$q" ] && [ "$(readlink -f "$ROOTFS$q")" = "$ROOTFS$q" ] || continue
                                 mount | grep -q " $ROOTFS$q " && break
                                 if $BB mount --bind "$GAPM_OV/audio_policy_configuration.xml" "$ROOTFS$q"; then
                                     $BB mount -o remount,ro,bind "$ROOTFS$q" 2>/dev/null || true
@@ -3876,7 +3879,7 @@ PANO
         elif grep -q "name=\"$RRF\"" "$FEAT" 2>/dev/null; then
             echo "ColorOS refresh-rate menu: already declared in $FEAT"
         else
-            RR_CNT=$(awk -F'fps=' '{ for (i = 2; i <= NF; i++) { v = int($i + 0.5); if (v >= 30 && v <= 120) r[v] = 1 } } END { c = 0; for (k in r) c++; print c }' "$STAGE/display_host.txt" 2>/dev/null)
+            RR_CNT=$(oneos_panel_rates "$STAGE/display_host.txt" 2>/dev/null | wc -l)
             RR_DECL=""
             for f in "$ROOTFS"/my_*/etc/extension/*.xml "$ROOTFS"/my_*/etc/permissions/*.xml; do
                 [ -f "$f" ] && [ ! -L "$f" ] && grep -q "name=\"$RRF\"" "$f" || continue

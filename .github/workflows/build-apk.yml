@@ -75,6 +75,7 @@ jobs:
 
       - name: Verify optional guest partition image safety
         run: |
+          python3 scripts/test-guest-refresh-rate.py
           python3 scripts/test-guest-partitions.py
           python3 scripts/test-guest-vendor.py
           python3 scripts/test-stock-vendor.py

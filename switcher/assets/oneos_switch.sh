@@ -2738,8 +2738,8 @@ esac
 # 0.5.32: rounded first. The S24 FE's One UI lists its 120 Hz mode as fps=120.00001, which the old "<= 120"
 # test dropped: the guest got 60 Hz as its top rate and every swipe ran at 60 (report 44afc238).
 GUEST_REFRESH=120.0
-R=$(awk -F'fps=' '{ for (i = 2; i <= NF; i++) { v = int($i + 0.5); if (v >= 30 && v <= 120 && v > m) m = v } }
-    END { if (m) printf "%.1f", m }' "$STAGE/display_host.txt" 2>/dev/null)
+R=$(oneos_panel_rates "$STAGE/display_host.txt" 2>/dev/null | tail -1)
+[ -z "$R" ] || R="$R.0"
 case "$R" in
     30.0|[3-9][0-9].0|1[01][0-9].0|120.0) GUEST_REFRESH=$R ;;
 esac

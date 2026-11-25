@@ -23,7 +23,7 @@ def between(text, start, end):
 
 
 def local(block):
-    return block.replace('/vendor/etc/', '$V/etc/').replace('/vendor/lib', '$V/lib').replace('/odm/lib', '$V/odm/lib')
+    return block.replace('/vendor/etc/', '$V/etc/').replace('/vendor/lib', '$V/lib').replace('/odm/lib', '$V/odm/lib').replace('/odm/etc/', '$V/odm/etc/')
 
 
 COPY = local(between(PREPARE, 'apm_hw_lib() {\n', "# HyperOS: Xiaomi's miui-services.jar"))
@@ -269,8 +269,9 @@ class Fixture:
         if hyperos:
             (self.miui / 'miui-services.jar').write_text('x')
         if odm:
-            (self.rootfs / 'odm/etc').mkdir(parents=True)
-            (self.rootfs / 'odm/etc/audio_policy_configuration.xml').write_text(plain)
+            for base in (v / 'odm/etc', Path(str(self.rootfs) + str(v / 'odm/etc'))):
+                base.mkdir(parents=True)
+                (base / 'audio_policy_configuration.xml').write_text(PLAIN.replace('primary-out', 'odm-out'))
 
     def run(self, code, env=None, awk=None):
         e = dict(os.environ, R=str(self.r), V=str(self.v), STAGE=str(self.stage), ROOTFS=str(self.rootfs),
@@ -750,12 +751,18 @@ class OtherGuests(unittest.TestCase):
             self.assertEqual([f'Guest audio policy: {etc}/audio_policy_configuration.xml left as it is: {why}'], lines)
             self.assertFalse(any('--bind' in l for l in log), log)
 
-    def test_a_file_the_guest_reads_first_is_left_alone(self):
-        lines, copy, log, etc, f = self.prepare(odm=True)
-        self.assertEqual((['Guest audio policy: the guest reads /odm/etc/audio_policy_configuration.xml; left alone'], []), (lines, log))
-        lines, copy, log, etc, f = self.prepare(sku='s5e8845', env={'SKU_PROP': 's5e8845'})
-        self.assertEqual(([f'Guest audio policy: the guest reads {etc}/audio/sku_s5e8845/audio_policy_configuration.xml; left alone'], []),
-                         (lines, log))
+    def test_priority_policy_keeps_its_own_routes_and_directory(self):
+        for kwargs, suffix, port in (({'odm': True}, '/odm/etc', 'odm-out'),
+                                     ({'sku': 's5e8845'}, '/etc/audio/sku_s5e8845', 'sku-out'),
+                                     ({'odm': True, 'sku': 's5e8845'}, '/odm/etc', 'odm-out')):
+            with self.subTest(kwargs=kwargs):
+                lines, copy, log, etc, f = self.prepare(env={'SKU_PROP': 's5e8845'}, **kwargs)
+                path = str(f.v) + suffix
+                self.assertIn(path + '/audio_policy_configuration.xml', lines[0])
+                self.assertIn(port, copy)
+                self.assertIn('href="' + path + '/a2dpsink', copy)
+                self.assertIn('OneOS BT A2DP Out', copy)
+                self.assertTrue(any(str(f.rootfs) + path + '/audio_policy_configuration.xml' in l for l in log))
 
     def test_not_for_hyperos_an_aidl_audio_hal_or_the_switch(self):
         both_off = {'ONEOS_GUEST_APM_A2DP': '0', 'ONEOS_GUEST_APM_USB': '0', 'ONEOS_GUEST_APM_DEEP_BUFFER': '0'}

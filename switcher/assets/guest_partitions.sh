@@ -14,6 +14,33 @@ oneos_image_fs() {
         *) return 1 ;;
     esac
 }
+# Sorted render rates for the built-in display driving display 0. Prefer
+# DisplayManager's base record. Other logical displays (DeX, casts) can list
+# valid modes for an entirely different display. Read fps, never the vsync clock.
+oneos_panel_rates() {
+    awk '
+        /mBaseDisplayInfo=DisplayInfo\{/ && /displayId 0,/ && /type INTERNAL[,}]/ { base=$0 }
+        /DisplayDeviceInfo\{/ && /type INTERNAL[,}]/ && /state ON[,}]/ {
+            if (!seen[$0]++) { devices++; device=$0 }
+        }
+        /^ *supportedModes \[/ { legacy=$0; legacy_count++ }
+        END {
+            line=base
+            if (!line && devices==1) line=device
+            if (!line && !devices && legacy_count==1) line=legacy
+            if (!sub(/^.*supportedModes[= ]+\[/, "", line)) exit
+            # Child arrays can contain brackets. The list ends after the final mode object.
+            if (match(line, /\}[[:space:]]*\]/)) line=substr(line,1,RSTART)
+            else exit
+            n=split(line, modes, /\}[[:space:]]*,[[:space:]]*\{/)
+            for (i=1;i<=n;i++) {
+                if (!match(modes[i], /(^|[ ,{])fps=[0-9]+([.][0-9]+)?([,} ]|$)/)) continue
+                s=substr(modes[i],RSTART,RLENGTH); sub(/^.*fps=/,"",s)
+                hz=int(s+0.5); if (hz>=30 && hz<=120) rates[hz]=1
+            }
+            for (hz=30;hz<=120;hz++) if (hz in rates) print hz
+        }' "$1"
+}
 oneos_parts_file() {
     [ -f "$1" ] && [ ! -L "$1" ] &&
         [ "$(stat -c %u "$1")" = 0 ] || return 1

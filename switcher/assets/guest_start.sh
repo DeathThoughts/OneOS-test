@@ -1919,11 +1919,23 @@ for id in $(dumpsys SurfaceFlinger --display-id 2>/dev/null | sed -n 's/^Display
         f && /^ *activeMode=\{id=[0-9]+,/ { r = $0; sub(/.*resolution=/, "", r); sub(/,.*/, "", r); res = r }
         f && /^ *\{id=[0-9]+, hwcId=/ { m = $0; sub(/^ *\{id=/, "", m); sub(/,.*/, "", m)
             rr = $0; sub(/.*resolution=/, "", rr); sub(/,.*/, "", rr)
-            v = $0; if (!sub(/.*vsyncRate=/, "", v)) v = 0; k++; id_[k] = m; res_[k] = rr; hz[k] = int(v + 0.5) }
+            v = $0; if (!sub(/.*vsyncRate=/, "", v) || v+0 <= 0) next
+            rate = v+0
+            # VRR timing clocks may run at 240 Hz while the mode presents at
+            # 60, 90 or 120 fps. Use the render limit advertised by the compositor.
+            if (match($0, /peakRefreshRate=[0-9]+([.][0-9]+)?/)) {
+                p=substr($0,RSTART+length("peakRefreshRate="),RLENGTH-length("peakRefreshRate="))+0; if (p>0 && p<rate) rate=p
+            }
+            if (match($0, /minFrameIntervalNs=[0-9]+/)) {
+                ns=substr($0,RSTART+length("minFrameIntervalNs="),RLENGTH-length("minFrameIntervalNs="))+0
+                if (ns>0 && 1000000000/ns<rate) rate=1000000000/ns
+            }
+            k++; id_[k]=m; res_[k]=rr; clock_[k]=v+0
+            hz[k]=int(rate+0.5); if (hz[k]>120) hz[k]=120 }
         END { b = -1; bv = 0; bh = 0; o = -1; ov = 0
-            for (i = 1; i <= k; i++) if (res_[i] == res) { c = hz[i] > 120 ? 120 : hz[i]
-                if (c > bv || (c == bv && hz[i] < bh)) { bv = c; bh = hz[i]; b = id_[i] } }
-            for (i = 1; i <= k; i++) if (res_[i] == res && id_[i] != b && hz[i] != bv && hz[i] >= 48 && hz[i] > ov) { ov = hz[i]; o = id_[i] }
+            for (i = 1; i <= k; i++) if (res && res_[i] == res && hz[i]>=30) {
+                if (hz[i] > bv || (hz[i] == bv && clock_[i] < bh)) { bv=hz[i]; bh=clock_[i]; b=id_[i] } }
+            for (i = 1; i <= k; i++) if (res_[i] == res && hz[i] < bv && hz[i] >= 48 && hz[i] > ov) { ov=hz[i]; o=id_[i] }
             if (b >= 0) print b, bv, o, ov }')
     set -- $sel
     [ $# = 4 ] || { echo "display $id: no modes in the dump, left alone"; continue; }
