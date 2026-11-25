@@ -28,6 +28,8 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(source, f'gh:{migration.REPO}:{migration.TAG}')
             self.assertEqual(int(sizes[sha]), items[sha]['bytes'])
         for manifest in (migration.ROOT / 'scripts/patch-migration').glob('*-*.json'):
+            if manifest.name == 'fork-payloads-v2.json':
+                continue  # Payload-copy plan, not a contributor channel snapshot.
             import json
             for payload in json.loads(manifest.read_text())['files']:
                 self.assertEqual(f'gh:{migration.REPO}:{migration.TAG}', payload['source'])
