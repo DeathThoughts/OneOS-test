@@ -256,6 +256,7 @@ jobs:
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
             --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \
+            --tests '*StageScriptTest.googleAccountQueueIsPrivateBoundToStageAndClearable' \
             --tests '*StageScriptTest.a55VulkanUsesTheColorOsStage'
 
       - name: Verify HyperOS Popsicle image and staging

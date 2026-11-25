@@ -94,7 +94,7 @@ class GoogleAccountsActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 701 && resultCode == RESULT_OK &&
             data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE) == GoogleAccountQueue.TYPE) {
-            val name = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+            val name = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
             if (name != null && GoogleAccountQueue.valid(name)) { names.add(name); selected.add(name) }
             names.addAll(visible())
             render()

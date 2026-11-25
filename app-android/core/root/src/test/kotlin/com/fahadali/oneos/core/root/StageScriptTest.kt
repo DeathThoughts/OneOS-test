@@ -509,6 +509,29 @@ class StageScriptTest {
     }
 
     @Test
+    fun googleAccountQueueIsPrivateBoundToStageAndClearable() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        val marker = StageMarker.parse(File(fr.stage, StageMarker.FILE_NAME).readText())!!
+        val payload = com.fahadali.oneos.core.model.GoogleAccountQueue.encode(listOf("one@example.invalid", "two@example.invalid"))
+        val pending = File(fr.stage, "incoming/google-accounts.pending")
+        fun queue(image: String, created: String, bytes: ByteArray) =
+            fr.run(RootScript.Verb.GOOGLE_ACCOUNTS, image, created, bytes.size.toString(), stdin = bytes)
+        val created = marker.createdEpoch.toString()
+        refused(queue(marker.imageId, "1", payload), "stage changed")
+        assertFalse(pending.exists())
+        refused(queue(marker.imageId, created, "invalid".toByteArray()), "invalid account queue")
+        assertFalse(pending.exists())
+        s.ok(queue(marker.imageId, created, payload))
+        assertArrayEquals(payload, pending.readBytes())
+        assertEquals(setOf(java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE),
+            java.nio.file.Files.getPosixFilePermissions(pending.toPath()))
+        s.ok(queue(marker.imageId, created, ByteArray(0)))
+        assertFalse(pending.exists())
+    }
+
+    @Test
     fun selfUpdateTakesOnlyTheAppsCheckedDownload() = eachShell { fr ->
         val apk = "PK\u0003\u0004 not really an APK\n".repeat(100).toByteArray()
         val sha = Hashes.sha256(apk)

@@ -13,12 +13,26 @@ import com.fahadali.oneos.core.model.GoogleAccountQueue
 import com.fahadali.oneos.core.model.Hashes
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.InputStream
+import java.io.ByteArrayOutputStream
+
+private fun InputStream.readAccountQueue(): ByteArray {
+    val out = ByteArrayOutputStream()
+    val buf = ByteArray(4096)
+    while (true) {
+        val n = read(buf)
+        if (n < 0) break
+        require(out.size() + n <= GoogleAccountQueue.MAX_BYTES)
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
+}
 
 /** The inbox is local and app-private, excluded from backup. Only root in this guest can submit hints. */
 internal object GoogleAccountInbox {
     private fun file(ctx: Context) = AtomicFile(File(ctx.noBackupFilesDir, "google-account-queue"))
     @Synchronized fun load(ctx: Context): List<String> = runCatching {
-        file(ctx).openRead().use { GoogleAccountQueue.decode(it.readNBytes(GoogleAccountQueue.MAX_BYTES + 1)) }
+        file(ctx).openRead().use { GoogleAccountQueue.decode(it.readAccountQueue()) }
     }.getOrDefault(emptyList())
     @Synchronized fun store(ctx: Context, names: Collection<String>) {
         val data = GoogleAccountQueue.encode(names)
@@ -50,7 +64,7 @@ class GoogleAccountInboxProvider : ContentProvider() {
         requireRoot()
         val f = incoming()
         val ok = if (method != "commit" || arg == null || !Regex("[0-9a-f]{64}").matches(arg)) false else runCatching {
-            val bytes = f.inputStream().use { it.readNBytes(GoogleAccountQueue.MAX_BYTES + 1) }
+            val bytes = f.inputStream().use { it.readAccountQueue() }
             require(Hashes.sha256(bytes) == arg)
             val names = GoogleAccountQueue.decode(bytes)
             GoogleAccountInbox.merge(requireNotNull(context), names)
