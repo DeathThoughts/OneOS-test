@@ -1,0 +1,40 @@
+name: Inspect upstream 0.5.46 merge
+on:
+  push:
+    branches: [tools/reconcile-upstream-046]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Inspect unresolved semantic changes against runtime candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config core.hooksPath /dev/null
+          git config user.name 'OneOS integration review'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin refs/heads/integration/upstream-0.5.46-runtime
+          git fetch --no-tags https://github.com/fahadalijaved/OneOS.git refs/heads/main
+          git checkout --detach 5d075134b9932a425a9adb294ee41066a72366d1
+          git -c merge.conflictStyle=diff3 merge --no-ff --no-commit 7d65defdd1245708b71312b77eaeeb203ac4d4b7 || true
+          git diff --name-only --diff-filter=U
+          python3 - <<'PYTHON'
+          import re
+          from pathlib import Path
+          paths = ["switcher/assets/guest_prepare.sh", "switcher/assets/guest_start.sh",
+                   "switcher/assets/oneos_switch.sh", "scripts/release-files.py"]
+          for name in paths:
+              print("FILE:", name)
+              txt = Path(name).read_text()
+              for m in re.finditer(r"(?ms)^<<<<<<<.*?^>>>>>>>[^\n]*", txt):
+                  h = m.group()
+                  print(h if len(h) <= 24000 else h[:12000] + "\n[truncated]\n" + h[-12000:])
+          PYTHON
+          git merge --abort
