@@ -67,6 +67,42 @@ def verify_asset(asset, sha, size, tag, directory):
         path.unlink()
     return True
 
+def verify_channel(existing, directory, publish, target):
+    # Keep the old channel release intact for older APKs. Rebase only the two
+    # explicitly replaceable contributor payloads onto the current stable set.
+    manifest = ROOT / "scripts/patch-migration/channel-v2/f8-n6-global-f8.json"
+    data = json.loads(manifest.read_text())
+    packages = ROOT / "app-android/packages"
+    base = {name: sha for sha, name in rows(packages / "n6-global-f8.sha256").items()}
+    guards = {name: sha for sha, name in rows(packages / "n6-global-f8.guards.txt").items()}
+    entries = {item["name"]: item for item in data["files"]}
+    replaceable = {"Fold8SystemUI.apk", "GlobalVerifiedAddons.tar"}
+    if set(entries) != set(base) or len(entries) != len(data["files"]):
+        raise RuntimeError("Fold8 channel set differs")
+    for name, item in entries.items():
+        sha, size = item["sha256"], item["bytes"]
+        if (name not in replaceable and sha != base[name]) or (name in guards and sha != guards[name]):
+            raise RuntimeError(f"Fold8 channel changes a guarded or non-replaceable file: {name}")
+        match = SOURCE.fullmatch(item["source"])
+        if not match or not PIN.fullmatch(sha) or not 0 < size <= 268435456:
+            raise RuntimeError(f"Invalid Fold8 channel pin: {name}")
+        tag = match.group(1)
+        if tag not in existing:
+            existing[tag] = migration.assets(tag) or {}
+        if not verify_asset(existing[tag].get(sha), sha, size, tag, directory):
+            raise RuntimeError(f"Missing Fold8 channel payload: {name}")
+    tag = "fork-fold8-experimental-v2"
+    current = migration.assets(tag) or {}
+    asset = current.get(manifest.name)
+    digest = f"sha256:{migration.digest(manifest)}"
+    if asset is None and publish:
+        migration.ensure_release(tag, target)
+        migration.gh("release", "upload", tag, str(manifest))
+        asset = (migration.assets(tag) or {}).get(manifest.name)
+    if not asset or asset.get("state") != "uploaded" or asset.get("size") != manifest.stat().st_size or asset.get("digest") != digest:
+        raise RuntimeError("Fold8 channel v2 manifest is missing or differs from reviewed snapshot")
+    print("Verified Fold8 experimental channel v2 (old release preserved).", flush=True)
+
 def run(publish=False, target=None):
     remote, sizes, pending, active = load()
     tags = {SOURCE.fullmatch(remote[h]).group(1) for h in active}
@@ -94,6 +130,7 @@ def run(publish=False, target=None):
             tag = SOURCE.fullmatch(remote[sha]).group(1)
             if not verify_asset(existing[tag].get(sha), sha, sizes[sha], tag, directory):
                 raise RuntimeError(f"Fork asset still missing after publication: {tag}/{sha}")
+        verify_channel(existing, directory, publish, target)
     print(f"Verified all {len(active)} active pinned payloads in {len(tags)} fork releases.", flush=True)
 
 def main():

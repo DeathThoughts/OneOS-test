@@ -40,11 +40,22 @@ class MigrationTests(unittest.TestCase):
         packages = migration.ROOT / 'app-android/packages'
         base = {line.split()[1]: line.split()[0] for line in (packages / 'n6-global-f8.sha256').read_text().splitlines()
                 if line and not line.startswith('#')}
-        snapshot = json.loads((migration.ROOT / 'scripts/patch-migration/f8-n6-global-f8.json').read_text())
+        snapshot = json.loads((migration.ROOT / 'scripts/patch-migration/channel-v2/f8-n6-global-f8.json').read_text())
         self.assertEqual(set(base), {file['name'] for file in snapshot['files']})
         for file in snapshot['files']:
             if file['name'] not in ('Fold8SystemUI.apk', 'GlobalVerifiedAddons.tar'):
                 self.assertEqual(base[file['name']], file['sha256'])
+        remote = dict(line.split(None, 1) for line in (packages / 'remote.txt').read_text().splitlines()
+                      if line and not line.startswith('#'))
+        sizes = dict(line.split() for line in (packages / 'sizes.txt').read_text().splitlines()
+                     if line and not line.startswith('#'))
+        for file in snapshot['files']:
+            if file['name'] not in ('Fold8SystemUI.apk', 'GlobalVerifiedAddons.tar'):
+                self.assertEqual(remote[file['sha256']], file['source'])
+                self.assertEqual(int(sizes[file['sha256']]), file['bytes'])
+        guards = {line.split()[1]: line.split()[0] for line in (packages / 'n6-global-f8.guards.txt').read_text().splitlines()
+                  if line and not line.startswith('#')}
+        self.assertEqual(guards, {f['name']: f['sha256'] for f in snapshot['files'] if f['name'] in guards})
 
     def test_corrupt_same_size_and_truncated_downloads_are_discarded(self):
         for data in (b'evil', b'go'):
