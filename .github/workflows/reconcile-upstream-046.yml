@@ -1,40 +1,69 @@
-name: Inspect upstream 0.5.46 merge
+name: Reconcile upstream OneOS 0.5.46
 on:
   push:
     branches: [tools/reconcile-upstream-046]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+concurrency:
+  group: oneos-046-reviewed-integration
+  cancel-in-progress: true
 jobs:
-  inspect:
+  reconcile:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Inspect unresolved semantic changes against runtime candidate
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Merge pinned versions and resolve reviewed conflicts
         shell: bash
         run: |
           set -euo pipefail
+          cp scripts/reconcile-upstream-046.py "$RUNNER_TEMP/reconcile.py"
           git config core.hooksPath /dev/null
           git config user.name 'OneOS integration review'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch --no-tags origin refs/heads/integration/upstream-0.5.46-runtime
           git fetch --no-tags https://github.com/fahadalijaved/OneOS.git refs/heads/main
-          git checkout --detach 5d075134b9932a425a9adb294ee41066a72366d1
+          git checkout --detach d21d28b9557f0dc3bff7c7c493daec0493c3c697
           git -c merge.conflictStyle=diff3 merge --no-ff --no-commit 7d65defdd1245708b71312b77eaeeb203ac4d4b7 || true
-          git diff --name-only --diff-filter=U
-          python3 - <<'PYTHON'
-          import re
-          from pathlib import Path
-          paths = ["switcher/assets/guest_prepare.sh", "switcher/assets/guest_start.sh",
-                   "switcher/assets/oneos_switch.sh", "scripts/release-files.py"]
-          for name in paths:
-              print("FILE:", name)
-              txt = Path(name).read_text()
-              for m in re.finditer(r"(?ms)^<<<<<<<.*?^>>>>>>>[^\n]*", txt):
-                  h = m.group()
-                  print(h if len(h) <= 24000 else h[:12000] + "\n[truncated]\n" + h[-12000:])
-          PYTHON
-          git merge --abort
+          git rev-parse -q --verify MERGE_HEAD
+          python3 "$RUNNER_TEMP/reconcile.py" d21d28b9557f0dc3bff7c7c493daec0493c3c697 7d65defdd1245708b71312b77eaeeb203ac4d4b7
+          for s in switcher/assets/guest_prepare.sh switcher/assets/guest_start.sh switcher/assets/oneos_switch.sh switcher/assets/guest_props.sh switcher/assets/guest_runtime.sh switcher/assets/return_to_oneui.sh app-android/app/src/full/assets/root/oneos_root.sh; do sh -n "$s"; done
+      - name: Rebuild merged audio DEX and check catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git hash-object switcher/patches/build_edm_stub.sh)" == "$(git rev-parse d21d28b9557f0dc3bff7c7c493daec0493c3c697:switcher/patches/build_edm_stub.sh)" ]]
+          sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:?no Android SDK}}
+          manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$manager" ]; then manager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -n1); fi
+          yes | "$manager" --licenses >/dev/null || true
+          "$manager" --install 'platforms;android-37.0' 'build-tools;36.0.0'
+          ANDROID_HOME="$sdk" sh switcher/patches/build_edm_stub.sh
+          git add switcher/assets/OneOSEdmStub.dex
+          git diff --cached --check
+          python3 scripts/migrate-all-patch-payloads.py --check-catalog
+          python3 scripts/test-patch-migration.py
+          python3 scripts/test-patch-channel.py
+          git commit -m 'Merge OneOS 0.5.46 with reviewed fork-specific runtime and catalog resolutions'
+      - name: Publish candidate to existing draft PR, never debug
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: DeathThoughts/OneOS-test
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD^1)" == 'd21d28b9557f0dc3bff7c7c493daec0493c3c697' ]]
+          [[ "$(git rev-parse HEAD^2)" == '7d65defdd1245708b71312b77eaeeb203ac4d4b7' ]]
+          head=$(gh api repos/DeathThoughts/OneOS-test/pulls/76 --jq .head.sha)
+          [[ "$head" == '7d65defdd1245708b71312b77eaeeb203ac4d4b7' ]]
+          gh auth setup-git
+          git push origin HEAD:refs/heads/sync/upstream-0.5.46
+          gh pr comment 76 --body "Reviewed candidate created at $(git rev-parse HEAD). Shell syntax and catalog checks passed; full APK CI and device testing still required. Cross-SDK mode stays opt-in."
