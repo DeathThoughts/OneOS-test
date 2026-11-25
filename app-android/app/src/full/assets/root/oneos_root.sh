@@ -3247,22 +3247,22 @@ do_google_accounts() {
     idle_or_refuse
     [ ! -f "$STAGE/persist_session.active" ] || refuse "restore the last session first"
     [ -d "$STAGE/incoming" ] && mine "$STAGE/incoming" || refuse "unsafe incoming folder"
-    pending="$STAGE/incoming/google-accounts.pending"
-    if [ -L "$pending" ] || { [ -e "$pending" ] && { [ ! -f "$pending" ] || ! mine "$pending"; }; }; then
+    GA_PENDING="$STAGE/incoming/google-accounts.pending"
+    if [ -L "$GA_PENDING" ] || { [ -e "$GA_PENDING" ] && { [ ! -f "$GA_PENDING" ] || ! mine "$GA_PENDING"; }; }; then
         refuse "unsafe account queue"
     fi
     if [ "$3" = 0 ]; then
-        rm -f "$pending" || die "could not clear account queue"
+        rm -f "$GA_PENDING" || die "could not clear account queue"
         say "@@OK google-accounts"
         return
     fi
-    part=$(umask 077; mktemp "$STAGE/incoming/google-accounts.XXXXXX") || die "could not prepare account queue"
-    head -c "$3" > "$part" || { rm -f "$part"; die "could not write account queue"; }
-    [ "$(stat -c %s "$part")" = "$3" ] && own "$part" 0600 || { rm -f "$part"; refuse "incomplete account queue"; }
+    GA_TMP=$(umask 077; mktemp "$STAGE/incoming/google-accounts.XXXXXX") || die "could not prepare account queue"
+    head -c "$3" > "$GA_TMP" || { rm -f "$GA_TMP"; die "could not write account queue"; }
+    [ "$(stat -c %s "$GA_TMP")" = "$3" ] && own "$GA_TMP" 0600 || { rm -f "$GA_TMP"; refuse "incomplete account queue"; }
     # Strict envelope and bounded size. The guest independently validates every address.
-    [ "$(head -n 1 "$part")" = ONEOS-GOOGLE-ACCOUNTS-1 ] &&
-        [ "$(tail -n 1 "$part")" = END ] || { rm -f "$part"; refuse "invalid account queue"; }
-    mv -f "$part" "$pending" || { rm -f "$part"; die "could not publish account queue"; }
+    [ "$(head -n 1 "$GA_TMP")" = ONEOS-GOOGLE-ACCOUNTS-1 ] &&
+        [ "$(tail -n 1 "$GA_TMP")" = END ] || { rm -f "$GA_TMP"; refuse "invalid account queue"; }
+    mv -f "$GA_TMP" "$GA_PENDING" || { rm -f "$GA_TMP"; die "could not publish account queue"; }
     say "@@OK google-accounts"
 }
 
