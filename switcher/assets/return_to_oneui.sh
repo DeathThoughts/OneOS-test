@@ -698,25 +698,34 @@ if [ "$MODE" != inplace ]; then
     # backdownload) sent every later boot to Download Mode.
     echo "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) $(date +%s)" > $S/return_inplace.done
     sync
+    # oneui8test13 (S22 3d35a984): this shell's /system went away during the return ("/system/bin/setprop: No
+    # such file or directory" for setprop, sleep, reboot and sync, then "reboot: applet not found"), and the
+    # phone stayed on the return screen until the user forced a restart. Each step then runs in init's mount
+    # namespace, with busybox's sleep and sync; the kernel's reboot is the last resort.
+    sysrun() { # <tool> <args...>
+        if [ -x "/system/bin/$1" ]; then "/system/bin/$@"
+        else in_init_ns "/system/bin/$@"; fi
+    }
+    zz() { if [ -x /system/bin/sleep ]; then sleep "$1"; elif [ -n "$BB" ]; then "$BB" sleep "$1"; fi; }
     # A guest shutdown request (low battery, thermal, power off), recorded by the
     # guarded ShutdownThread, becomes a real host shutdown; anything else reboots.
-    req=$(getprop oneos.guest.powerctl)
-    setprop oneos.guest.powerctl "" 2>/dev/null
+    req=$(sysrun getprop oneos.guest.powerctl)
+    sysrun setprop oneos.guest.powerctl "" 2>/dev/null
     case "$req" in
         shutdown*)
             echo "Guest asked to shut down ($req): powering off."
-            setprop sys.powerctl shutdown,oneos-guest-shutdown ;;
+            sysrun setprop sys.powerctl shutdown,oneos-guest-shutdown ;;
         *)
             echo "Rebooting into One UI (ONEOS_RETURN_MODE=inplace restarts it in place instead)."
-            setprop sys.powerctl reboot,oneos-return ;;
+            sysrun setprop sys.powerctl reboot,oneos-return ;;
     esac
-    sleep 30
-    reboot
+    zz 30
+    sysrun reboot
     # Neither request rebooted (run 46 showed both refused under Enforcing):
     # the kernel's reboot after a sync.
-    sleep 10
-    sync
-    "$BB" reboot -f
+    zz 10
+    if [ -x /system/bin/sync ]; then sync; elif [ -n "$BB" ]; then "$BB" sync; fi
+    [ -n "$BB" ] && "$BB" reboot -f
     exit 0
 fi
 

@@ -2824,6 +2824,18 @@ if [ -f /data/guest_audio.flag ]; then
             miss=$((miss + 1)); [ $miss -lt 2 ] && continue
             kill -9 $as 2>/dev/null
             now=$(date +%s); [ $((now - last)) -gt 120 ] && r=0; last=$now
+            # 0.5.45 (S23 FE One UI 8.5 8a093c12, d6be5a01): the Google app voice match model (110628 bytes) is
+            # larger than the VTS buffer of the Exynos sound trigger HAL (0x16800), which then died in
+            # vts_load_sound_model at every start of recognition, the audio HAL with it, every 75 s (17 deaths,
+            # no sound for most of the session). Once that is in the crash log: no DSP hotword for the Google app
+            # in this guest (RECORD_AUDIO_HOTWORD ignore, kept in its app ops; SoundTriggerHelper then starts no
+            # recognition) and the app stopped so it attaches again under that rule.
+            if [ ! -f /data/oneos_hotword_off.log ] && logcat -d -b crash 2>/dev/null | grep -q "(vts_load_sound_model+"; then
+                g=com.google.android.googlequicksearchbox
+                o=$(/system/bin/sh /data/oneos_genv.sh /system/bin/cmd appops set $g RECORD_AUDIO_HOTWORD ignore 2>&1 | tr -s " \n" " " | head -c 80)
+                /system/bin/sh /data/oneos_genv.sh /system/bin/am force-stop $g >/dev/null 2>&1
+                echo "$(date +%T) audio HAL died loading a voice wake-up model (vts_load_sound_model): Hey Google DSP hotword off for $g ($o)" | tee /data/oneos_hotword_off.log
+            fi
             # 0.4.60: no hand-over after registration. Every guest framework is not
             # Samsung, and Samsung audioserver killed it (Invalid usage 1005; 0.4.59
             # Pixel reports 2c9c6419, 630e5625, 7fe453b5: a sound model Samsung sound
@@ -2930,8 +2942,36 @@ if [ -f /data/guest_audio.flag ] && [ "${ONEOS_GUEST_CALL_SIM:-1}" != 0 ]; then
                 echo "$(date +%T) vendor audio library search: cached for this vendor build"
             fi
             if [ -z "$lib" ]; then
-                echo "$(date +%T) no vendor audio library has g_call_sim_slot and updateSecVSID: SIM slot loop off"
-                exit 0
+                # 0.5.40, the Galaxy S24 Ultra (the newer Qualcomm audio HAL, "AHAL: AudioVoice"; ColorOS
+                # e9377958: a call on SIM 2 started on VSID_1 0x11C05000 and was silent): that HAL takes
+                # the Qualcomm voice keys, "vsid=<session>;call_state=<1 inactive, 2 active>", read
+                # together (AudioVoice::VoiceSetParameters). During a call on SIM slot 2 the session
+                # moves to VSID_2 0x11DC5000 (started first, then VSID_1 stopped); the HAL ends both
+                # when the mode goes back to normal. Through the guest AudioSystem (OneOSAudioParam).
+                q=$(grep -l -s -F VoiceSetParameters /vendor/lib64/*audio*.so /vendor/lib64/hw/*audio*.so /vendor/bin/hw/*audio* 2>/dev/null | head -n 1)
+                if [ -z "$q" ] || ! grep -q -s -F call_state "$q" || ! grep -q -s -F vsid "$q"; then
+                    echo "$(date +%T) no vendor audio library has g_call_sim_slot and updateSecVSID: SIM slot loop off"
+                    exit 0
+                fi
+                echo "$(date +%T) Qualcomm voice keys (vsid, call_state) in $q: SIM slot 2 calls moved to VSID_2"
+                qset() { /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "$1" 2>&1 | tr -s " \n" " " | head -c 100; }
+                moved=""
+                while true; do
+                    sleep 1
+                    [ -f /data/guest_audio.flag ] || continue
+                    st=$(dumpsys telephony.registry 2>/dev/null | $bb awk -F= "/^ *Phone Id=/ { p = \$2 } /^ *mCallState=/ { print p \":\" \$2 }")
+                    off=""
+                    for e in $st; do [ "${e#*:}" = 2 ] && off=${e%:*}; done
+                    if [ -z "$off" ]; then
+                        [ -z "$moved" ] || echo "$(date +%T) call ended (VSID_2 session closes with the normal mode)"
+                        moved=""; continue
+                    fi
+                    [ "$off" = 1 ] && [ -z "$moved" ] || continue
+                    moved=1
+                    echo "$(date +%T) call on SIM slot 1 (SIM 2): vsid=299651072;call_state=2 -> $(qset "vsid=299651072;call_state=2"); vsid=297816064;call_state=1 -> $(qset "vsid=297816064;call_state=1")"
+                    sleep 1
+                    logcat -d -t 200 -s AHAL 2>/dev/null | $bb grep -E "UpdateCalls|VoiceSetParameters" | tail -n 3
+                done
             fi
             echo "$(date +%T) audio HAL keys found in $lib"
         fi
