@@ -58,36 +58,35 @@ jobs:
             exit 0
           fi
 
-          # Keep one integration PR at a time. Only fast-forward an untouched
-          # draft that points into upstream history; never overwrite manual fixes.
+          # Re-audit raw drafts every run; preserve any manual resolution.
           open=$(gh pr list --state open --base debug --limit 100 \
             --json number,headRefName,headRefOid,isDraft \
             --jq '[.[] | select(.headRefName | startswith("sync/upstream-"))] | first // empty')
           gh auth setup-git
           existing_pr=""
           existing_head=""
-          expected_branch="sync/upstream-${upstream:0:12}"
+          raw_draft=false
+          branch="sync/upstream-${upstream:0:12}"
           if [[ -n "$open" ]]; then
             number=$(jq -r .number <<< "$open")
             branch=$(jq -r .headRefName <<< "$open")
             old=$(jq -r .headRefOid <<< "$open")
-            if [[ $(jq -r .isDraft <<< "$open") == false && "$branch" == "$expected_branch" ]]; then
+            git fetch --no-tags origin "refs/heads/$branch"
+            if [[ $(jq -r .isDraft <<< "$open") == true ]] &&
+               git merge-base --is-ancestor "$old" "$upstream"; then
               existing_pr="$number"
               existing_head="$old"
-            elif [[ $(jq -r .isDraft <<< "$open") == true ]] && [[ "$old" != "$upstream" ]] &&
-               git cat-file -e "$old^{commit}" 2>/dev/null && git merge-base --is-ancestor "$old" "$upstream"; then
-              git push origin "$upstream:refs/heads/$branch"
-              echo "Updated untouched upstream draft #$number to $upstream." >> "$GITHUB_STEP_SUMMARY"
-              echo "pr=$number" >> "$GITHUB_OUTPUT"
-              exit 0
+              raw_draft=true
+            elif [[ $(jq -r .isDraft <<< "$open") == false ]]; then
+              existing_pr="$number"
+              existing_head="$old"
             else
-              echo "Existing integration PR #$number retained (no overwrite of manual work)." >> "$GITHUB_STEP_SUMMARY"
+              echo "Existing integration PR #$number has manual work; retained." >> "$GITHUB_STEP_SUMMARY"
               echo "pr=$number" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
 
-          branch="sync/upstream-${upstream:0:12}"
           git checkout --detach "$base"
           git merge --no-ff --no-commit "$upstream" || true
           if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
@@ -96,6 +95,12 @@ jobs:
           fi
           conflicts=$(git diff --name-only --diff-filter=U)
           other=$(printf '%s\n' "$conflicts" | grep -v -E '^(app-android/packages/(remote|sizes)\.txt)?$' || true)
+          echo "Conflicting paths (before catalog reconciliation):"
+          printf '%s\n' "$conflicts"
+          if [[ -n "$other" ]]; then
+            git diff --cc --stat
+            git diff --cc --no-color | head -c 160000 || true
+          fi
           # Only the two hash-keyed metadata tables can be reconciled automatically.
           # Never choose ours/theirs wholesale for executable code, pins or guards.
           reason=""
@@ -125,15 +130,26 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           if [[ -n "$existing_pr" ]]; then
-            # Recompute the merge against today's exact base and upstream.
-            # Never auto-promote manually edited commits or stale candidates.
-            if [[ -n "$reason" ]] || ! git cat-file -e "$existing_head^{commit}" 2>/dev/null ||
-               [[ "$(git show -s --format=%P "$existing_head")" != "$base $upstream" ]] ||
-               [[ "$(git rev-parse "$existing_head^{tree}")" != "$(git rev-parse "$candidate^{tree}")" ]]; then
-              echo "Existing PR #$existing_pr no longer matches a clean reproducible integration; manual review." >> "$GITHUB_STEP_SUMMARY"
+            echo "pr=$existing_pr" >> "$GITHUB_OUTPUT"
+            if [[ "$raw_draft" == true ]]; then
+              if [[ -n "$reason" ]]; then
+                if [[ "$existing_head" != "$upstream" ]]; then
+                  git push origin "$upstream:refs/heads/$branch"
+                fi
+                echo "PR #$existing_pr still requires manual resolution." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              git push origin "$candidate:refs/heads/$branch"
+              gh pr ready "$existing_pr"
+              echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "pr=$existing_pr" >> "$GITHUB_OUTPUT"
+            if [[ -n "$reason" ]] ||
+               [[ "$(git show -s --format=%P "$existing_head")" != "$base $upstream" ]] ||
+               [[ "$(git rev-parse "$existing_head^{tree}")" != "$(git rev-parse "$candidate^{tree}")" ]]; then
+              echo "PR #$existing_pr no longer matches a reproducible integration; manual review." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
             echo "candidate=$existing_head" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -228,9 +244,77 @@ jobs:
           PYTHON
           echo "eligible=true" >> "$GITHUB_OUTPUT"
 
-  preflight:
+  migrate-candidate:
     needs: [prepare, gate]
     if: needs.gate.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    concurrency:
+      group: fork-patch-payload-migration
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Copy only candidate pin metadata into trusted checkout
+        env:
+          CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+          BASE: ${{ needs.prepare.outputs.base }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$CANDIDATE"
+          [[ "$(git rev-parse HEAD)" == "$BASE" ]]
+          [[ "$(git rev-parse "$CANDIDATE^1")" == "$BASE" ]]
+          python3 - <<'PYTHON'
+          import os, re, subprocess
+          from pathlib import Path
+          candidate = os.environ["CANDIDATE"]
+          directory = Path("app-android/packages")
+          allowed = re.compile(r"app-android/packages/[a-z0-9-]+\.sha256")
+          special = {"app-android/packages/remote.txt", "app-android/packages/sizes.txt",
+                     "scripts/patch-migration/fork-payloads-v2.json"}
+          entries = subprocess.check_output(["git", "ls-tree", "-r", "-z", candidate, "--",
+                     str(directory), "scripts/patch-migration/fork-payloads-v2.json"]).decode().split("\0")
+          copied = set()
+          for entry in filter(None, entries):
+              info, path = entry.split("\t", 1)
+              if path not in special and not allowed.fullmatch(path):
+                  continue
+              mode, kind, sha = info.split()
+              if mode != "100644" or kind != "blob":
+                  raise RuntimeError(f"Unexpected metadata mode: {path}")
+              Path(path).write_bytes(subprocess.check_output(["git", "cat-file", "blob", sha]))
+              copied.add(path)
+          if not special <= copied:
+              raise RuntimeError("Incomplete candidate metadata")
+          for path in directory.glob("*.sha256"):
+              if str(path) not in copied:
+                  path.unlink()
+          PYTHON
+      - name: Verify and publish missing immutable payloads with trusted migration code
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ needs.prepare.outputs.base }}
+        run: |
+          set -euo pipefail
+          # Never run scripts from the candidate with a write token.
+          python3 - <<'PYTHON'
+          import importlib.util, os
+          from pathlib import Path
+          script = Path("scripts/migrate-all-patch-payloads.py")
+          spec = importlib.util.spec_from_file_location("migration", script)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.run(publish=True, target=os.environ["BASE"])
+          PYTHON
+
+  preflight:
+    needs: [prepare, gate, migrate-candidate]
+    if: needs.gate.outputs.eligible == 'true' && needs.migrate-candidate.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -272,6 +356,17 @@ jobs:
           GH_PACKAGES_USER: ${{ github.actor }}
           GH_PACKAGES_TOKEN: ${{ github.token }}
         run: sh scripts/build-guest-manager.sh debug
+
+      - name: Verify optional guest partition image safety
+        run: |
+          python3 scripts/test-guest-refresh-rate.py
+          python3 scripts/test-guest-partitions.py
+          python3 scripts/test-guest-vendor.py
+          python3 scripts/test-stock-vendor.py
+          python3 scripts/test-stock-odm.py
+          python3 scripts/test-stock-parts-setup.py
+          sh -n switcher/assets/guest_partitions.sh
+          sh -n scripts/inspect-guest-vendor.sh
 
       - name: Verify update handling
         env:
@@ -420,7 +515,7 @@ jobs:
           echo "Promoted $CANDIDATE to debug; signed build dispatched." >> "$GITHUB_STEP_SUMMARY"
 
   report:
-    needs: [prepare, gate, preflight, promote]
+    needs: [prepare, gate, migrate-candidate, preflight, promote]
     if: always() && needs.prepare.outputs.candidate != '' && needs.prepare.outputs.pr != ''
     runs-on: ubuntu-latest
     permissions:
@@ -433,7 +528,8 @@ jobs:
           PR: ${{ needs.prepare.outputs.pr }}
           RESULT: ${{ needs.preflight.result }}
           GATE: ${{ needs.gate.result }}
+          MIGRATION: ${{ needs.migrate-candidate.result }}
           PROMOTE: ${{ needs.promote.result }}
           CANDIDATE: ${{ needs.prepare.outputs.candidate }}
         run: |
-          gh pr comment "$PR" --body "Automated checks for `$CANDIDATE`: scope **$GATE**, tests/build **$RESULT**, debug promotion **$PROMOTE**. Physical device validation and stable release remain manual. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh pr comment "$PR" --body "Automated checks for $CANDIDATE: scope **$GATE**, patch migration **$MIGRATION**, tests/build **$RESULT**, debug promotion **$PROMOTE**. Physical device validation and stable release remain manual. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
