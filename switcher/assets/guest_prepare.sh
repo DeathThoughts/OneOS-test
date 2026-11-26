@@ -1642,15 +1642,24 @@ if { [ -d /system_ext/apex ] && [ -d "$GUEST_SYSTEM_EXT" ]; } || [ $INJ = 1 ] ||
             # 0.5.35: One UI 9.5 installs a system package for a user only when its user-type allow list names it
             # (A17 0d249e83, 0.5.34: "PackageManager: Package is not in allowed list : com.fahadali.oneos.guest", the
             # OneOS app missing although bound in /system_ext/app/OneOSGuest). Its entry, beside it in system_ext.
+            # 0.5.38: that message is not the user-type list. One UI 9.5's InstallPackageHelper.processParseResult
+            # (PMRune.PM_ALLOWED_SYSTEM_PRELOAD_APPS) drops every system package SystemConfig's
+            # <allowed-system-preload package=.../> entries do not name (the image's list:
+            # /system/etc/sysconfig/allowed-system-preload-apps.xml, 1065 packages); 0.5.36 sessions still logged it with
+            # the user-type entry in place (A57 2ba7dba7, One UI 9 -> 9.5). The OneOS app and the /oem overlays get
+            # that entry too.
             if grep -q '^ro.build.version.oneui=' "$ROOTFS/system/build.prop" 2>/dev/null && [ -d "$OV/up/app/OneOSGuest" ]; then
                 mkdir -p "$OV/up/etc/sysconfig" &&
                     printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<config>' \
+                        '    <allowed-system-preload package="com.fahadali.oneos.guest" />' \
+                        '    <allowed-system-preload package="oneos.overlay.pixel.statusbar" />' \
+                        '    <allowed-system-preload package="oneos.overlay.phone.injection" />' \
                         '    <install-in-user-type package="com.fahadali.oneos.guest">' \
                         '        <install-in user-type="FULL" />' '        <install-in user-type="SYSTEM" />' \
                         '    </install-in-user-type>' '</config>' > "$OV/up/etc/sysconfig/oneos-guest-user-types.xml" &&
                     chmod 755 "$OV/up/etc" "$OV/up/etc/sysconfig" && chmod 644 "$OV/up/etc/sysconfig/oneos-guest-user-types.xml" &&
                     $BB chcon -R u:object_r:system_file:s0 "$OV/up/etc" 2>/dev/null &&
-                    echo "OneOS app: in One UI's user-type allow list (system_ext/etc/sysconfig)"
+                    echo "OneOS app: in One UI 9.5's allowed system preloads and user-type allow list (system_ext/etc/sysconfig)"
             fi
         fi
         # Features my_product declares (0.4.38): the container does not load
@@ -5305,6 +5314,47 @@ if [ "${ONEOS_GUEST_SOUNDBOOSTER_PATCH:-1}" = 1 ] && [ -f /vendor/lib64/soundfx/
         fi
     fi
 fi
+# One UI 9.5's audio HAL client (libaudiohal@aidl.so, StreamHalAidl::getBufferSize) divides the primary
+# module's stream buffer by 8 unless the HAL answers its l_uhq_buffer_scaling parameter with 0, an answer
+# only One UI 9.5's own audio HALs give. On a phone whose AIDL audio HAL is older every output got an
+# eighth of the HAL's buffer: Exynos A56, A57 and S26 FE sessions had a 120-frame primary and a 24-frame
+# fast output (0.5 ms mix periods) where every other system on the same phones has 960 and 192, and the
+# fast mixer underran thousands of times (S26 FE 4bb06b8c: 10799 underruns, 38579 overruns; A57
+# 2ba7dba7: 1280): crackling sound. The session binds a copy without the division (one instruction,
+# lsr #3 at 0x15bd18 -> nop), made here from the image's file only (sha256 pinned before and after); a
+# phone already on One UI 9.5 keeps the image's. ONEOS_GUEST_AUDIO_BUFFER_SCALING=1 leaves it alone.
+# 0.5.43: never `service list` here (0.5.39-0.5.42 did): it asks every service for its interface, One UI's
+# surfaceflinger is frozen behind the gap splash at this point, so it never returned and the switch hung on
+# the OneOS logo before the guest started (S22 Exynos ee0596c2, S23 FE 6110a679: the log ends at the
+# renderfright line; the same hang as 0.4.11, guest_props.sh). Only a servicemanager lookup, with a timeout.
+AHL="$ROOTFS/system/lib64/libaudiohal@aidl.so"
+AHS="$STAGE/libaudiohal_aidl.session.so"
+rm -f "$AHS"
+HOST_ONEUI=$(getprop ro.build.version.oneui); case "$HOST_ONEUI" in ''|*[!0-9]*) HOST_ONEUI=0 ;; esac
+if [ -f "$AHL" ] && [ ! -L "$AHL" ] && [ "${ONEOS_GUEST_AUDIO_BUFFER_SCALING:-0}" != 1 ] &&
+   grep -q '^ro.build.version.oneui=' "$ROOTFS/system/build.prop" 2>/dev/null &&
+   [ "$HOST_ONEUI" -lt 90500 ] &&
+   { $BB grep -rqs 'android.hardware.audio.core' /vendor/etc/vintf/ /odm/etc/vintf/ /apex/*/etc/vintf/ 2>/dev/null ||
+     $BB timeout 5 service check android.hardware.audio.core.IModule/default 2>/dev/null | grep -q ': found'; }; then
+    if $BB awk -v m="$AHL" '$5 == m { f = 1 } END { exit !f }' /proc/self/mountinfo 2>/dev/null; then
+        $BB umount -l "$AHL" 2>/dev/null || true
+    fi
+    if [ "$($BB sha256sum "$AHL" 2>/dev/null | $BB cut -c1-64)" != 81df53b19c28a84ecbd204735a52ad436e3f93113473eca52fa3a79d00c226a3 ]; then
+        echo "Audio buffers: the image's libaudiohal@aidl.so is not the known One UI 9.5 one; left as it is"
+    elif cp "$AHL" "$AHS" &&
+         $BB printf '\037\040\003\325' | $BB dd of="$AHS" bs=1 seek=1424664 count=4 conv=notrunc 2>/dev/null &&
+         [ "$($BB sha256sum "$AHS" 2>/dev/null | $BB cut -c1-64)" = 63d55b95e12f3bfec30930e5a26e4824653df60347b41906d149e7e9bbfe01c9 ] &&
+         chmod 644 "$AHS" && chown 0:0 "$AHS" &&
+         { $BB chcon u:object_r:system_lib_file:s0 "$AHS" 2>/dev/null || true; } &&
+         $BB mount --bind "$AHS" "$AHL"; then
+        echo "Audio buffers: One UI 9.5's audio client keeps the HAL's whole stream buffer (One UI ${HOST_ONEUI} audio HAL; no 1/8 buffers, no crackling)"
+    else
+        rm -f "$AHS"
+        echo "!!! Audio buffers: could not make or bind libaudiohal@aidl.so without the 1/8 buffers; sound may crackle"
+    fi
+elif [ -f "$AHL" ] && grep -q '^ro.build.version.oneui=' "$ROOTFS/system/build.prop" 2>/dev/null; then
+    echo "Audio buffers: the image's libaudiohal@aidl.so left as it is (One UI ${HOST_ONEUI}; ONEOS_GUEST_AUDIO_BUFFER_SCALING=${ONEOS_GUEST_AUDIO_BUFFER_SCALING:-0}; no AIDL audio HAL found)"
+fi
 # libcomposer_ext_patched.so (vivo OriginOS, MediaTek): its ComposerExt client
 # asked 21 times, 100 ms apart, for MediaTek's IComposerExt (no such service on
 # a Samsung vendor) on every display power-mode change, stalling SurfaceFlinger
@@ -5648,6 +5698,34 @@ else
         fi
         rm -f "$DTXT" "$DTXT.new"
     fi
+fi
+# 0.5.40, One UI 9.5 (owner, S22 Ultra test13 and S24 Ultra 8224e3b4): Screen resolution QHD -> FHD/HD in the
+# guest's settings left the screen zoomed out, and switching back did not undo it; only a reset did. The switch
+# is a forced size (and density) in the guest's display_settings.xml, which WindowManager reapplies at every
+# boot. A new session starts without it: an entry with forcedWidth loses forcedWidth, forcedHeight and its
+# forcedDensity (the resolution switch sets them together); a density chosen alone (Screen zoom) stays.
+# ONEOS_GUEST_KEEP_FORCED_SIZE=1 leaves the file alone.
+if grep -q '^ro.build.version.oneui=' "$ROOTFS/system/build.prop" 2>/dev/null && [ -s "$DSET" ] && [ "${ONEOS_GUEST_KEEP_FORCED_SIZE:-0}" != 1 ]; then
+    DTXT="$STAGE/display_settings.txt"
+    rm -f "$DTXT" "$DTXT.new"
+    if [ "$(head -c 3 "$DSET")" = ABX ]; then
+        abx2xml "$DSET" "$DTXT" 2>/dev/null || rm -f "$DTXT"
+    else
+        cp "$DSET" "$DTXT"
+    fi
+    if [ -s "$DTXT" ] && grep -q 'forcedWidth=' "$DTXT"; then
+        FS_WAS=$(grep -o 'forcedWidth="[0-9]*" forcedHeight="[0-9]*"\|forcedHeight="[0-9]*" forcedWidth="[0-9]*"' "$DTXT" | head -n 1)
+        awk '/<display / && /forcedWidth=/ { gsub(/ forced(Width|Height|Density)="[0-9]*"/, "") } { print }' "$DTXT" > "$DTXT.new"
+        CTX=$(ls -Z "$DSET" 2>/dev/null | awk '{ print $1 }')
+        case "$CTX" in u:object_r:*) ;; *) CTX=u:object_r:system_data_file:s0 ;; esac
+        if grep -q '</display-settings>' "$DTXT.new" && ! grep -q 'forcedWidth=' "$DTXT.new" && mv -f "$DTXT.new" "$DSET"; then
+            chown 1000:1000 "$DSET"; chmod 600 "$DSET"; $BB chcon "$CTX" "$DSET" 2>/dev/null
+            echo "Screen resolution: the guest's forced size (${FS_WAS:-?}) cleared for this session (One UI 9.5's resolution switch does not undo itself here)"
+        else
+            echo "!!! Screen resolution: could not clear the guest's forced size in display_settings.xml"
+        fi
+    fi
+    rm -f "$DTXT" "$DTXT.new"
 fi
 
 echo "=== 5.3 $(date +%T) cover density ==="
