@@ -4,6 +4,7 @@ import java.util.List;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
+import android.os.Looper;
 
 /** One-shot root helper: select the one connected classic audio device, never a null device.
  * Invoked only after a fresh A2DP connection and the exact Oplus active-device failure.
@@ -35,12 +36,29 @@ public final class OneOSBtActive {
 
     public static void main(String[] args) {
         try {
-            System.exit(run(args));
-        } catch (Throwable e) {
-            android.util.Log.e("OneOSBtActive", "Recovery failed", e);
-            System.err.println(android.util.Log.getStackTraceString(e));
+            // BluetoothAdapter constructs a Handler bound to the process main looper.
+            // Keep it dispatching callbacks while the worker makes synchronous Binder calls.
+            if (Looper.getMainLooper() == null) Looper.prepareMainLooper();
+            report("Main looper initialized (v3)");
+            Thread worker = new Thread(() -> {
+                try {
+                    System.exit(run(args));
+                } catch (Throwable e) {
+                    fail(e);
+                }
+            }, "oneos-bt-active");
+            worker.start();
+            Looper.loop();
             System.exit(2);
+        } catch (Throwable e) {
+            fail(e);
         }
+    }
+
+    private static void fail(Throwable e) {
+        android.util.Log.e("OneOSBtActive", "Recovery failed", e);
+        System.err.println(android.util.Log.getStackTraceString(e));
+        System.exit(2);
     }
 
     private static int run(String[] args) throws Exception {
@@ -52,6 +70,7 @@ public final class OneOSBtActive {
             return 2;
         }
         report("Bluetooth adapter initialized and enabled");
+        report("Reading active Bluetooth routes");
         Method get = BluetoothAdapter.class.getMethod("getActiveDevices", int.class);
         // Do not replace any active media/assistive route.
         if (hasActive(get, adapter, BluetoothProfile.A2DP)
@@ -61,6 +80,7 @@ public final class OneOSBtActive {
         }
         Method isConnected = BluetoothDevice.class.getMethod("isConnected");
         BluetoothDevice candidate = null;
+        report("Reading paired devices");
         Collection<BluetoothDevice> bonded = adapter.getBondedDevices();
         for (BluetoothDevice device : bonded) {
             if (!Boolean.TRUE.equals(isConnected.invoke(device))) continue;
@@ -80,6 +100,7 @@ public final class OneOSBtActive {
         if (hasActive(get, adapter, BluetoothProfile.A2DP)) return 0;
         Method set = BluetoothAdapter.class.getMethod("setActiveDevice", BluetoothDevice.class, int.class);
         int audio = BluetoothAdapter.class.getField("ACTIVE_DEVICE_AUDIO").getInt(null);
+        report("Requesting A2DP active device");
         boolean accepted = Boolean.TRUE.equals(set.invoke(adapter, candidate, audio));
         if (!accepted) {
             report("setActiveDevice returned false");
