@@ -95,7 +95,7 @@ def main(src, out):
     with open(out, "w", encoding="utf-8") as f:
         f.write("# OneOS Debloater list: scripts/debloat/make-app-list.py from docs/debloat/*.tsv\n")
         for r in sorted(rows, key=lambda r: (r[0] != "S", r[2].lower(), r[1])):
-            f.write("\t".join(r) + "\n")
+            f.write("\t".join(r).rstrip("\t") + "\n")
     print(f"{len(rows)} apps ({sum(r[0] == 'S' for r in rows)} safe, {sum(r[7] == 'm' for r in rows)} MysticGSI removes) -> {out}; {dropped} left out (no app folder)")
 
 

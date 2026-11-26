@@ -1,0 +1,7 @@
+<resources>
+    <string name="rom_visual_continue">Continue</string>
+    <string name="rom_visual_ready">Ready to start</string>
+    <string name="rom_visual_charging">Charging</string>
+    <string name="rom_visual_storage">Storage</string>
+    <string name="rom_visual_patches">Patches</string>
+</resources>
