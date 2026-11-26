@@ -1,0 +1,87 @@
+name: Recover verified debloat inventories
+on:
+  push:
+    branches: [experiment/debloat-variant-lists]
+    paths:
+      - '.github/workflows/recover-debloat-inventories.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: recover-debloat-inventories
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref_name == 'experiment/debloat-variant-lists'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: experiment/debloat-variant-lists
+          fetch-depth: 0
+      - name: Reuse exact successful inventories from run 45738905319
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          from collections import Counter
+          import csv, json, subprocess, hashlib, zipfile
+          repo = "DeathThoughts/OneOS-test"
+          run = 45738905319
+          source = "49b93fa078b522593a15c179f01ff3a8dd8fddbc"
+          pins = {
+              "coloros17-twinity4c": (15079879305, "9eb0a5f0857ef6792ee2f3c4c7cf76e94e1c310bff413b0ce27df68079e8be42", 98),
+              "coloros17-pyb110": (15079937941, "89d1a9dd8e48dfd5e0d1900ba91bb4de81d4e139b67d259c573f06b732c7fc4c", 130),
+              "hyperos-popsicle": (15079949257, "4503a93ce7c6c0493d2762a4361fcb44773d68adfd8f4a3cc0fa07daf396ae91", 79),
+              "hyperos-madrid": (15079983510, "d1715020ac9c9392577156cda77cc1e43415d776fc73e732489eddf2267265a2", 81),
+              "pixelos17-onyx": (15082146342, "d60b8b8627aec5ba4ec157b44e058b5ddca44369855330ecae3f51e66f8a7a44", 73),
+          }
+          def api(path):
+              return json.loads(subprocess.check_output(["gh", "api", "repos/" + repo + "/" + path]))
+          meta = api(f"actions/runs/{run}")
+          assert meta["head_sha"] == source and meta["status"] == "completed"
+          jobs = api(f"actions/runs/{run}/jobs?per_page=100")["jobs"]
+          assert all(any(j["name"] == f"inventory ({image})" and j["conclusion"] == "success" for j in jobs) for image in pins)
+          artifacts = {a["id"]: a for a in api(f"actions/runs/{run}/artifacts?per_page=100")["artifacts"]}
+          asset = Path("app-android/app/src/full/assets/debloat/apps.tsv")
+          old = Counter(l.rstrip("\t") for l in asset.read_text().splitlines())
+          out = Path("out/recovered")
+          out.mkdir(parents=True, exist_ok=True)
+          for image, (ident, digest, count) in pins.items():
+              a = artifacts[ident]
+              assert a["name"] == "debloat-" + image and not a["expired"] and a["digest"] == "sha256:" + digest
+              archive = out / (image + ".zip")
+              with archive.open("wb") as f:
+                  subprocess.run(["gh", "api", f"repos/{repo}/actions/artifacts/{ident}/zip"], stdout=f, check=True)
+              assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
+              with zipfile.ZipFile(archive) as z:
+                  assert set(z.namelist()) == {image + ".tsv", "report.json"}
+                  raw = z.read(image + ".tsv")
+                  report = json.loads(z.read("report.json"))
+              rows = list(csv.DictReader(raw.decode().splitlines(), delimiter="\t"))
+              assert report["image"] == image and len(rows) == count == report["safe"] + report["caution"]
+              assert all(r["images"] == image and r["rating"] in ("🟢", "🟡") for r in rows)
+              assert len({r["package"] for r in rows}) == count
+              (Path("docs/debloat") / (image + ".tsv")).write_bytes(raw)
+              print(image, count, "verified apps")
+          subprocess.run(["python3", "scripts/debloat/make-app-list.py"], check=True)
+          new = Counter(asset.read_text().splitlines())
+          assert not old - new, "Existing official lists changed beyond optional trailing tabs"
+          for image, (_, _, count) in pins.items():
+              rows = [l.split("\t") for l in asset.read_text().splitlines() if not l.startswith("#") and image in l.split("\t")[4].split(",")]
+              assert len(rows) == count == len({r[1] for r in rows})
+              assert sum(len(r[5].split(";")) for r in rows) <= 600
+          PY
+          git diff --check
+          git config user.name "OneOS CI"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/debloat/*.tsv app-android/app/src/full/assets/debloat/apps.tsv
+          git diff --cached --check
+          git commit -m "Integrate 461 verified debloat entries without downloading ROMs again"
+          git push origin HEAD:refs/heads/experiment/debloat-variant-lists
+          gh workflow run build-apk.yml --ref experiment/debloat-variant-lists -f publish=false

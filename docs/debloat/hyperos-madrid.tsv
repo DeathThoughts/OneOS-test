@@ -1,0 +1,82 @@
+package	label	rating	reason	images	folder	notes
+com.android.appsearch.aiseal.config		🟡	AppSearch config for AI features	hyperos-madrid	/system/app/AppSearchAiSealConfig	8 KB; exact donor APK manifests checked; inherited official rating
+com.android.backupconfirm		🟡	Backup and restore of system data	hyperos-madrid	/system/priv-app/BackupRestoreConfirmation	268 KB; exact donor APK manifests checked; inherited official rating
+com.android.bips	System printing service	🟡	Printing	hyperos-madrid	/system/priv-app/BuiltInPrintService	1783 KB; exact donor APK manifests checked; inherited official rating
+com.android.bluetoothmidiservice	Bluetooth MIDI Service	🟢	Bluetooth MIDI: only for BLE musical instruments	hyperos-madrid	/system/app/BluetoothMidiService	45 KB; exact donor APK manifests checked; inherited official rating
+com.android.calendar	Calendar	🟢	Standalone Xiaomi app (calculator, compass, notes, weather, calendar, recorder); replaceable from Play	hyperos-madrid	/product/data-app/MIUICalendar	15435 KB; exact donor APK manifests checked; inherited official rating
+com.android.calllogbackup	Call Log Backup/Restore	🟡	Backup and restore of system data	hyperos-madrid	/system/priv-app/CallLogBackup	57 KB; exact donor APK manifests checked; inherited official rating
+com.android.cameraextensions	CameraExtensionsProxy	🟡	Camera extensions for third-party camera apps (night, bokeh)	hyperos-madrid	/system/app/CameraExtensionsProxy	77 KB; exact donor APK manifests checked; inherited official rating
+com.android.companiondevicemanager	Companion Device Manager	🟡	Companion device pairing: smartwatches, earbuds companion apps	hyperos-madrid	/system/app/CompanionDeviceManager	983 KB; exact donor APK manifests checked; inherited official rating
+com.android.deskclock	Clock	🟡	Clock: the only alarm/timer app (and its resources)	hyperos-madrid	/product/data-app/MIUIDeskClock	17436 KB; exact donor APK manifests checked; inherited official rating
+com.android.devicediagnostics	DeviceDiagnostics	🟢	Device diagnostics for trade-in checks	hyperos-madrid	/system/priv-app/DeviceDiagnostics	5096 KB; exact donor APK manifests checked; inherited official rating
+com.android.dreams.basic	Basic Daydreams	🟢	Sample screensavers	hyperos-madrid	/system/app/BasicDreams	190 KB; exact donor APK manifests checked; inherited official rating
+com.android.egg	Android Easter Egg	🟢	Android Easter egg	hyperos-madrid	/system/app/EasterEgg	2355 KB; exact donor APK manifests checked; inherited official rating
+com.android.emergency	Emergency information	🟡	Emergency information (medical info on lock screen)	hyperos-madrid	/system_ext/priv-app/EmergencyInfo	7287 KB; exact donor APK manifests checked; inherited official rating
+com.android.eyedropper	EyeDropper	🟡	System colour picker that apps can call	hyperos-madrid	/system/priv-app/EyeDropper	1868 KB; exact donor APK manifests checked; inherited official rating
+com.android.fileexplorer	File Manager	🟡	HyperOS File Manager (DocumentsUI stays)	hyperos-madrid	/product/app/MIUIFileExplorer	21898 KB; exact donor APK manifests checked; inherited official rating
+com.android.htmlviewer	HTML Viewer	🟡	HTML viewer: Settings > legal information pages	hyperos-madrid	/system/priv-app/HTMLViewer	37024 KB; exact donor APK manifests checked; inherited official rating
+com.android.mtp	MTP Host	🟡	MTP: USB file transfer to a PC	hyperos-madrid	/system/priv-app/MtpService	1125 KB; exact donor APK manifests checked; inherited official rating
+com.android.musicfx	MusicFX	🟡	Audio equalizer fallback (MusicFX)	hyperos-madrid	/system/priv-app/MusicFX	306 KB; exact donor APK manifests checked; inherited official rating
+com.android.pacprocessor	PacProcessor	🟡	PAC proxy support (company Wi-Fi with auto proxy)	hyperos-madrid	/system/app/PacProcessor	29 KB; exact donor APK manifests checked; inherited official rating
+com.android.printservice.recommendation	Print Service Recommendation Service	🟢	Suggests print plug-ins to install; printing itself stays	hyperos-madrid	/system/app/PrintRecommendationService	240 KB; exact donor APK manifests checked; inherited official rating
+com.android.printspooler	Print Spooler	🟡	Printing	hyperos-madrid	/system_ext/app/MiuiPrintSpooler	8594 KB; exact donor APK manifests checked; inherited official rating
+com.android.privatespace	Private Space	🟡	Private Space	hyperos-madrid	/system/priv-app/PrivateSpace	2377 KB; exact donor APK manifests checked; inherited official rating
+com.android.providers.downloads.ui	Downloads	🟡	Downloads app (the download manager itself stays)	hyperos-madrid	/product/data-app/DownloadProviderUi	16109 KB; exact donor APK manifests checked; inherited official rating
+com.android.providers.partnerbookmarks		🟢	Browser bookmark stubs: nothing reads them	hyperos-madrid	/system/priv-app/PartnerBookmarksProvider	93 KB; exact donor APK manifests checked; inherited official rating
+com.android.proxyhandler	ProxyHandler	🟡	PAC proxy support (company Wi-Fi with auto proxy)	hyperos-madrid	/system/priv-app/ProxyHandler	37 KB; exact donor APK manifests checked; inherited official rating
+com.android.quicksearchbox	Search	🟡	HyperOS search (launcher search)	hyperos-madrid	/product/priv-app/MIUIQuickSearchBox	19250 KB; exact donor APK manifests checked; inherited official rating
+com.android.settings.intelligence	Settings Suggestions	🟡	Settings search and suggestions	hyperos-madrid	/product/priv-app/SettingsIntelligence	2741 KB; exact donor APK manifests checked; inherited official rating
+com.android.sharedstoragebackup		🟡	Backup and restore of system data	hyperos-madrid	/system/priv-app/SharedStorageBackup	33 KB; exact donor APK manifests checked; inherited official rating
+com.android.simappdialog	Sim App Dialog	🟡	SIM app install prompt (carrier apps)	hyperos-madrid	/system/app/SimAppDialog	389 KB; exact donor APK manifests checked; inherited official rating
+com.android.storagemanager	Storage Manager	🟡	"Storage manager: ""free up space"" and smart storage"	hyperos-madrid	/system_ext/priv-app/StorageManager	6783 KB; exact donor APK manifests checked; inherited official rating
+com.android.thememanager	Themes	🟡	Themes: theme store, icons, fonts and wallpapers	hyperos-madrid	/product/app/MIUIThemeManager	76956 KB; exact donor APK manifests checked; inherited official rating
+com.android.traceur	System Tracing	🟢	System tracing (developer tool)	hyperos-madrid	/system/app/Traceur	3346 KB; exact donor APK manifests checked; inherited official rating
+com.android.updater	Updater	🟢	Updater: HyperOS OTAs cannot install on a OneOS image	hyperos-madrid	/product/app/Updater	14673 KB; exact donor APK manifests checked; inherited official rating
+com.android.wallpaper.livepicker	Live Wallpaper Picker	🟡	Live wallpaper picker	hyperos-madrid	/system/priv-app/LiveWallpapersPicker	3848 KB; exact donor APK manifests checked; inherited official rating
+com.android.wallpaperbackup		🟡	Backup and restore of system data	hyperos-madrid	/system/app/WallpaperBackup	136 KB; exact donor APK manifests checked; inherited official rating
+com.android.wallpapercropper		🟡	Wallpaper picker/cropper	hyperos-madrid	/system_ext/priv-app/WallpaperCropper	126 KB; exact donor APK manifests checked; inherited official rating
+com.fido.asm	MI FIDO	🟡	FIDO login (banking and payment apps' fingerprint login)	hyperos-madrid	/product/app/FidoAuthen2	9552 KB; exact donor APK manifests checked; inherited official rating
+com.google.android.configupdater	ConfigUpdater	🟡	ConfigUpdater: certificate pinning / intent-firewall updates from Google	hyperos-madrid	/product/priv-app/ConfigUpdater	3857 KB; exact donor APK manifests checked; inherited official rating
+com.google.android.gms.location.history	Google Location History	🟢	Location History stub: Timeline moved to the device, nothing uses it	hyperos-madrid	/product/app/GoogleLocationHistory	2653 KB; exact donor APK manifests checked; inherited official rating
+com.google.android.printservice.recommendation	Print Service Recommendation Service	🟢	Suggests print plug-ins to install; printing itself stays	hyperos-madrid	/product/app/GooglePrintRecommendationService	332 KB; exact donor APK manifests checked; inherited official rating
+com.hyper.gallery.plugin	Gallery components	🟡	Xiaomi Gallery (the camera's photo viewer and editor)	hyperos-madrid	/product/data-app/HyperGalleryPluginCn	24307 KB; exact donor APK manifests checked; inherited official rating
+com.miui.autoui.ext	AutoUIExtension	🟡	HyperOS floating windows / UI extension	hyperos-madrid	/system_ext/app/AutoUIExtension	12 KB; exact donor APK manifests checked; inherited official rating
+com.miui.backup	Backup	🟡	Local backup (Settings > backup)	hyperos-madrid	/product/priv-app/Backup	27635 KB; exact donor APK manifests checked; inherited official rating
+com.miui.calculator	Calculator	🟢	Standalone Xiaomi app (calculator, compass, notes, weather, calendar, recorder); replaceable from Play	hyperos-madrid	/product/data-app/MIUICalculator	9654 KB; exact donor APK manifests checked; inherited official rating
+com.miui.cloudbackup	Cloud backup	🟡	Xiaomi Cloud sync and backup	hyperos-madrid	/product/priv-app/MIUICloudBackup	11587 KB; exact donor APK manifests checked; inherited official rating
+com.miui.cloudservice	Xiaomi Cloud	🟡	Xiaomi Cloud sync and backup	hyperos-madrid	/product/app/MIUICloudService	15221 KB; exact donor APK manifests checked; inherited official rating
+com.miui.compass	Compass	🟢	Standalone Xiaomi app (calculator, compass, notes, weather, calendar, recorder); replaceable from Play	hyperos-madrid	/product/data-app/MIUICompass	5174 KB; exact donor APK manifests checked; inherited official rating
+com.miui.contentextension	Taplus	🟡	Taplus: long-press text/screen recognition	hyperos-madrid	/product/priv-app/MIUIContentExtension	17431 KB; exact donor APK manifests checked; inherited official rating
+com.miui.gallery	Gallery	🟡	Xiaomi Gallery (the camera's photo viewer and editor)	hyperos-madrid	/product/data-app/MIUIGallery	101823 KB; exact donor APK manifests checked; inherited official rating
+com.miui.hybrid	Quick apps Service Framework	🟢	Quick apps framework (China mini-apps)	hyperos-madrid	/product/app/HybridPlatform	56094 KB; exact donor APK manifests checked; inherited official rating
+com.miui.mediaeditor	Gallery Editor	🟡	Gallery editor (edits from the gallery open it)	hyperos-madrid	/product/data-app/MiMediaEditor	212196 KB; exact donor APK manifests checked; inherited official rating
+com.miui.mediaviewer	Media viewer	🟡	Media viewer: gallery/file manager open photos and videos in it	hyperos-madrid	/product/app/MediaViewer	46932 KB; exact donor APK manifests checked; inherited official rating
+com.miui.passwords	Manage passwords	🟡	Password manager (autofill)	hyperos-madrid	/product/app/MiuiPasswords	18402 KB; exact donor APK manifests checked; inherited official rating
+com.miui.powerinsight	powerinsight	🟡	Power insight (battery usage stats)	hyperos-madrid	/system_ext/priv-app/PowerInsight	2855 KB; exact donor APK manifests checked; inherited official rating
+com.miui.server.litert		🟡	LiteRT (on-device AI runtime stub)	hyperos-madrid	/system_ext/priv-app/MiLiteRTServiceStub	52 KB; exact donor APK manifests checked; inherited official rating
+com.miui.themestore	Themes store	🟡	Themes store	hyperos-madrid	/product/data-app/MIUIThemeStore	1691 KB; exact donor APK manifests checked; inherited official rating
+com.miui.voiceassistProxy	Xiaomi Hyper XiaoAi	🟡	XiaoAi voice assistant	hyperos-madrid	/product/data-app/VoiceAssistProxy	1502 KB; exact donor APK manifests checked; inherited official rating
+com.miui.weather2	Weather	🟢	Standalone Xiaomi app (calculator, compass, notes, weather, calendar, recorder); replaceable from Play	hyperos-madrid	/product/data-app/MIUIWeather	63843 KB; exact donor APK manifests checked; inherited official rating
+com.miuix.editor	floatingwindow	🟡	HyperOS floating windows / UI extension	hyperos-madrid	/product/app/MiuixEditor	1268 KB; exact donor APK manifests checked; inherited official rating
+com.qti.dcf	dcf	🟡	Qualcomm data-connection framework helper	hyperos-madrid	/system_ext/priv-app/dcf	8 KB; exact donor APK manifests checked; inherited official rating
+com.qti.ltebc	LTE Broadcast Manager	🟡	LTE broadcast (carrier broadcast video)	hyperos-madrid	/system_ext/priv-app/QAS_DVC_MSP	2416 KB; exact donor APK manifests checked; inherited official rating
+com.qualcomm.qti.powersavemode	Usable Power Mode	🟡	Qualcomm power-save mode helper	hyperos-madrid	/system_ext/app/PowerSaveMode	45 KB; exact donor APK manifests checked; inherited official rating
+com.qualcomm.qti.workloadclassifier		🟡	Qualcomm performance workload classifier	hyperos-madrid	/system_ext/app/workloadclassifier	588 KB; exact donor APK manifests checked; inherited official rating
+com.qualcomm.qti.xrcb	XRCB	🟢	Qualcomm XR (AR/VR glasses) services	hyperos-madrid	/system_ext/priv-app/xrcbservice	66 KB; exact donor APK manifests checked; inherited official rating
+com.qualcomm.qti.xrwifi	XR Wifi Service	🟢	Qualcomm XR glasses Wi-Fi service	hyperos-madrid	/system_ext/priv-app/xrwifiservice	74 KB; exact donor APK manifests checked; inherited official rating
+com.qualcomm.wfd.service	Wfd Service	🟡	Wi-Fi Display (Miracast screen casting)	hyperos-madrid	/system_ext/priv-app/WfdService	155 KB; exact donor APK manifests checked; inherited official rating
+com.unionpay.tsmservice.mi	银联可信服务安全组件小米版本	🟡	UnionPay / IFAA: secure payment and fingerprint payment in Chinese banking apps	hyperos-madrid	/product/app/UPTsmService	40286 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.account	Xiaomi Account	🟡	Xiaomi account	hyperos-madrid	/product/app/MIUIXiaomiAccount	19802 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.aiservice	AI Service	🟡	AI service (AI features of HyperOS)	hyperos-madrid	/product/priv-app/AIService	19782 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.app.toolbox	Toolbox	🟢	Toolbox (promotional shortcuts)	hyperos-madrid	/product/priv-app/Toolbox	68 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.bestphotos	找机位	🟢	Game Center / photo-spot finder / Xiaomi Home (smart-home app)	hyperos-madrid	/product/data-app/MIUIBestPhotos	45488 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.cameramind	CameraMind	🟡	CameraMind: camera scene AI service	hyperos-madrid	/system_ext/app/CameraMind	4552 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.gamecenter	小米游戏中心	🟢	Game Center / photo-spot finder / Xiaomi Home (smart-home app)	hyperos-madrid	/product/data-app/MIUIGameCenter	73828 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.healthkit	小米运动健康数据服务	🟡	Health data service (Mi Fitness)	hyperos-madrid	/product/app/Healthkit	16010 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.macro	MiMacro	🟡	MiMacro: automation of taps (game turbo / accessibility)	hyperos-madrid	/product/app/com.xiaomi.macro	10495 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.minigame	小游戏服务	🟢	Mini-games service (China)	hyperos-madrid	/product/priv-app/MiniGameService	32544 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.mis	小米汽车互联服务	🟡	Xiaomi interconnect: PC/car/tablet continuity (HyperConnect, PC Frame, car link)	hyperos-madrid	/product/app/MIS	24144 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.scanner	AI Scanner	🟡	AI scanner (QR codes and documents from the camera)	hyperos-madrid	/product/data-app/MiuiScanner	83401 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.simactivate.service	Xiaomi SIM Activation Service	🟢	Xiaomi SIM activation (China Mi Mobile)	hyperos-madrid	/product/app/XiaomiSimActivateServiceCn	8853 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.subscreencenter	Back display	🟡	Back display (rear screen on Xiaomi phones that have one)	hyperos-madrid	/product/app/subscreencenter	18854 KB; exact donor APK manifests checked; inherited official rating
+com.xiaomi.ugd	GPU Driver Updater	🟡	GPU driver updater (game driver updates)	hyperos-madrid	/product/app/com.xiaomi.ugd	24 KB; exact donor APK manifests checked; inherited official rating
