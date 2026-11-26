@@ -3,6 +3,12 @@ on:
   workflow_dispatch:
   push:
     branches: [experiment/coloros-patch-parity]
+    paths:
+      - 'scripts/make-overlays.sh'
+      - 'scripts/make-coloros-wave-set.sh'
+      - 'scripts/fetch-coloros-parity-image.sh'
+      - 'scripts/coloros-parity-report.py'
+      - 'switcher/patches/**'
 permissions:
   contents: read
   actions: read
