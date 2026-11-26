@@ -15,11 +15,12 @@ START = '# Oplus classic audio (S23 Android 17):'
 LIMIT = 512 * 1024
 APM_MARKER = "# Guest audioserver (oneos_switch.sh stopped Samsung's):"
 APM_EXPERIMENT = r'''# Optional one-boot experiment: route output-mix effects to active flagless music.
-# Exact S23 guest library from the device report; no other binary is modified.
+# Exact S23 guest library pair from the device report; no other binary is modified.
 # No persistent image writes, and no experiment on subsequent restarts unless rearmed.
 oneos_apm_test() (
     D=/data/oneos-apm-test
     F=/system/lib64/libaudiopolicymanagerdefault.so
+    E=/system/system_ext/lib64/libaudiopolicyextimpl.so
     [ -d "$D" ] && [ ! -L "$D" ] &&
         [ "$("$BB" stat -c '%u:%g:%a' "$D")" = 0:0:700 ] || exit 0
     [ -f "$D/once" ] && [ ! -L "$D/once" ] &&
@@ -30,10 +31,11 @@ oneos_apm_test() (
     host=$("$BB" readlink /proc/1/ns/mnt)
     [ -n "$ns" ] && [ -n "$host" ] && [ "$ns" != "$host" ] || { log "not isolated"; exit 0; }
     [ -f "$F" ] && [ ! -L "$F" ] && [ "$("$BB" readlink -f "$F")" = "$F" ] || { log "unexpected library path"; exit 0; }
+    [ -f "$E" ] && [ ! -L "$E" ] && [ "$("$BB" readlink -f "$E")" = "$E" ] || { log "unexpected extension path"; exit 0; }
     # A bind must not propagate to the host or cover an existing file mount.
-    "$BB" awk -v f="$F" '
-        $5 == f { bad=1 }
-        $5 == "/" || $5 == "/system" || $5 == "/system/lib64" {
+    "$BB" awk -v f="$F" -v e="$E" '
+        $5 == f || $5 == e { bad=1 }
+        $5 == "/" || index(f, $5 "/") == 1 || index(e, $5 "/") == 1 {
             for(i=7;i<=NF && $i!="-";i++) if($i ~ /^shared:/) bad=1
         }
         END { exit bad }
@@ -41,8 +43,12 @@ oneos_apm_test() (
     old=996b9075d0963cf29ac8522801eac180056412dc331962a19909ce1c84e12fdb
     new=891d2ec4bc49e20c0d9b12e7a77e97bb7be086efc7d91ec837020bcc52594198
     [ "$("$BB" sha256sum "$F" | "$BB" cut -d ' ' -f 1)" = "$old" ] || { log "different library; skipped"; exit 0; }
+    ext_old=3126a25acaa7e6afbca6c3ce8a63929e10efd935f312c14813bbe48746184c44
+    ext_new=4213ebe249466d96e99f10b8146a9eb265548881837690e9148bb695f3f36526
+    [ "$("$BB" sha256sum "$E" | "$BB" cut -d ' ' -f 1)" = "$ext_old" ] || { log "different extension; skipped"; exit 0; }
     t=$("$BB" mktemp "$D/.apm.XXXXXX") || exit 0
-    trap 'rm -f "$t"' EXIT
+    u=$("$BB" mktemp "$D/.ext.XXXXXX") || { rm -f "$t"; exit 0; }
+    trap 'rm -f "$t" "$u"' EXIT
     # AArch64: preserve original primary test; accept active NONE only as fallback.
     # 0x5758c -> 0xc4cf4; original condition and control flow restored on return.
     cp "$F" "$t" &&
@@ -51,16 +57,30 @@ oneos_apm_test() (
         [ "$("$BB" sha256sum "$t" | "$BB" cut -d ' ' -f 1)" = "$new" ] &&
         chmod 644 "$t" && "$BB" chcon u:object_r:system_lib_file:s0 "$t" ||
         { log "candidate validation failed"; exit 0; }
+    # Only bypass the non-48kHz plain A2DP non-Dolby primary-output fallback.
+    # 0x49384: b.eq 0x493b4 -> b 0x493b4; retain game, low latency, spatializer,
+    # hearing aid and effect migration logic. Do not change the global effect property.
+    cp "$E" "$u" &&
+        "$BB" printf '\014\000\000\024' | "$BB" dd of="$u" bs=1 seek=299908 conv=notrunc 2>/dev/null &&
+        [ "$("$BB" sha256sum "$u" | "$BB" cut -d ' ' -f 1)" = "$ext_new" ] &&
+        chmod 644 "$u" && "$BB" chcon u:object_r:system_lib_file:s0 "$u" ||
+        { log "extension candidate validation failed"; exit 0; }
+    # Mount both or neither before audioserver is started.
+    bound_f=0
+    bound_e=0
     if "$BB" mount --bind "$t" "$F"; then
-        if "$BB" mount -o remount,bind,ro "$F"; then
-            log "one-boot active flagless output experiment bound ($new)"
-        else
-            "$BB" umount "$F" || "$BB" umount -l "$F"
-            log "read-only bind failed; removed"
+        bound_f=1
+        if "$BB" mount -o remount,bind,ro "$F" && "$BB" mount --bind "$u" "$E"; then
+            bound_e=1
+            if "$BB" mount -o remount,bind,ro "$E"; then
+                log "v2 one-boot APM + Oplus extension bound ($new $ext_new)"
+                exit 0
+            fi
         fi
-    else
-        log "bind failed"
     fi
+    [ "$bound_e" = 0 ] || "$BB" umount "$E" || "$BB" umount -l "$E"
+    [ "$bound_f" = 0 ] || "$BB" umount "$F" || "$BB" umount -l "$F"
+    log "v2 bind failed; rollback attempted"
 )
 oneos_apm_test
 
