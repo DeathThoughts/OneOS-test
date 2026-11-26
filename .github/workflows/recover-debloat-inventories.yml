@@ -76,17 +76,11 @@ jobs:
               rows = [l.split("\t") for l in asset.read_text().splitlines() if not l.startswith("#") and image in l.split("\t")[4].split(",")]
               assert len(rows) == count == len({r[1] for r in rows})
               assert sum(len(r[5].split(";")) for r in rows) <= 600
-          # The normal integration workflow must also tolerate normalization of the old optional empty column.
-          workflow = Path(".github/workflows/debloat-variant-lists.yml")
-          s = workflow.read_text()
-          old_line = "old = Counter(base.read_text().splitlines())"
-          assert s.count(old_line) == 1
-          workflow.write_text(s.replace(old_line, 'old = Counter(l.rstrip("\\t") for l in base.read_text().splitlines())'))
           PY
           git diff --check
           git config user.name "OneOS CI"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/debloat/*.tsv app-android/app/src/full/assets/debloat/apps.tsv .github/workflows/debloat-variant-lists.yml
+          git add docs/debloat/*.tsv app-android/app/src/full/assets/debloat/apps.tsv
           git diff --cached --check
           git commit -m "Integrate 461 verified debloat entries without downloading ROMs again"
           git push origin HEAD:refs/heads/experiment/debloat-variant-lists

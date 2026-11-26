@@ -1,11 +1,5 @@
 name: Derive debloat lists for fork ROMs
 on:
-  push:
-    branches: [experiment/debloat-variant-lists]
-    paths:
-      - 'scripts/debloat/derive-variant-list.py'
-      - 'scripts/debloat/fetch-variant-image.sh'
-      - '.github/workflows/debloat-variant-lists.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -96,7 +90,7 @@ jobs:
           import csv, json, shutil, subprocess
           ids = ('coloros17-twinity4c','coloros17-pyb110','hyperos-popsicle','hyperos-madrid','pixelos17-onyx')
           base = Path('app-android/app/src/full/assets/debloat/apps.tsv')
-          old = Counter(base.read_text().splitlines())
+          old = Counter(l.rstrip("\t") for l in base.read_text().splitlines())
           for image in ids:
               p = Path('out/debloat/debloat-' + image)
               src = p / (image + '.tsv')
