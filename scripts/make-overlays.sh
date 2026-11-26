@@ -501,6 +501,16 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_update_engine.
 # so sets built before it keep starting). patches/guest_media_mount_hold.py, helper
 # OneOSMediaHold.
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_media_mount_hold.py" "$WORK/services")"
+# Candidate ColorOS sets only; use the original image's own smali.
+# An incompatible layout fails the build instead of shipping partial hooks.
+if [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ]; then
+    [ "$IMAGE_SDK" = 37 ] && in_image /system/framework/oplus-services.jar ||
+        { echo "ColorOS parity requires an Android 17 OPPO image" >&2; exit 1; }
+    for g in guest_udfps_location guest_seh_touch guest_fp_touchwatch; do
+        NEW=$(python3 -I "$ROOT/switcher/patches/$g.py" "$WORK/services")
+        KEY_DIRS="$KEY_DIRS $NEW"
+    done
+fi
 # A Samsung charger's power for the guest's BatteryService (0.5.31; patches/battery_charge_power.py): the
 # Galaxy's health HAL reports no maximum charging current or voltage, so no guest showed fast charging.
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/battery_charge_power.py" "$WORK/services" "$ROOT/switcher/patches/OneOSChargePower.smali")"
@@ -546,8 +556,11 @@ fi
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/qti_builtin_display_public.py" "$WORK/services")"
 # Twinity ColorOS 17 starts with 65535 method references in classes.dex.
 # Move the generated INetd classes together so the guest guards fit.
+# The exact pinned Find N6 parity image also overflows its first dex after
+# moving OneOSMediaHold alone (65544). Reuse the checked family relocation.
 SERVICES_SHA=$(sha256sum < "$WORK/services.jar")
-if [ "${SERVICES_SHA%% *}" = f669c8373f10043d674cc3cd7391627de4d6d958fe5ebb8b5dd303ab46e64270 ]; then
+if [ "${SERVICES_SHA%% *}" = f669c8373f10043d674cc3cd7391627de4d6d958fe5ebb8b5dd303ab46e64270 ] ||
+   { [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ] && [ "${IMAGE_SHA%% *}" = eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c ]; }; then
     KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/twinity_services_dex.py" "$WORK/services")"
 fi
 # One UI images (set oneui95 r3): Privacy Display binder calls safe without a controller (CoreRune flags off).
@@ -1304,6 +1317,9 @@ fi
     echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets, ksuappid and mediahold guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
     echo "# installd and IOemNetd codes read on the phone at runtime (OneOSInstalldCodes, OneOSOemNetdCodes): One UI 9.0 and 9.5 phones"
     echo "# charger power from Samsung's charging_type in BatteryService (OneOSChargePower)"
+    if [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ]; then
+        echo "# ColorOS parity: udfps, sehtouch and fptouch built against this image; optical hardware gated at runtime"
+    fi
     [ "$VOLD_GVLD" = 1 ] && echo "# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)"
     # HyperOS images (miui-services_patched.jar) and Pixel images list their
     # files in the order and with the notes each set was built with.

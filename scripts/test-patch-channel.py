@@ -23,7 +23,7 @@ class ChannelPublisherTests(unittest.TestCase):
             data = json.loads(manifest.read_text())
             entry = next(f for f in data['files'] if f['name'] == payload.name)
             self.assertEqual(hashlib.sha256(b'fixture').hexdigest(), entry['sha256'])
-            self.assertEqual('gh:DeathThoughts/OneOS-test:fork-fold8-experimental-v2', entry['source'])
+            self.assertEqual('gh:DeathThoughts/OneOS-test:fork-fold8-experimental-v3', entry['source'])
             self.assertEqual(b'fixture', (manifest.parent / entry['sha256']).read_bytes())
 
     def test_guarded_payloads_and_their_guards_stay_the_apps(self):

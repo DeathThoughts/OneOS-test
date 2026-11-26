@@ -283,9 +283,11 @@ object PackageSets {
             // 0.4.47: the image's Theme Store without its brand check (DeviceChecker refused the Galaxy's brand).
             PackageFile(THEME_STORE_APK, FileRole.GUEST_FIX) +
             // 0.4.63: OPPO's AI engine for the guest's /odm (lock screen depth effect, AI features).
-            PackageFile(ODM_AI, FileRole.GUEST_FIX),
+            PackageFile(ODM_AI, FileRole.GUEST_FIX) +
+            PackageFile("OplusGestureUI_patched.apk", FileRole.GUEST_FIX) +
+            PackageFile("OplusGestureUI_patched.apk.src_sha256", FileRole.GUEST_FIX),
         omitted = listOf(TETHERING),
-        approxBytes = 763_750_051L + 12_338_345L,
+        approxBytes = 953765607L,
         hasReturnApp = true,
     )
 
@@ -982,9 +984,14 @@ object PackageSets {
             PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR) +
             PackageFile("libcamera_client_patched.so", FileRole.GUARD_LIBRARY) +
             OPLUS_FRAMEWORK_IMS +
-            PackageFile("samcam_bar.tar", FileRole.GUEST_FIX),
+            PackageFile("samcam_bar.tar", FileRole.GUEST_FIX) +
+            PackageFile("ColorPanoramicSystemUI.apk", FileRole.GUEST_FIX) +
+            PackageFile("SystemUI_wave.dex", FileRole.GUEST_FIX) +
+            PackageFile("OneOSWaveRepack.dex", FileRole.GUEST_FIX) +
+            PackageFile("OplusGestureUI_patched.apk", FileRole.GUEST_FIX) +
+            PackageFile("OplusGestureUI_patched.apk.src_sha256", FileRole.GUEST_FIX),
         omitted = emptyList(),
-        approxBytes = 424_083_730L,
+        approxBytes = 594136028L,
         hasReturnApp = true,
     )
 
@@ -1069,9 +1076,13 @@ object PackageSets {
             PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR),
             PackageFile("vold_patched", FileRole.GUARD_EXECUTABLE),
             PackageFile("wifi_payload.img", FileRole.APEX_PAYLOAD),
-        ),
+        ) + PackageFile("ColorPanoramicSystemUI.apk", FileRole.GUEST_FIX) +
+            PackageFile("SystemUI_wave.dex", FileRole.GUEST_FIX) +
+            PackageFile("OneOSWaveRepack.dex", FileRole.GUEST_FIX) +
+            PackageFile("OplusGestureUI_patched.apk", FileRole.GUEST_FIX) +
+            PackageFile("OplusGestureUI_patched.apk.src_sha256", FileRole.GUEST_FIX),
         omitted = listOf(TETHERING),
-        approxBytes = 347_290_073L,
+        approxBytes = 515298958L,
         hasReturnApp = true,
     )
 

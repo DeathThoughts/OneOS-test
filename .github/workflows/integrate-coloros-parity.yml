@@ -1,0 +1,70 @@
+name: Integrate ColorOS parity and build APK
+on:
+  push:
+    branches: [experiment/coloros-patch-parity]
+    paths:
+      - 'scripts/integrate-coloros-parity.py'
+      - '.github/workflows/integrate-coloros-parity.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: coloros-parity-integration
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref_name == 'experiment/coloros-patch-parity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: experiment/coloros-patch-parity
+          fetch-depth: 0
+      - name: Verify and retrieve the successful rebuild
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          gh api repos/DeathThoughts/OneOS-test/actions/runs/45727722152 > "$RUNNER_TEMP/parity-run.json"
+          python3 - "$RUNNER_TEMP/parity-run.json" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          assert r['conclusion'] == 'success'
+          assert r['head_sha'] == '6424d259515fa141a395cefc82ea710fa72b33a2'
+          assert r['name'] == 'Rebuild ColorOS parity candidates'
+          PY
+          for image in findn6 twinity pyb110; do
+            for kind in candidate report; do
+              gh run download 45727722152 --name "coloros-parity-$image-$kind" --dir "$RUNNER_TEMP/parity/$image/$kind"
+            done
+          done
+      - name: Validate, publish immutable payloads and integrate pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/integrate-coloros-parity.py "$RUNNER_TEMP/parity" "$GITHUB_SHA"
+          python3 scripts/test-patch-migration.py
+          python3 scripts/test-patch-channel.py
+          python3 scripts/migrate-all-patch-payloads.py --check-catalog
+          python3 scripts/migrate-all-patch-payloads.py --verify
+          git diff --check
+          git status --short
+          git config user.name "OneOS CI"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app-android scripts/migrate-all-patch-payloads.py scripts/test-patch-migration.py scripts/test-patch-channel.py scripts/patch-migration/channel-v3
+          git commit -m "Integrate verified ColorOS parity payloads from rebuild 45727722152"
+          git push origin HEAD:refs/heads/experiment/coloros-patch-parity
+      - name: Dispatch signed debug APK for the integrated commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected=$(git rev-parse HEAD)
+          actual=$(git ls-remote origin refs/heads/experiment/coloros-patch-parity | cut -f1)
+          test "$expected" = "$actual"
+          echo "Integrated commit: $expected" >> "$GITHUB_STEP_SUMMARY"
+          gh workflow run build-apk.yml --ref experiment/coloros-patch-parity -f publish=false
