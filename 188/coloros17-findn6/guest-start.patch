@@ -4,9 +4,11 @@ debug
 coloros17-findn6
 eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c
 1fb2d76d21354dbccac2c9df618b06b5603b91a336fb7333bbc05a75f8c3a307
-4
-332354 67dab77a53f90379647fe25109a9f37be11fe91344061d1de09b75f4daef2d25
-’t¿ÕTÃ(Ê¥µE§dk"ÑQ-ëÝMŽ‡÷)5bIþxÅÇ?'Ë”ÿjfÈBh˜“ÍTL0bS2F¤½/#!/system/bin/sh
+5
+333918 67e1845c4810280bd8d79fa60b5ab6f5b066e26d6e6a22f5c2d4646b6e952f2d
+®€ŽN$íüèüËÿ¸„]÷rÜæaØžýÏE™1Æ‡BÇ3Ô(ˆXÓLË»åøäÜ„##P±³
+â±Xg³|#!/system/bin/sh
+echo '[OneOS patch] signed audio routing v3 startup reached'
 # The root manager's own busybox (as oneos_switch.sh checked), never a
 # search of /data; after the pivot the guest's copy in its /data.
 BB=""
@@ -2537,24 +2539,36 @@ if [ -f /data/guest_media.flag ]; then
 fi
 
 echo "[Pivoted Root] time $($BB date +%T) audio"
-# Optional one-boot experiment: route output-mix effects to active flagless music.
-# Exact S23 guest library pair from the device report; no other binary is modified.
-# No persistent image writes, and no experiment on subsequent restarts unless rearmed.
+# OneOS APM effect routing v3 (begin)
+# Opt-in exact-hash guest-only audio routing fix. Never modify the image.
+# `once` is a single trial; `enabled` keeps it armed across guest restarts.
 oneos_apm_test() (
     D=/data/oneos-apm-test
     F=/system/lib64/libaudiopolicymanagerdefault.so
-    E=/system/system_ext/lib64/libaudiopolicyextimpl.so
-    [ -d "$D" ] && [ ! -L "$D" ] &&
-        [ "$("$BB" stat -c '%u:%g:%a' "$D")" = 0:0:700 ] || exit 0
-    [ -f "$D/once" ] && [ ! -L "$D/once" ] &&
-        [ "$("$BB" stat -c '%u:%g:%a' "$D/once")" = 0:0:600 ] || exit 0
-    rm -f "$D/once" || exit 0
     log() { echo "[OneOS patch] APM test: $*"; }
+    log "v3 reached"
+    [ -f /data/guest_audio.flag ] || { log "guest audio disabled"; exit 0; }
+    [ -d "$D" ] && [ ! -L "$D" ] || { log "not armed (no private directory)"; exit 0; }
+    meta=$("$BB" stat -c '%u:%g:%a' "$D" 2>/dev/null)
+    [ "$meta" = 0:0:700 ] || { log "unsafe directory metadata ($meta)"; exit 0; }
+    mode=once
+    if [ -e "$D/enabled" ] || [ -L "$D/enabled" ]; then mode=enabled; fi
+    [ -f "$D/$mode" ] && [ ! -L "$D/$mode" ] || { log "not armed (no regular marker)"; exit 0; }
+    meta=$("$BB" stat -c '%u:%g:%a' "$D/$mode" 2>/dev/null)
+    [ "$meta" = 0:0:600 ] || { log "unsafe $mode marker metadata ($meta)"; exit 0; }
+    log "armed ($mode)"
+    E=/system_ext/lib64/libaudiopolicyextimpl.so
+    [ -f "$E" ] || E=/system/system_ext/lib64/libaudiopolicyextimpl.so
+    [ -f "$E" ] && [ ! -L "$E" ] || { log "extension missing or symlink"; exit 0; }
+    E=$("$BB" readlink -f "$E")
+    case "$E" in
+        /system_ext/lib64/libaudiopolicyextimpl.so|/system/system_ext/lib64/libaudiopolicyextimpl.so) ;;
+        *) log "unexpected extension path ($E)"; exit 0 ;;
+    esac
     ns=$("$BB" readlink /proc/self/ns/mnt)
     host=$("$BB" readlink /proc/1/ns/mnt)
     [ -n "$ns" ] && [ -n "$host" ] && [ "$ns" != "$host" ] || { log "not isolated"; exit 0; }
     [ -f "$F" ] && [ ! -L "$F" ] && [ "$("$BB" readlink -f "$F")" = "$F" ] || { log "unexpected library path"; exit 0; }
-    [ -f "$E" ] && [ ! -L "$E" ] && [ "$("$BB" readlink -f "$E")" = "$E" ] || { log "unexpected extension path"; exit 0; }
     # A bind must not propagate to the host or cover an existing file mount.
     "$BB" awk -v f="$F" -v e="$E" '
         $5 == f || $5 == e { bad=1 }
@@ -2569,8 +2583,8 @@ oneos_apm_test() (
     ext_old=3126a25acaa7e6afbca6c3ce8a63929e10efd935f312c14813bbe48746184c44
     ext_new=4213ebe249466d96e99f10b8146a9eb265548881837690e9148bb695f3f36526
     [ "$("$BB" sha256sum "$E" | "$BB" cut -d ' ' -f 1)" = "$ext_old" ] || { log "different extension; skipped"; exit 0; }
-    t=$("$BB" mktemp "$D/.apm.XXXXXX") || exit 0
-    u=$("$BB" mktemp "$D/.ext.XXXXXX") || { rm -f "$t"; exit 0; }
+    t=$("$BB" mktemp "$D/.apm.XXXXXX") || { log "cannot create manager candidate"; exit 0; }
+    u=$("$BB" mktemp "$D/.ext.XXXXXX") || { rm -f "$t"; log "cannot create extension candidate"; exit 0; }
     trap 'rm -f "$t" "$u"' EXIT
     # AArch64: preserve original primary test; accept active NONE only as fallback.
     # 0x5758c -> 0xc4cf4; original condition and control flow restored on return.
@@ -2588,24 +2602,45 @@ oneos_apm_test() (
         [ "$("$BB" sha256sum "$u" | "$BB" cut -d ' ' -f 1)" = "$ext_new" ] &&
         chmod 644 "$u" && "$BB" chcon u:object_r:system_lib_file:s0 "$u" ||
         { log "extension candidate validation failed"; exit 0; }
-    # Mount both or neither before audioserver is started.
-    bound_f=0
-    bound_e=0
-    if "$BB" mount --bind "$t" "$F"; then
-        bound_f=1
-        if "$BB" mount -o remount,bind,ro "$F" && "$BB" mount --bind "$u" "$E"; then
-            bound_e=1
-            if "$BB" mount -o remount,bind,ro "$E"; then
-                log "v2 one-boot APM + Oplus extension bound ($new $ext_new)"
-                exit 0
-            fi
-        fi
+    # Consume a single trial only after both candidates have been verified.
+    if [ "$mode" = once ]; then
+        rm -f "$D/once" || { log "cannot consume trial marker"; exit 0; }
     fi
-    [ "$bound_e" = 0 ] || "$BB" umount "$E" || "$BB" umount -l "$E"
-    [ "$bound_f" = 0 ] || "$BB" umount "$F" || "$BB" umount -l "$F"
-    log "v2 bind failed; rollback attempted"
+    # Mount both or neither before audioserver opens either library.
+    mounted() {
+        "$BB" awk -v p="$1" '$5==p {n++} END {exit n==0}' /proc/self/mountinfo
+    }
+    protected_mount() {
+        "$BB" awk -v p="$1" '
+            $5==p {
+                n++
+                if (index("," $6 ",", ",ro,") == 0) bad=1
+                for(i=7;i<=NF && $i!="-";i++) if($i ~ /^shared:/) bad=1
+            }
+            END {exit n!=1 || bad}
+        ' /proc/self/mountinfo
+    }
+    if "$BB" mount --bind "$t" "$F" &&
+       "$BB" mount -o remount,bind,ro "$t" "$F" && protected_mount "$F" &&
+       "$BB" mount --bind "$u" "$E" &&
+       "$BB" mount -o remount,bind,ro "$u" "$E" && protected_mount "$E"; then
+        log "v3 APM + Oplus extension bound ($mode: $new $ext_new)"
+        exit 0
+    fi
+    log "v3 bind failed; rolling back both candidates"
+    for target in "$E" "$F"; do
+        if mounted "$target"; then
+            "$BB" umount "$target" || "$BB" umount -l "$target" || true
+        fi
+    done
+    if mounted "$F" || mounted "$E"; then
+        log "FATAL: incomplete rollback; aborting guest startup"
+        exit 3
+    fi
+    log "v3 rollback complete; original libraries restored"
 )
-oneos_apm_test
+oneos_apm_test || exit 3
+# OneOS APM effect routing v3 (end)
 
 # Guest audioserver (oneos_switch.sh stopped Samsung's): ColorOS's audio
 # interfaces are not numbered like Samsung's (run 29: no routing strategies,
