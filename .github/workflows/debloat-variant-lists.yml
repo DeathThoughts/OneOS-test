@@ -1,0 +1,124 @@
+name: Derive debloat lists for fork ROMs
+on:
+  push:
+    branches: [experiment/debloat-variant-lists]
+    paths:
+      - 'scripts/debloat/derive-variant-list.py'
+      - 'scripts/debloat/fetch-variant-image.sh'
+      - '.github/workflows/debloat-variant-lists.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: debloat-variant-lists
+  cancel-in-progress: true
+jobs:
+  inventory:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref_name == 'experiment/debloat-variant-lists'
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [coloros17-twinity4c, coloros17-pyb110, hyperos-popsicle, hyperos-madrid, pixelos17-onyx]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install inventory tools and test policy
+        run: |
+          set -euo pipefail
+          python3 scripts/debloat/derive-variant-list.py --self-test
+          sudo rm -rf -- /usr/share/dotnet /opt/ghc /usr/local/lib/swift "${ANDROID_HOME:?}/ndk"
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs erofs-utils unzip
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          fi
+          yes | "$sdkmanager" --licenses >/dev/null || true
+          "$sdkmanager" --install "build-tools;36.0.0"
+          df -h .
+      - name: Download and verify exact pinned image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ matrix.image }}
+        run: bash scripts/debloat/fetch-variant-image.sh "$IMAGE" "$RUNNER_TEMP/input"
+      - name: Inspect package manifests and app folders read-only
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mnt" "$RUNNER_TEMP/result"
+          img="$RUNNER_TEMP/input/system.img"
+          fs=$(blkid -p -s TYPE -o value "$img")
+          case "$fs" in
+            ext4) opts=ro,noload,nodev,nosuid,noexec ;;
+            erofs) opts=ro,nodev,nosuid,noexec ;;
+            *) echo "Unexpected filesystem $fs"; exit 1 ;;
+          esac
+          sudo mount -t "$fs" -o "loop,$opts" "$img" "$RUNNER_TEMP/mnt"
+          trap 'sudo umount "$RUNNER_TEMP/mnt"' EXIT
+          python3 scripts/debloat/derive-variant-list.py "$IMAGE" "$RUNNER_TEMP/mnt" \
+            "$ANDROID_HOME/build-tools/36.0.0/aapt2" "$RUNNER_TEMP/result"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: debloat-${{ matrix.image }}
+          path: ${{ runner.temp }}/result/
+          if-no-files-found: error
+  integrate:
+    needs: inventory
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.ref_name == 'experiment/debloat-variant-lists'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: experiment/debloat-variant-lists
+          fetch-depth: 0
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: debloat-*
+          path: out/debloat
+      - name: Integrate only verified inventories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from collections import Counter
+          from pathlib import Path
+          import csv, json, shutil, subprocess
+          ids = ('coloros17-twinity4c','coloros17-pyb110','hyperos-popsicle','hyperos-madrid','pixelos17-onyx')
+          base = Path('app-android/app/src/full/assets/debloat/apps.tsv')
+          old = Counter(base.read_text().splitlines())
+          for image in ids:
+              p = Path('out/debloat/debloat-' + image)
+              src = p / (image + '.tsv')
+              report = json.loads((p / 'report.json').read_text())
+              rows = list(csv.DictReader(src.open(), delimiter='\t'))
+              assert report['image'] == image and len(rows) == report['safe'] + report['caution'] and rows
+              assert all(r['images'] == image and r['rating'] in ('🟢','🟡') for r in rows)
+              assert len(rows) == len({r['package'] for r in rows})
+              shutil.copyfile(src, Path('docs/debloat') / (image + '.tsv'))
+              print(image, len(rows), 'verified selectable apps')
+          subprocess.run(['python3', 'scripts/debloat/make-app-list.py'], check=True)
+          new = Counter(base.read_text().splitlines())
+          assert not old - new, 'Existing official list changed'
+          for image in ids:
+              matches = [l.split('\t') for l in base.read_text().splitlines() if not l.startswith('#') and image in l.split('\t')[4].split(',')]
+              assert matches and len(matches) == len({r[1] for r in matches})
+              assert sum(len(r[5].split(';')) for r in matches) <= 600
+          PY
+          git diff --check
+          git config user.name "OneOS CI"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/debloat/*.tsv app-android/app/src/full/assets/debloat/apps.tsv
+          git commit -m "Add verified debloat lists for five fork ROM variants"
+          git push origin HEAD:refs/heads/experiment/debloat-variant-lists
+          gh workflow run build-apk.yml --ref experiment/debloat-variant-lists -f publish=false
