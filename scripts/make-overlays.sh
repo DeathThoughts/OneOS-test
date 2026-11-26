@@ -501,6 +501,16 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_update_engine.
 # so sets built before it keep starting). patches/guest_media_mount_hold.py, helper
 # OneOSMediaHold.
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_media_mount_hold.py" "$WORK/services")"
+# Candidate ColorOS sets only; use the original image's own smali.
+# An incompatible layout fails the build instead of shipping partial hooks.
+if [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ]; then
+    [ "$IMAGE_SDK" = 37 ] && in_image /system/framework/oplus-services.jar ||
+        { echo "ColorOS parity requires an Android 17 OPPO image" >&2; exit 1; }
+    for g in guest_udfps_location guest_seh_touch guest_fp_touchwatch; do
+        NEW=$(python3 -I "$ROOT/switcher/patches/$g.py" "$WORK/services")
+        KEY_DIRS="$KEY_DIRS $NEW"
+    done
+fi
 # A Samsung charger's power for the guest's BatteryService (0.5.31; patches/battery_charge_power.py): the
 # Galaxy's health HAL reports no maximum charging current or voltage, so no guest showed fast charging.
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/battery_charge_power.py" "$WORK/services" "$ROOT/switcher/patches/OneOSChargePower.smali")"
@@ -1304,6 +1314,9 @@ fi
     echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, biowrites, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets, ksuappid and mediahold guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
     echo "# installd and IOemNetd codes read on the phone at runtime (OneOSInstalldCodes, OneOSOemNetdCodes): One UI 9.0 and 9.5 phones"
     echo "# charger power from Samsung's charging_type in BatteryService (OneOSChargePower)"
+    if [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ]; then
+        echo "# ColorOS parity: udfps, sehtouch and fptouch built against this image; optical hardware gated at runtime"
+    fi
     [ "$VOLD_GVLD" = 1 ] && echo "# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)"
     # HyperOS images (miui-services_patched.jar) and Pixel images list their
     # files in the order and with the notes each set was built with.

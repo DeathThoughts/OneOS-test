@@ -1,0 +1,126 @@
+name: Rebuild ColorOS parity candidates
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/coloros-patch-parity]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: coloros-parity-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  rebuild:
+    if: github.repository == 'DeathThoughts/OneOS-test'
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [findn6, twinity, pyb110]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: MysticGSI/mysticgsi
+          ref: 825b850dd8ddff11fdb8ed024034fc00e94b1451
+          path: mysticgsi
+          persist-credentials: false
+          sparse-checkout: |
+            /*.py
+            /requirements.txt
+            /patches/
+            /tools/
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          mkdir -p out/parity/report
+          sdk=$ANDROID_HOME
+          sudo rm -rf -- /usr/share/dotnet /opt/ghc /usr/local/lib/swift "${sdk:?}/ndk"
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs zip unzip zstd python3-venv
+          sdkmanager="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager" ]; then
+            sdkmanager=$(ls -d "$sdk"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          fi
+          yes | "$sdkmanager" --licenses >/dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0"
+          python3 -m venv mysticgsi/.venv
+          mysticgsi/.venv/bin/python -m pip install -r mysticgsi/requirements.txt capstone
+          chmod +x mysticgsi/tools/bin/Linux/x86_64/{e2fsdroid,extract.erofs,mke2fs,mkfs.erofs}
+          echo "$GITHUB_WORKSPACE/mysticgsi/.venv/bin" >> "$GITHUB_PATH"
+          df -h .
+      - name: Retrieve exact catalog image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          bash scripts/fetch-coloros-parity-image.sh "$IMAGE" out/parity/input 2>&1 | tee out/parity/report/image.log
+      - name: Rebuild image-specific overlays
+        env:
+          APKTOOL: ${{ github.workspace }}/mysticgsi/tools/apktool/apktool.jar
+          EXTRACT_EROFS: ${{ github.workspace }}/mysticgsi/tools/bin/Linux/x86_64/extract.erofs
+          ONEOS_COLOROS_PARITY: "1"
+        run: |
+          set -euo pipefail
+          export KEYSTORE="$RUNNER_TEMP/coloros-parity.keystore"
+          keytool -genkeypair -keystore "$KEYSTORE" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=OneOS parity candidate,O=OneOS,C=US"
+          sh scripts/make-overlays.sh out/parity/input/system.img out/parity/overlays 2>&1 | tee out/parity/report/overlays.log
+          (cd out/parity/overlays && sha256sum --strict --check guards.txt)
+          for f in services_patched.jar oplus-services_patched.jar vold_patched service.incremental_patched.so surfaceflinger_patched; do
+            test -s "out/parity/overlays/$f"
+          done
+      - name: Attempt image-specific SystemUI wave and AOD
+        env:
+          APKTOOL: java -jar ${{ github.workspace }}/mysticgsi/tools/apktool/apktool.jar
+        run: |
+          set -euo pipefail
+          input=out/parity/input/system.img
+          stock=out/parity/input/SystemUI.apk
+          for path in /system/system_ext/priv-app/SystemUI/SystemUI.apk /system_ext/priv-app/SystemUI/SystemUI.apk; do
+            if debugfs -R "stat $path" "$input" 2>&1 | grep -q '^Inode:'; then
+              debugfs -R "dump $path $stock" "$input"
+              break
+            fi
+          done
+          if [ -s "$stock" ]; then
+            mkdir -p out/parity/systemui
+            if sh scripts/make-coloros-wave-set.sh "$stock" out/parity/systemui >out/parity/report/systemui.log 2>&1 &&
+               test -s out/parity/systemui/ColorPanoramicSystemUI.apk &&
+               test -s out/parity/systemui/SystemUI_wave.dex; then
+              sha256sum "$stock" > out/parity/report/systemui-source.sha256
+            else
+              rm -rf out/parity/systemui
+              echo "Incompatible edit sites; no SystemUI replacement generated." >> out/parity/report/systemui.log
+            fi
+          else
+            echo "Stock SystemUI not found." > out/parity/report/systemui.log
+          fi
+      - name: Compare candidate with active set pins
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: python3 scripts/coloros-parity-report.py "$IMAGE" out/parity/overlays out/parity/report
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: coloros-parity-${{ matrix.image }}-candidate
+          path: |
+            out/parity/overlays/
+            out/parity/systemui/
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coloros-parity-${{ matrix.image }}-report
+          path: out/parity/report/
+          retention-days: 14
+          if-no-files-found: warn
