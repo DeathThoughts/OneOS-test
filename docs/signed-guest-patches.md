@@ -97,3 +97,30 @@ su -c 'grep -F "OneOS patch:" /data/local/tmp/oneos/auto_return.log | tail -n 10
 A marker proves the script started. The separately logged acceptance proves
 that Home was confirmed for that trial. Test rollback with a separate debug
 fixture and leave the release feed unmodified.
+
+## Debug audio routing recovery
+
+For the exact build 188 S23 library pair, the debug audio routing patch uses
+read-only, guest-namespace bind mounts before audioserver starts. It never
+modifies the raw image. The startup marker `signed audio routing v3 startup
+reached` distinguishes script selection/execution from the APM trial itself.
+The `APM test: v3 reached` diagnostic then reports the marker/guard result.
+A consumed sequence (the second number on the second line of
+`/data/oneos_bootui/signed_patch`) is **not** acceptance; the host restart log
+records selected trials, accepted sequences, and fallback selection separately.
+
+The APM fix is deliberately opt-in until the exact pair passes physical
+speaker, A2DP, effect, call, and restart tests. The root-owned private directory
+`/data/oneos-apm-test` (0700) accepts a regular root-owned 0600 marker named
+`once` for one validated trial or `enabled` for subsequent guest startups.
+Do not enable the persistent marker until a one-shot test has passed. Unknown
+library hashes or unsafe paths/mounts are skipped; failed binding restores both
+original libraries or aborts the guest startup if rollback cannot be verified.
+Removing the persistent marker **before a guest restart** restores the original
+libraries in the next clean namespace. SoundBoosterPlus remains speaker
+calibration; do not force it on Bluetooth or wired headphones.
+
+Multi-audio focus only allows simultaneous playback. Individual application
+volume is a different ColorOS SystemUI/AudioService feature. Check Sound &
+vibration for app-specific volume and test the native slider; do not enable
+unverified feature flags or change the existing multi-focus preference.
