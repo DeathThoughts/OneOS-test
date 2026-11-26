@@ -7,4 +7,9 @@
 <string name="catalog_open_checks">Open pre-boot checks for %1$s</string>
 <string name="catalog_update">Update</string>
 <string name="catalog_switch">Switch</string>
+    <string name="catalog_version_count">%1$d versions</string>
+    <string name="catalog_versions_button">Choose version</string>
+    <string name="catalog_choose_version">Choose a %1$s version</string>
+    <string name="catalog_version_prepared">Prepared</string>
+    <string name="catalog_version_saved">Saved copy</string>
 </resources>

@@ -24,4 +24,9 @@
     <string name="catalog_open_checks">Abrir verificações antes de iniciar %1$s</string>
     <string name="catalog_update">Atualizar</string>
     <string name="catalog_switch">Trocar</string>
+    <string name="catalog_version_count">%1$d versões</string>
+    <string name="catalog_versions_button">Escolher versão</string>
+    <string name="catalog_choose_version">Escolha uma versão de %1$s</string>
+    <string name="catalog_version_prepared">Preparada</string>
+    <string name="catalog_version_saved">Cópia salva</string>
 </resources>
