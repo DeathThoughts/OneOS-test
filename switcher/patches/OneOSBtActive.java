@@ -17,24 +17,46 @@ public final class OneOSBtActive {
         return false;
     }
 
+    private static void report(String message) {
+        android.util.Log.i("OneOSBtActive", message);
+        System.out.println(message);
+    }
+
+    // app_process does not run the ActivityThread application bootstrap.
+    private static void initBluetooth() throws Exception {
+        Class<?> initializer = Class.forName("android.bluetooth.BluetoothFrameworkInitializer");
+        if (initializer.getMethod("getBluetoothServiceManager").invoke(null) == null) {
+            Class<?> manager = Class.forName("android.os.BluetoothServiceManager");
+            initializer.getMethod("setBluetoothServiceManager", manager)
+                    .invoke(null, manager.getConstructor().newInstance());
+        }
+        report("Bluetooth framework initialized");
+    }
+
     public static void main(String[] args) {
         try {
             System.exit(run(args));
         } catch (Throwable e) {
-            System.err.println("OneOSBtActive: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            android.util.Log.e("OneOSBtActive", "Recovery failed", e);
+            System.err.println(android.util.Log.getStackTraceString(e));
             System.exit(2);
         }
     }
 
     private static int run(String[] args) throws Exception {
         if (args.length != 1 || !args[0].matches("(?i)[0-9a-f]{2}:[0-9a-f]{2}")) return 2;
+        initBluetooth();
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-        if (adapter == null || !adapter.isEnabled()) return 2;
+        if (adapter == null || !adapter.isEnabled()) {
+            report("Bluetooth adapter missing or disabled");
+            return 2;
+        }
+        report("Bluetooth adapter initialized and enabled");
         Method get = BluetoothAdapter.class.getMethod("getActiveDevices", int.class);
         // Do not replace any active media/assistive route.
         if (hasActive(get, adapter, BluetoothProfile.A2DP)
                 || hasActive(get, adapter, 21) || hasActive(get, adapter, 22)) {
-            System.out.println("already active or alternate Bluetooth audio route");
+            report("already active or alternate Bluetooth audio route");
             return 0;
         }
         Method isConnected = BluetoothDevice.class.getMethod("isConnected");
@@ -45,14 +67,14 @@ public final class OneOSBtActive {
             if (!device.getAddress().toUpperCase(java.util.Locale.ROOT)
                     .endsWith(args[0].toUpperCase(java.util.Locale.ROOT))) continue;
             if (candidate != null) {
-                System.out.println("ambiguous device suffix; no change");
+                report("ambiguous device suffix; no change");
                 return 3;
             }
             candidate = device;
         }
         if (candidate == null || adapter.getProfileConnectionState(BluetoothProfile.A2DP)
                 != BluetoothProfile.STATE_CONNECTED) {
-            System.out.println("no matching connected A2DP candidate");
+            report("no matching connected A2DP candidate");
             return 3;
         }
         if (hasActive(get, adapter, BluetoothProfile.A2DP)) return 0;
@@ -60,18 +82,18 @@ public final class OneOSBtActive {
         int audio = BluetoothAdapter.class.getField("ACTIVE_DEVICE_AUDIO").getInt(null);
         boolean accepted = Boolean.TRUE.equals(set.invoke(adapter, candidate, audio));
         if (!accepted) {
-            System.out.println("setActiveDevice returned false");
+            report("setActiveDevice returned false");
             return 4;
         }
         for (int i = 0; i < 10; i++) {
             Thread.sleep(200);
             List<?> devices = (List<?>) get.invoke(adapter, BluetoothProfile.A2DP);
             if (devices.contains(candidate)) {
-                System.out.println("A2DP active device confirmed");
+                report("A2DP active device confirmed");
                 return 0;
             }
         }
-        System.out.println("selection accepted but active device not confirmed");
+        report("selection accepted but active device not confirmed");
         return 5;
     }
 }
