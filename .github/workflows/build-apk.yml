@@ -54,6 +54,7 @@ jobs:
     if: >-
       !cancelled() && (needs.migrate-patch-payloads.result == 'success' || needs.migrate-patch-payloads.result == 'skipped') &&
       (github.ref_name == 'release' || github.ref_name == 'debug' ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'experiment/coloros-patch-parity') ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
     strategy:
       fail-fast: false
@@ -253,6 +254,8 @@ jobs:
           python3 scripts/migrate-patch-payloads.py --check-inventory
           cd app-android
           ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest' --tests '*GoogleAccountQueueTest'
+          ./gradlew --console=plain :app:testFullDebugUnitTest --tests '*FastInstallPolicyTest' --tests '*SetDownloaderTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageScriptTest.fastFinishStillRejectsTamperingAfterKeepFiles' --tests '*StageScriptTest.keepFilesRecordsOnlyIdenticalStageFilesAndFinishStillChecksThem'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
             --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \

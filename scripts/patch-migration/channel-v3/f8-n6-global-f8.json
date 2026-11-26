@@ -1,0 +1,243 @@
+{
+  "schema": 1,
+  "profile": "f8",
+  "set": "n6-global-f8",
+  "imageSha256": "eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c",
+  "revision": "fork-coloros-parity-r1",
+  "files": [
+    {
+      "name": "ColorPanoramicSystemUI.apk",
+      "sha256": "7da2707eb1371f4ba1a55c666783fef6823933426642777b2114f0d400a28f14",
+      "bytes": 143786749,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "Fold8AngleRelay.dex",
+      "sha256": "ccf2fbddc462eca6d7cb7f112ca1b36620fe0ccd044ff6ba28bebe13cfe6b89e",
+      "bytes": 5552,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "Fold8SystemUI.apk",
+      "sha256": "fbdc0570a79df22a81c55c350693f05f3c16636492459a3a600a9a82f8ed9beb",
+      "bytes": 134953091,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "GlobalVerifiedAddons.tar",
+      "sha256": "eec3202107d1dc28214a073410a90cb8e559f26e653e25d23c1239f2a25c448e",
+      "bytes": 146706054,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "KeKeThemeSpace_patched.apk",
+      "sha256": "2eddd38f878e61fa41d18151f5f90be5f18b5b3e161ac559ce191b9022e18c7b",
+      "bytes": 146423832,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "OneOSGuest.apk",
+      "sha256": "bd03c424877de86c2864313ba3371d3725b3d5531559373aadc84d592f9cae0c",
+      "bytes": 7471127,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "OneOSWallpapersFoldGrid.apk",
+      "sha256": "377e90fe7d4109bece60ab3dda82409a16d85b1e5cf2ad775a90a5cc4558be1c",
+      "bytes": 12895,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "OplusGestureUI_patched.apk",
+      "sha256": "d3c19c5cd8ec908439f3362a5341889faab22df29977099ddf0308fa94e974f5",
+      "bytes": 33764977,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "OplusGestureUI_patched.apk.src_sha256",
+      "sha256": "0c4c92964adc4e18e0e3761057dd2215f62d923102b376a78cb07e1ca336ed91",
+      "bytes": 65,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "adservices_payload.img",
+      "sha256": "63a54a1d705e387966c1174a6707fe02b85035b311fa1fbda1c7fcf0991a202a",
+      "bytes": 22568960,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "appsearch_payload.img",
+      "sha256": "88ce090179da9e71ff718a72b7e027bdf0813ddbcde5b17e2b05d03fc20f6fcb",
+      "bytes": 4550656,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "art_payload.img",
+      "sha256": "391e25c00f71217669879482c4055ae27855e8b5be8df9f4dfcd018fa02fc148",
+      "bytes": 31633408,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "cellbroadcast_payload.img",
+      "sha256": "eca67bef101d9f300f36f824c9af394c316c0f27d3d7c72d9e2e22d3ea7e0c7c",
+      "bytes": 23945216,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "configinfrastructure_payload.img",
+      "sha256": "f8fc69250f59bd83b0d11399c17a4bfa4e63030d7297b2108eb84d9bc7dc94fd",
+      "bytes": 5849088,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "crashrecovery_payload.img",
+      "sha256": "2cda6104fa8266d2ee26ca9512532dfed6fef9c8c2a319663f890fd19986c0a0",
+      "bytes": 380928,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "extservices_payload.img",
+      "sha256": "dddccf843beb0fb4552d3f0afe1c4f8bb8d7a1c4269f5a787f16ad1b08f8beaf",
+      "bytes": 6443008,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "framework_patched.jar",
+      "sha256": "bb456167446baa00efd3bfa6445e8f6423d3e798eac4c3a3029b9e11233e4498",
+      "bytes": 52442303,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "guards.txt",
+      "sha256": "5dc5351f10ac42a14e490b3e45d5583144c6f4f2fe88cdb0e0d312dd1db5eb25",
+      "bytes": 1973,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "healthfitness_payload.img",
+      "sha256": "8f2a37629ed009b011d33f017714ac3d33caa5ffba838c2ced3a2c4f6a612efc",
+      "bytes": 17305600,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "i18n_payload.img",
+      "sha256": "1750220fbfa2af1611a8ed7b1b3526074953b3a863f0e066a3fede2a4ea7d756",
+      "bytes": 21409792,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "ims-ext-common_patched.jar",
+      "sha256": "c78909a8b6a6ebefcc5b2d20bfa9a4b7ce228c15f4b22de6a0ea84d5d0f8a21a",
+      "bytes": 206183,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "libcamera_client_patched.so",
+      "sha256": "fae755c0225bb9cdd3553fc26a11092fd035984c8432adbf22c3c8d70275fa30",
+      "bytes": 666232,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "mediaprovider_payload.img",
+      "sha256": "ceaa5bbb31041942437b2b45bdbaf3589c6d39670ea9164a8817b979fa27a82f",
+      "bytes": 32632832,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "ondevicepersonalization_payload.img",
+      "sha256": "d3a960a714fb2a07572b85cdcd97d2585e22a9d348da60a9da6befe20284d021",
+      "bytes": 14684160,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "oplus-framework_patched.jar",
+      "sha256": "ee4429b869a4d0083fb45525feef3bb2efbca5d0fcef87d7372328bb99330fdf",
+      "bytes": 12338345,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "oplus-services_patched.jar",
+      "sha256": "d014f800c19c7213dad86a4fea407a130a4adc117a9abe4dfc22bd64a104685a",
+      "bytes": 30370845,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "oplus-telephony-common_patched.jar",
+      "sha256": "89ba84b1ae0fcb1415c93e2c7e080fa402c4a1033dfc3a524eb4455379ea3973",
+      "bytes": 2959629,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "oplus_odm_ai.tar",
+      "sha256": "4faf5c11a7f9ee024805dafd520b158f6db470d39da46f8f02f5edca170b5b86",
+      "bytes": 15667200,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "permission_payload.img",
+      "sha256": "a74644f7a3817f52fdf59e248b88fdac19fca7a87a74a2e2ed91063ad213404f",
+      "bytes": 30302208,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "rkpd_payload.img",
+      "sha256": "df141e3656cbbe576a98975cdd17327f7e4a7dc671a1725c504886ebf5009a05",
+      "bytes": 1507328,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "runtime_payload.img",
+      "sha256": "f45b10cbc8deb9d2cf32a33df4e778904334cc8cdb0cb628043153029ddf9379",
+      "bytes": 5296128,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "samcam.tar",
+      "sha256": "286150b45c782b1a87f11d734d850942bceaddd66d2e338662246f70e253f98e",
+      "bytes": 90869760,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "sdkext_payload.img",
+      "sha256": "448f4909cc27a33be33ea85d3d950d38d285c2964c930c043eb3827c89ff267f",
+      "bytes": 1212416,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "service.incremental_patched.so",
+      "sha256": "e0c49883974c10f5601950c0f54c3da29658dda1ce17c08c5af1364bbd31bdd8",
+      "bytes": 1763144,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "services_patched.jar",
+      "sha256": "295abb705e6b89ff47d9c565201c09bfbb9c3eba3e07d413a3c9148c240eb663",
+      "bytes": 44762075,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "surfaceflinger_patched",
+      "sha256": "2c773fe0637e24eb5b950101f682883efd2f4c55595007db3b56eddd8e25b5a0",
+      "bytes": 7343928,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "telephony-common_patched.jar",
+      "sha256": "803c91cd0609030effe7d17132dee973de2c90506349a600645ce959791c92ce",
+      "bytes": 6060150,
+      "source": "gh:DeathThoughts/OneOS-test:coloros-parity-r1"
+    },
+    {
+      "name": "vold_patched",
+      "sha256": "2d9ee6309c7581f5d55a0ec9e89686413fe0c9c3c4971cbcda81ddc0e013d845",
+      "bytes": 1325272,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    },
+    {
+      "name": "wifi_payload.img",
+      "sha256": "93f7758cee7ad56d20c4ee80cd270837d1ecb187efacfbc473f3d27c3184f2f6",
+      "bytes": 19251200,
+      "source": "gh:DeathThoughts/OneOS-test:fork-payloads-v1"
+    }
+  ]
+}

@@ -845,8 +845,8 @@ image_raw() {
 
 set_files() {
     case "$1" in
-        n6-global-f8) echo "$SET_COMMON oplus-framework_patched.jar OneOSWallpapersFoldGrid.apk cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar Fold8SystemUI.apk Fold8AngleRelay.dex KeKeThemeSpace_patched.apk oplus_odm_ai.tar GlobalVerifiedAddons.tar ColorPanoramicSystemUI.apk" ;;
-        n6-f8u) echo "$SET_COMMON oplus-framework_patched.jar OneOSWallpapersFoldGrid.apk cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar Fold8SystemUI.apk Fold8AngleRelay.dex KeKeThemeSpace_patched.apk oplus_odm_ai.tar ColorPanoramicSystemUI.apk" ;;
+        n6-global-f8) echo "$SET_COMMON oplus-framework_patched.jar OneOSWallpapersFoldGrid.apk cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar Fold8SystemUI.apk Fold8AngleRelay.dex KeKeThemeSpace_patched.apk oplus_odm_ai.tar GlobalVerifiedAddons.tar ColorPanoramicSystemUI.apk OplusGestureUI_patched.apk OplusGestureUI_patched.apk.src_sha256" ;;
+        n6-f8u) echo "$SET_COMMON oplus-framework_patched.jar OneOSWallpapersFoldGrid.apk cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar Fold8SystemUI.apk Fold8AngleRelay.dex KeKeThemeSpace_patched.apk oplus_odm_ai.tar ColorPanoramicSystemUI.apk OplusGestureUI_patched.apk OplusGestureUI_patched.apk.src_sha256" ;;
         x9u-in-1105-sultra) echo "$SET_COMMON oplus-framework_patched.jar cellbroadcast_payload.img framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so samcam.tar KeKeThemeSpace_patched.apk oplus_odm_ai.tar ColorPanoramicSystemUI.apk SystemUI_wave.dex OneOSWaveRepack.dex samcam_a.tar OplusGestureUI_patched.apk OplusGestureUI_patched.apk.src_sha256" ;;
         pixel-f8u) echo "$SET_PIXEL Fold8PixelSystemUI.apk Fold8AngleRelay.dex OneOSPixelUnfold.apk yogi-services_patched.jar libbootanimation_preapex_patched.so OneOSPixelLauncher.apk OneOSFoldCutout.apk" ;;
         pixel-f8) echo "$SET_PIXEL Fold8PixelSystemUI.apk Fold8AngleRelay.dex Fold8PixelUnfold.apk yogi-services_patched.jar libbootanimation_preapex_patched.so OneOSPixelLauncher.apk" ;;
@@ -854,8 +854,8 @@ set_files() {
         hyper-f8u) echo "$SET_HYPEROS" ;;
         hyper-popsicle) echo "$SET_POPSICLE" ;;
         hyper-madrid) echo "$SET_POPSICLE" ;;
-        twinity-s23) echo "$SET_COMMON framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so oplus-framework_patched.jar samcam_bar.tar" ;;
-        pyb110-s23) echo "$SET_PYB" ;;
+        twinity-s23) echo "$SET_COMMON framework_patched.jar telephony-common_patched.jar libcamera_client_patched.so oplus-framework_patched.jar samcam_bar.tar ColorPanoramicSystemUI.apk SystemUI_wave.dex OneOSWaveRepack.dex OplusGestureUI_patched.apk OplusGestureUI_patched.apk.src_sha256" ;;
+        pyb110-s23) echo "$SET_PYB ColorPanoramicSystemUI.apk SystemUI_wave.dex OneOSWaveRepack.dex OplusGestureUI_patched.apk OplusGestureUI_patched.apk.src_sha256" ;;
         hyper-hk) echo "$SET_HYPERHK framework_patched_oneui95.jar libcamera_client_patched_oneui95.so" ;;
         nothing-f8u) echo "$SET_NOTHING framework_patched_oneui95.jar libcamera_client_patched_oneui95.so" ;;
         nothing-a) echo "$SET_NOTHINGA" ;;
@@ -1501,7 +1501,9 @@ do_finish() {
     for n in $P_FILES; do
         sum=$(received_sum "$n")
         is_hex64 "$sum" || refuse "$n was not received"
-        [ -f "$STAGE/$n" ] && mine "$STAGE/$n" && [ "$(sha "$STAGE/$n")" = "$sum" ] || refuse "$n changed after it was received"
+        # check_files below hashes every member after the list and attic are finalized.
+        # Keep the early type/ownership gate, but avoid hashing the same payload twice.
+        [ -f "$STAGE/$n" ] && mine "$STAGE/$n" || refuse "$n changed after it was received"
         list="$list$sum  $n
 "
     done

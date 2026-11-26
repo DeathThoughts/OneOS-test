@@ -2582,7 +2582,12 @@ SENSORS_HAL_RESTART=0
 SENS_DEF=0
 case "$(getprop ro.product.model)" in SM-S721*) SENS_DEF=1 ;; esac
 grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null && SENS_DEF=0
-if [ "${ONEOS_GUEST_HOVER_PROX:-$SENS_DEF}" = 1 ] && [ ! -e /sys/class/sensors/proximity_sensor ] && [ -f /vendor/lib64/sensors.inputvirtual.so ]; then
+# 0.5.41: the hover proximity sensor on the Galaxy S24 Ultra too (owner: "Proximity sensor doesnt work in s24u
+# during calls"; the S24 Ultra has no proximity sensor of its own, One UI uses the touch IC's ear detect). The patch
+# checks every byte it changes and leaves a library it does not recognise alone.
+PROX_DEF=$SENS_DEF
+case "$(getprop ro.product.model)" in SM-S928*) grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null || PROX_DEF=1 ;; esac
+if [ "${ONEOS_GUEST_HOVER_PROX:-$PROX_DEF}" = 1 ] && [ ! -e /sys/class/sensors/proximity_sensor ] && [ -f /vendor/lib64/sensors.inputvirtual.so ]; then
     apply_hover_prox_patch || echo "!!! Proximity: Hover Proximity patch was not applied; calls may keep screen on"
 fi
 if [ "${ONEOS_GUEST_CAM_SENSORS:-$SENS_DEF}" = 1 ] && ! grep -q '^ro.build.version.oneui=' "$STAGE/rootfs/system/build.prop" 2>/dev/null; then
@@ -3183,6 +3188,14 @@ while true; do
             echo \"[UI Activator] navigation: hide_navigationbar_enable=\$NAVK navigation_mode=\$NAVM\"
             case \"\$NAVK:\$NAVM\" in 0:2|2:0|3:0) echo \"[UI Activator] WARNING: ColorOS nav key and AOSP navigation_mode disagree\" ;; esac
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm disable android.ext.services/android.ext.services.notification.Assistant 2>/dev/null || true
+            # 0.5.46 (Tab S9 FE+ d12ec9aa, ColorOS 17 Pad): ColorOS's setup (com.coloros.bootreg) arms an alarm on its
+            # GuidePage that powers the device off when it sits there (GuidePage\$AlarmReceiver: \"will try to shut down\",
+            # PowerManager.shutdown); it fired 13 and 16 min into two sessions and OneOS, as asked, powered the tablet off.
+            # That receiver is turned off; the setup itself stays. ONEOS_GUEST_BOOTREG_ALARM=1 keeps it.
+            if [ \"${ONEOS_GUEST_BOOTREG_ALARM:-0}\" != 1 ] &&
+               $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm disable 'com.coloros.bootreg/com.coloros.bootreg.settings.activity.GuidePage\$AlarmReceiver' >/dev/null 2>&1; then
+                echo \"[UI Activator] ColorOS setup: its power-off alarm (GuidePage\\\$AlarmReceiver) disabled\"
+            fi
             # Fallback for a staged /data that had no settings files to seed, before
             # HOME: a fresh stage has none. Pixel's two setup wizards (ColorOS has
             # none) would take that first boot and wait for Google services.
@@ -5928,14 +5941,20 @@ if [ "$RETURN_MAX" -gt 0 ]; then
                 # 0.4.87: the system buffer on its own. Read together with main, a busy
                 # camera filled the 4000 lines within the second and nothing was printed
                 # (S24 Ultra e99b8eae: 'shutdown' with the camera at full zoom, asker unknown).
-                timeout 5 logcat -d -b system -t 3000 2>/dev/null | grep -E ' OneOS|ShutdownThread|ShutdownActivity|GlobalActions|RescueParty|PowerManagerService.*[Rr]eboot|[Ss]hut ?down|[Oo]verheat|[Hh]igh ?[Tt]emp' | tail -15
+                # 0.5.45: printed nothing on the Tab S9 FE+ (0dbe56e0, ColorOS 'shutdown' 30 min in, twice): the
+                # guest's own logcat (its logd, in its mount namespace) first, the system and main buffers.
+                WHO='ShutdownThread|ShutdownActivity|GlobalActions|RescueParty|PowerManagerService.*([Rr]eboot|[Ss]hutdown|goToSleep)|[Ss]hut ?down|[Pp]ower ?[Oo]ff|[Oo]verheat|[Hh]igh ?[Tt]emp|[Ll]ow ?[Bb]att'
+                SFP=\$(pidof surfaceflinger | awk '{print \$1}')
+                a=''
+                [ -n \"\$SFP\" ] && a=\$(timeout 5 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/logcat -d -b system,main -t 6000 2>/dev/null | grep -E \" OneOS|\$WHO\" | tail -n 20)
+                [ -n \"\$a\" ] || a=\$(timeout 5 logcat -d -b system -t 3000 2>/dev/null | grep -E \" OneOS|\$WHO\" | tail -n 15)
+                echo \"\${a:-who asked: no line in the guest's or One UI's log}\"
                 # The guest's thermal and battery services can ask for a shutdown
                 # without a line in the log: what they hold now, 5 s each at most.
                 # Not after the user's own return (app, keys) or a soft reboot.
                 case \"\$req\" in
                     app:*|keys:*|ksud:*) ;;
                     *)
-                        SFP=\$(pidof surfaceflinger | awk '{print \$1}')
                         if [ -n \"\$SFP\" ]; then
                             a=\$(timeout 5 $BB nsenter -t \$SFP -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys thermalservice 2>/dev/null | grep -o -E 'Thermal Status: [0-9]+|Temperature[{][^}]*mStatus=[1-6][}]' | head -n 12 | tr '\n' ' ')
                             echo \"guest thermal service: \${a:-no answer}\"
@@ -6425,7 +6444,7 @@ if [ "$RETURN_MAX" -gt 0 ]; then
         # hold is recognized. Straight from the phone's vibrator HAL (IVibrator.on(ms, null callback), transaction
         # 3), which serves One UI and the guest alike and keeps running whatever either framework does; a
         # timed_output node where the kernel has one.
-        KVIB=$(service list 2>/dev/null | sed -n 's/.*\(android\.hardware\.vibrator\.IVibrator\/[A-Za-z0-9_]*\).*/\1/p' | head -n 1)
+        KVIB=$(timeout 5 service list 2>/dev/null | sed -n 's/.*\(android\.hardware\.vibrator\.IVibrator\/[A-Za-z0-9_]*\).*/\1/p' | head -n 1)
         [ -n "$KVIB" ] || { [ -w /sys/class/timed_output/vibrator/enable ] && KVIB=timed_output; }
         echo "$KVIB" > "$KS/vibrator"
         for kd in $KDEVS; do
@@ -6434,6 +6453,32 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # builtin echo writes as the subshell, and 0 means the writer).
             ( echo 0 > /sys/fs/cgroup/cgroup.procs 2>/dev/null
               echo -1000 > /proc/self/oom_score_adj 2>/dev/null
+              # When the device goes away (a keyboard cover detached: Galaxy Tab
+              # S10 Lite's Book Cover Keyboard lists KEY_VOLUMEUP/DOWN), Android's
+              # getevent keeps its fd on the deleted node and spins on it at a
+              # full core, forever: the loop below never gets a line, so the
+              # session check never runs (two of them held two cores for 3 hours
+              # across sessions and One UI). A sidecar ends getevent once its
+              # node is gone or a later switch took over, every 5 s. It signals
+              # the one getevent that holds this device and is its sibling, a
+              # child of this subshell ($$ is the script's in a subshell: the
+              # shell's own /proc/self/stat gives the PPID), never a walk by name
+              # (see the comment above).
+              ( sleep 1
+                read -r st < /proc/self/stat; set -- $st; me=$4
+                g=''
+                for p in $(pidof getevent 2>/dev/null); do
+                    read -r st < "/proc/$p/stat" 2>/dev/null || continue; set -- $st
+                    [ "$4" = "$me" ] && [ "$(readlink "/proc/$p/fd/4" 2>/dev/null)" = "$kd" ] && { g=$p; break; }
+                done
+                [ -n "$g" ] || exit 0
+                while kill -0 "$g" 2>/dev/null; do
+                    sleep 5
+                    [ "$(cat "$KS/session" 2>/dev/null)" = "$KTOK" ] && [ -c "$kd" ] &&
+                        ! readlink "/proc/$g/fd/4" 2>/dev/null | grep -q ' (deleted)$' && continue
+                    kill "$g" 2>/dev/null
+                    exit 0
+                done ) &
               getevent -lq "$kd" 2>/dev/null | while read -r typ code val rest; do
                 # A later switch (or none: the stage's file gone) ends this
                 # reader; getevent then ends on its next write.

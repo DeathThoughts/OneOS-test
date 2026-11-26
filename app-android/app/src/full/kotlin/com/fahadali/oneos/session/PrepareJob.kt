@@ -114,12 +114,16 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
     }
 
     @Volatile private var cancelled = false
+    private var phaseStartedMs = 0L
+    private var setupStartedMs = 0L
 
     fun start(ctx: Context, plan: Plan = Plan.AUTO) {
         if (state.busy || StageCheck.state.busy || LaunchJob.state.busy || LogJob.state.busy) return
         val app = ctx.applicationContext
         cancelled = false
         Rate.reset()
+        setupStartedMs = SystemClock.elapsedRealtime()
+        phaseStartedMs = setupStartedMs
         update(State(Phase.RUNNING, Step.CHECK, detail = "Checking root…"))
         lastBytesUpdateMs = 0L
         PrepareService.start(app)
@@ -139,6 +143,9 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                 val msg = "${e.javaClass.simpleName}: ${e.message.orEmpty()}".take(500)
                 update(state.copy(phase = Phase.FAILED, message = msg, plain = Plain.setupFailed(msg, cancelled, state.image)))
                 republishStage(app)
+            } finally {
+                val now = SystemClock.elapsedRealtime()
+                android.util.Log.i("OneOSFastInstall", "phase=${state.step?.name ?: "DONE"} elapsedMs=${now - phaseStartedMs} totalMs=${now - setupStartedMs} result=${state.phase}")
             }
         }
     }
@@ -171,6 +178,11 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
 
     private fun step(s: Step, detail: String? = null) {
         if (cancelled) throw Stop(STOPPED)
+        if (state.step != s) {
+            val now = SystemClock.elapsedRealtime()
+            android.util.Log.i("OneOSFastInstall", "phase=${state.step?.name ?: "CHECK"} elapsedMs=${now - phaseStartedMs}")
+            phaseStartedMs = now
+        }
         update(state.copy(step = s, done = state.done + (state.step?.takeIf { it != s }?.let { setOf(it) } ?: emptySet()), detail = detail,
             stepDone = 0, stepTotal = 0))
     }
@@ -356,7 +368,18 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
 
         // 2b. (0.4.41) The set's files this app does not carry, downloaded by hash before the
         // stage is touched: a failed or stopped download leaves the phone as it was.
-        val downloads = AppAssets.toDownload(app, files)
+        // The fresh full root check provides a download hint, not an authorization.
+        // keep-files independently rechecks these hashes before the stage is finalized.
+        val reuse = if (mode == RootScript.BeginMode.KEEP && st.complete && st.safe) {
+            val entries = st.entries.associateBy { it.name }
+            files.filter { f ->
+                val e = entries[f.name]
+                e != null && e.type == 'f' && e.uid == 0 && e.size == f.bytes &&
+                    e.mode.trimStart('0') == FastInstallPolicy.mode(f.name) && st.hashes[f.name] == f.sha256
+            }.map { it.name }.toSet()
+        } else emptySet()
+        val downloads = AppAssets.toDownload(app, files.filter { it.name !in reuse })
+        android.util.Log.i("OneOSFastInstall", "stageReuseFiles=${reuse.size} downloads=${downloads.size} downloadBytes=${downloads.sumOf { it.first.bytes }}")
         if (downloads.isNotEmpty()) {
             step(Step.DOWNLOAD)
             val need = downloads.sumOf { it.first.bytes }
@@ -365,8 +388,7 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
             if (free < need + 256L * 1024 * 1024) {
                 throw Stop("Not enough free space for this system's OneOS files: ${Units.bytes(need)} to download, ${Units.bytes(free)} free.")
             }
-            // (0.4.42) Three at a time: Drive took 16-80 s to start some files (one at a time, the
-            // screen sat still that long); the others keep coming meanwhile.
+            // Bounded parallelism: fewer workers on metered networks or warm devices.
             val partial = java.util.concurrent.atomic.AtomicLongArray(downloads.size)
             val finished = java.util.concurrent.atomic.AtomicInteger(0)
             val lastByteAt = java.util.concurrent.atomic.AtomicLong(SystemClock.elapsedRealtime())
@@ -376,7 +398,19 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
             val firstFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
             val connections: MutableSet<java.net.HttpURLConnection> = java.util.concurrent.ConcurrentHashMap.newKeySet()
             val started = SystemClock.elapsedRealtime()
-            val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(3, downloads.size)) { r -> Thread(r, "oneos-download") }
+            val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+            val pm = app.getSystemService(android.os.PowerManager::class.java)
+            fun workers(): Int = FastInstallPolicy.parallelism(
+                downloads.size,
+                runCatching { cm?.isActiveNetworkMetered ?: true }.getOrDefault(true),
+                runCatching { pm?.currentThermalStatus ?: 2 }.getOrDefault(2),
+            )
+            val pool = java.util.concurrent.ThreadPoolExecutor(
+                workers(), minOf(8, downloads.size), 10L, java.util.concurrent.TimeUnit.SECONDS,
+                java.util.concurrent.LinkedBlockingQueue<Runnable>(),
+                java.util.concurrent.ThreadFactory { r -> Thread(r, "oneos-download") },
+            )
+            var lastPolicyCheck = started
             val stepBase = base
             try {
                 val futures = downloads.mapIndexed { i, (f, ids) ->
@@ -403,10 +437,14 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                     var got = 0L
                     for (i in 0 until partial.length()) got += partial.get(i)
                     val now = SystemClock.elapsedRealtime()
+                    if (now - lastPolicyCheck >= 2_000) {
+                        pool.corePoolSize = workers()
+                        lastPolicyCheck = now
+                    }
                     val idle = (now - lastByteAt.get()) / 1000
                     val secs = (now - started) / 1000.0
                     val rate = if (secs >= 2 && idle < 3) " · ${Units.bytes((got / secs).toLong())}/s" else ""
-                    val waiting = if (idle >= 3) " · waiting for Google Drive ${idle} s" else ""
+                    val waiting = if (idle >= 3) " · waiting for patch server ${idle} s" else ""
                     bytes(stepBase, got, stepDone = got, force = true) {
                         "${finished.get()} of ${downloads.size} files · ${Units.bytes(got)} of ${Units.bytes(need)}$rate$waiting"
                     }
@@ -467,6 +505,11 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
             emptySet()
         }
         val toSend = files.filter { it.name !in keptNames }
+        // A changed root file is never trusted. Retry with a fresh status if the
+        // pre-download hint became stale and its verified replacement is missing.
+        if (AppAssets.toDownload(app, toSend).isNotEmpty()) {
+            throw Stop("A staged patch changed during setup. Prepare again to download its verified replacement.")
+        }
         var sentFiles = files.filter { it.name in keptNames }.sumOf { it.bytes }
         base += sentFiles
         bytes(base, 0, stepDone = sentFiles, force = true) {
@@ -525,7 +568,7 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
     }
 
     private fun copy(input: InputStream, out: OutputStream, md: MessageDigest, progress: (Long) -> Unit = {}): Long {
-        val buf = ByteArray(1 shl 16)
+        val buf = ByteArray(1 shl 18)
         var n = 0L
         while (true) {
             val r = input.read(buf)
@@ -582,11 +625,11 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                 }
                 val entryName = image.zipEntryName
                 val decoded = if (entryName == null) {
-                    GZIPInputStream(counting, 1 shl 16)
+                    GZIPInputStream(counting, 1 shl 18)
                 } else {
                     SingleImageZipInputStream(counting, entryName, image.rawBytes)
                 }
-                val buf = ByteArray(1 shl 18)
+                val buf = ByteArray(1 shl 20)
                 val head = ByteArray(Images.RAW_HEADER_BYTES)
                 decoded.use {
                     while (true) {

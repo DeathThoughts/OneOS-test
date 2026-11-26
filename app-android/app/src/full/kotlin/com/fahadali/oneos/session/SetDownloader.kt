@@ -55,10 +55,28 @@ object SetDownloader {
             source.count { it == ':' } == 2 && runCatching { url(source, sha256) }.isSuccess
         }
 
+    private val payloadLocks = Array(64) { java.util.concurrent.locks.ReentrantLock() }
+
     /** Resumes an interrupted download, retaining a file only after the pinned size and hash match. */
     fun fetch(
         ctx: Context, f: AppAssets.Staged, sources: List<String>, cancelled: () -> Boolean,
         connections: MutableSet<HttpURLConnection>? = null, progress: (Long) -> Unit,
+    ) {
+        val lock = payloadLocks[(f.sha256.hashCode() and Int.MAX_VALUE) % payloadLocks.size]
+        while (!lock.tryLock(200, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            if (cancelled()) throw Failed("stopped")
+        }
+        try {
+            if (cancelled()) throw Failed("stopped")
+            fetchLocked(ctx, f, sources, cancelled, connections, progress)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private fun fetchLocked(
+        ctx: Context, f: AppAssets.Staged, sources: List<String>, cancelled: () -> Boolean,
+        connections: MutableSet<HttpURLConnection>?, progress: (Long) -> Unit,
     ) {
         if (cached(ctx, f) != null) { progress(f.bytes); return }
         if (sources.isEmpty()) throw Failed("${f.name} has no download source")
@@ -73,8 +91,8 @@ object SetDownloader {
             for (attempt in 1..3) {
                 if (cancelled()) throw Failed("stopped")
                 try {
-                    download(part, url(source, f.sha256), f.bytes, f.name, cancelled, connections, progress)
-                    verify(part, f.bytes, f.sha256, f.name)
+                    download(part, url(source, f.sha256), f.bytes, f.name, cancelled, connections, f.sha256, progress)
+                    if (cancelled()) throw Failed("stopped")
                     if (!part.renameTo(File(dir(ctx), f.sha256))) throw Failed("could not keep ${f.name}")
                     return
                 } catch (e: Refused) {
@@ -103,15 +121,21 @@ object SetDownloader {
      */
     internal fun download(
         part: File, from: String, bytes: Long, name: String, cancelled: () -> Boolean,
-        connections: MutableSet<HttpURLConnection>? = null, progress: (Long) -> Unit,
+        connections: MutableSet<HttpURLConnection>? = null, expectedSha: String? = null, progress: (Long) -> Unit,
     ) {
+        if (cancelled()) throw Failed("stopped")
         val have = part.length()
-        if (have == bytes) return
+        if (have == bytes && part.isFile) {
+            if (expectedSha != null) verify(part, bytes, expectedSha, name)
+            progress(bytes)
+            return
+        }
         val c = URL(from).openConnection() as HttpURLConnection
         c.connectTimeout = 30_000
         // Drive took up to 80 s before the first byte of some files (0.4.41 on the Fold, and from the server).
         c.readTimeout = 150_000
         c.instanceFollowRedirects = true
+        c.setRequestProperty("Accept-Encoding", "identity")
         if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
         // The caller can close it from another thread (a stop): a blocked read then ends at once.
         connections?.add(c)
@@ -126,13 +150,34 @@ object SetDownloader {
             }
             val append = have > 0 && code == HttpURLConnection.HTTP_PARTIAL
             if (code != HttpURLConnection.HTTP_OK && !append) throw IOException("HTTP $code")
+            if (append && !FastInstallPolicy.validResume(c.getHeaderField("Content-Range"), have, bytes)) {
+                if (cancelled()) throw Failed("stopped")
+                if (!part.delete()) throw Failed("could not discard invalid partial $name")
+                throw IOException("$name: invalid Content-Range, retrying from the beginning")
+            }
             // A stop while Drive was still answering: never touch the file after it (0.4.42 review:
             // a late answer truncated the .part a newer run was writing).
             if (cancelled()) throw Failed("stopped")
             var done = if (append) have else 0L
+            val digest = expectedSha?.let { MessageDigest.getInstance("SHA-256") }
+            val buf = ByteArray(1 shl 18)
+            // Hash a resumed prefix once, then hash new bytes while writing.
+            if (append && digest != null) {
+                var prefix = 0L
+                part.inputStream().use { input ->
+                    while (true) {
+                        if (cancelled()) throw Failed("stopped")
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        digest.update(buf, 0, n)
+                        prefix += n
+                    }
+                }
+                if (prefix != have) throw Failed("$name changed while resuming")
+            }
+            progress(done)
             FileOutputStream(part, append).use { out ->
                 c.inputStream.use { input ->
-                    val buf = ByteArray(1 shl 16)
                     while (true) {
                         if (cancelled()) throw Failed("stopped")
                         val n = input.read(buf)
@@ -141,12 +186,18 @@ object SetDownloader {
                         if (n < 0) break
                         if (done + n > bytes) throw Failed("$name is larger than the app expects")
                         out.write(buf, 0, n)
+                        digest?.update(buf, 0, n)
                         done += n
                         progress(done)
                     }
                 }
             }
-            if (done != bytes) throw IOException("$name: $done of $bytes bytes")
+            if (done != bytes || part.length() != bytes) throw IOException("$name: $done of $bytes bytes")
+            if (cancelled()) throw Failed("stopped")
+            if (digest != null && Hashes.hex(digest.digest()) != expectedSha) {
+                part.delete()
+                throw Failed("$name arrived damaged (its hash is not the app's)")
+            }
         } finally {
             connections?.remove(c)
             c.disconnect()
@@ -161,7 +212,7 @@ object SetDownloader {
         }
         val md = MessageDigest.getInstance("SHA-256")
         RandomAccessFile(part, "r").use { r ->
-            val buf = ByteArray(1 shl 16)
+            val buf = ByteArray(1 shl 18)
             while (true) {
                 val n = r.read(buf)
                 if (n < 0) break

@@ -33,6 +33,7 @@ import com.fahadali.oneos.core.model.Level
 import com.fahadali.oneos.core.model.PhoneProfile
 import com.fahadali.oneos.core.model.Plain
 import com.fahadali.oneos.core.model.Profiles
+import com.fahadali.oneos.core.model.SystemFamily
 import com.fahadali.oneos.core.model.Units
 import com.fahadali.oneos.core.root.RootProbe
 import com.fahadali.oneos.session.AppAssets
@@ -510,22 +511,22 @@ class SystemsFragment : Fragment() {
             CatalogEntry(pixel.name, pixel, R.drawable.os_pixel, available.any { it.id == pixel.id }),
         )
 
-        val entries = if (p?.id == Profiles.ID_S26_FE) {
-            val shownIds = familyEntries.mapNotNull { it.image?.id }.toSet()
-            val artByFamily = familyEntries.associate { it.image?.family to it.art }
-            val variants = available.filterNot { it.id in shownIds }.map {
-                CatalogEntry(it.nameWithVariant, it, artByFamily.getValue(it.family), true)
-            }
-            familyEntries.map { entry ->
-                val ref = entry.image
-                if (ref != null && available.count { it.family == ref.family } > 1) {
-                    entry.copy(name = ref.nameWithVariant)
-                } else {
-                    entry
-                }
-            } + variants
-        } else {
-            familyEntries
+        // Keep the existing family order/artwork, but present each family only once.
+        // The full supported image list comes from the device profile, not a list
+        // of special-case cards. Each image retains its own setup/verification path.
+        val entries = familyEntries.groupBy { it.image?.family }.map { (family, cards) ->
+            val versions = available.filter { it.family == family }.distinctBy { it.id }
+            val representative = versions.firstOrNull { it.id == setUpId }
+                ?: versions.firstOrNull { it.id == settingUpId }
+                ?: versions.firstOrNull { it.id == pickedId }
+                ?: versions.firstOrNull { it.id in st?.oldImages.orEmpty().values }
+                ?: versions.firstOrNull()
+                ?: cards.first().image
+            val art = cards.firstOrNull { it.image?.id == representative?.id }?.art ?: cards.first().art
+            CatalogEntry(
+                familyName(family, cards.first().name),
+                representative, art, versions.isNotEmpty(), versions,
+            )
         }
 
         currentEntries = entries
@@ -605,7 +606,24 @@ class SystemsFragment : Fragment() {
         }
     }
 
-    private data class CatalogEntry(val name: String, val image: ImageRef?, val art: Int, val supported: Boolean)
+    private fun familyName(family: SystemFamily?, fallback: String): String = when (family) {
+        SystemFamily.COLOROS -> "ColorOS"
+        SystemFamily.HYPEROS -> "HyperOS"
+        SystemFamily.PIXEL -> "Pixel"
+        SystemFamily.PIXELOS -> "PixelOS"
+        SystemFamily.INFINITYX -> "Infinity-X"
+        SystemFamily.NOTHING -> "Nothing OS"
+        SystemFamily.OXYGENOS -> "OxygenOS"
+        SystemFamily.ORIGINOS -> "OriginOS"
+        SystemFamily.LINEAGE -> "LineageOS"
+        SystemFamily.ONEUI -> "One UI"
+        null -> fallback
+    }
+
+    private data class CatalogEntry(
+        val name: String, val image: ImageRef?, val art: Int, val supported: Boolean,
+        val versions: List<ImageRef> = emptyList(),
+    )
 
     private class CarouselHolder(val box: android.widget.FrameLayout) : androidx.recyclerview.widget.RecyclerView.ViewHolder(box)
 
@@ -638,7 +656,8 @@ class SystemsFragment : Fragment() {
             else -> R.string.catalog_experimental
         })
         v.findViewById<TextView>(R.id.systems_name).text = entry.name
-        badge.text = status
+        badge.text = if (entry.versions.size > 1)
+            getString(R.string.catalog_version_count, entry.versions.size) else status
         badge.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_catalog_device, 0, 0, 0)
         badge.compoundDrawablePadding = dp(8)
         // Not for this phone (0.4.43, UX audit): an Unsupported card used to run the whole setup flow and send
@@ -654,7 +673,7 @@ class SystemsFragment : Fragment() {
         }
         val primary = v.findViewById<Button>(R.id.systems_primary)
         val features = GuestFeatures.forSystem(p, image.id)
-        if (features.isNotEmpty()) {
+        if (entry.versions.size <= 1 && features.isNotEmpty()) {
             v.findViewById<Button>(R.id.systems_features).apply {
                 visibility = View.VISIBLE
                 setOnClickListener { showGuestFeatureFlags(ctx, image.id, features) }
@@ -662,8 +681,16 @@ class SystemsFragment : Fragment() {
         }
         // The menu follows the card's state (0.5.09): the set-up system offers Start fresh and Remove, a saved
         // copy offers its delete, a system not set up the download and file items. A long press opens it too.
-        fun showMenu(anchor: View) {
+        fun showMenu(anchor: View, variant: ImageRef = image) {
             val host = activity ?: return
+            val image = variant
+            val status = StageCheck.state.result?.status
+            val active = status?.takeIf { it.ours }?.marker?.imageId == image.id ||
+                (image.id == entry.image?.id && setUp)
+            val preparing = PrepareJob.state.busy && PrepareJob.state.image?.id == image.id
+            val saved = status?.oldImages?.entries?.firstOrNull { it.value == image.id }?.key
+                ?: savedCopy?.takeIf { image.id == entry.image?.id }
+            val features = GuestFeatures.forSystem(p, image.id)
             // Always tappable: while another job runs, the tap says why (a greyed item gave no reason, 11-14).
             androidx.appcompat.widget.PopupMenu(ctx, anchor, android.view.Gravity.END).apply {
                 fun details() = menu.add(R.string.catalog_details).setOnMenuItemClickListener {
@@ -676,13 +703,13 @@ class SystemsFragment : Fragment() {
                     }
                 }
                 when {
-                    setUp && !settingUp -> {
+                    active && !preparing -> {
                         menu.add(R.string.manage_start_fresh).setOnMenuItemClickListener { SystemManage.confirmStartFresh(host, image); true }
                         menu.add(getString(R.string.manage_remove, image.name)).setOnMenuItemClickListener { SystemManage.confirmRemove(host, image); true }
                         details()
                     }
-                    savedCopy != null -> {
-                        menu.add(getString(R.string.manage_delete_saved, image.name)).setOnMenuItemClickListener { SystemManage.confirmDeleteSaved(host, image, savedCopy); true }
+                    saved != null -> {
+                        menu.add(getString(R.string.manage_delete_saved, image.name)).setOnMenuItemClickListener { SystemManage.confirmDeleteSaved(host, image, saved); true }
                         details()
                     }
                     else -> {
@@ -724,6 +751,79 @@ class SystemsFragment : Fragment() {
         fun openCard(onClick: () -> Unit) {
             primary.visibility = View.GONE
             makeCardClickable(getString(R.string.catalog_open_checks, image.nameWithVariant), true, onClick)
+        }
+        if (entry.versions.size > 1) {
+            val artwork = v.findViewById<OsArtworkView>(R.id.systems_artwork)
+            fun chooseVersion(onChosen: (ImageRef) -> Unit) {
+                val stage = StageCheck.state.result?.status
+                val activeId = stage?.takeIf { it.ours }?.marker?.imageId
+                    ?: entry.image?.id?.takeIf { setUp }
+                val ordered = entry.versions.sortedWith(compareBy<ImageRef> {
+                    when {
+                        it.id == activeId -> 0
+                        it.id == PrepareJob.state.image?.id && PrepareJob.state.busy -> 1
+                        it.id in stage?.oldImages.orEmpty().values -> 2
+                        p?.choice(it.id)?.tested == true -> 3
+                        else -> 4
+                    }
+                }.thenBy { it.displayName })
+                val labels = ordered.map { version ->
+                    val state = when {
+                        version.id == activeId -> getString(R.string.catalog_version_prepared)
+                        PrepareJob.state.busy && PrepareJob.state.image?.id == version.id ->
+                            getString(R.string.systems_show_progress)
+                        version.id in stage?.oldImages.orEmpty().values ->
+                            getString(R.string.catalog_version_saved)
+                        p?.choice(version.id)?.tested == true -> getString(R.string.catalog_optimised)
+                        else -> getString(R.string.catalog_experimental)
+                    }
+                    version.displayName + "\n" + state + " · " + Units.bytes(version.gzBytes)
+                }.toTypedArray()
+                AlertDialog.Builder(ctx).setTitle(getString(R.string.catalog_choose_version, entry.name))
+                    .setItems(labels) { _, which ->
+                        ordered.getOrNull(which)?.let { chosen ->
+                            CarouselSelection.remember(ctx, chosen)
+                            onChosen(chosen)
+                        }
+                    }.setNegativeButton(android.R.string.cancel, null).show()
+            }
+            fun openVersion(version: ImageRef) {
+                val host = a ?: return
+                val stage = StageCheck.state.result?.status
+                val active = stage?.takeIf { it.ours }?.marker?.imageId == version.id ||
+                    (version.id == entry.image?.id && setUp)
+                val saved = stage?.oldImages?.entries?.firstOrNull { it.value == version.id }?.key
+                val busyNow = PrepareJob.state.busy || LaunchJob.state.busy || StageCheck.state.busy ||
+                    LogJob.state.busy || OldStagesJob.state.busy ||
+                    com.fahadali.oneos.session.RemoveJob.state.busy
+                when {
+                    PrepareJob.state.busy && PrepareJob.state.image?.id == version.id ->
+                        startArtwork(host, Intent(host, SetupProgressActivity::class.java), artwork)
+                    active -> startArtwork(host, EnvironmentNavigation.intent(host, version), artwork)
+                    busyNow -> Toast.makeText(ctx, R.string.setup_preview_busy, Toast.LENGTH_LONG).show()
+                    saved != null -> {
+                        val current = stage?.marker?.imageId?.let(Images::byId)?.name ?: getString(R.string.home_other_current_unknown)
+                        AlertDialog.Builder(ctx).setTitle(getString(R.string.home_other_confirm_title, version.name))
+                            .setMessage(getString(R.string.home_other_confirm_message, version.nameWithVariant, current))
+                            .setPositiveButton(R.string.home_other_confirm_go) { _, _ ->
+                                OldStagesJob.restore(host, com.fahadali.oneos.core.root.OldStage(saved, 0, version.id, hasData = true, busy = false))
+                                if (OldStagesJob.state.restoring == saved && OldStagesJob.state.busy) {
+                                    startArtwork(host, EnvironmentNavigation.intent(host, version), artwork)
+                                }
+                            }.setNegativeButton(android.R.string.cancel, null).show()
+                    }
+                    profile?.let { FixActions.pickedImage(ctx, it) }?.id == version.id ->
+                        FixActions.run(host, FixAction.SET_UP, version)
+                    else -> askDownloaded(version, artwork)
+                }
+            }
+            val label = getString(R.string.catalog_versions_button)
+            only(label, true) { chooseVersion(::openVersion) }
+            more.setOnClickListener { chooseVersion { version -> showMenu(more, version) } }
+            v.setOnLongClickListener { chooseVersion { version -> showMenu(more, version) }; true }
+            primary.contentDescription = getString(R.string.catalog_choose_version, entry.name)
+            v.contentDescription = primary.contentDescription
+            return v
         }
         val removing = com.fahadali.oneos.session.RemoveJob.state.takeIf { it.busy }
         val deletingSaved = OldStagesJob.state.takeIf { it.busy }?.deleting?.takeIf { it == savedCopy }

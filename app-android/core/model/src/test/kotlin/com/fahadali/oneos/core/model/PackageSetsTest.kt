@@ -37,7 +37,7 @@ class PackageSetsTest {
     @Test
     fun twinityStagingSetMatchesItsPayloadAndGuardPins() {
         assertEquals(Images.ID_COLOROS17_TWINTY4C, twinity.imageId)
-        assertEquals(29, twinity.files.size)
+        assertEquals(34, twinity.files.size)
         assertEquals("out/overlays_twinity4c_r1", twinity.sourceDir)
         val manifest = shas(twinity)
         val guardsText = guards(twinity)
@@ -50,9 +50,9 @@ class PackageSetsTest {
                 "framework_patched.jar", "telephony-common_patched.jar", "libcamera_client_patched.so", "oplus-framework_patched.jar"),
             twinity.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
         )
-        assertEquals(listOf("samcam_bar.tar"), twinity.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
+        assertEquals(listOf("samcam_bar.tar", "ColorPanoramicSystemUI.apk", "SystemUI_wave.dex", "OneOSWaveRepack.dex", "OplusGestureUI_patched.apk", "OplusGestureUI_patched.apk.src_sha256"), twinity.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
         assertEquals(emptyList<String>(), twinity.omitted)
-        assertEquals(424_083_730L, twinity.approxBytes)
+        assertEquals(594136028L, twinity.approxBytes)
         assertTrue(twinity.hasReturnApp)
     }
 
@@ -77,7 +77,7 @@ class PackageSetsTest {
 
     @Test
     fun setsAsData() {
-        assertEquals(36, n6.files.size) // 0.5.05: + oplus-framework_patched.jar; 0.4.98: + ColorPanoramicSystemUI.apk; 0.4.63: + oplus_odm_ai.tar; 0.4.47: + KeKeThemeSpace_patched.apk; 0.4.37: + framework_patched.jar, libcamera_client_patched.so, samcam.tar; 0.4.38 (global): + cellbroadcast, Fold8SystemUI.apk, Fold8AngleRelay.dex; 0.4.39: + telephony-common_patched.jar
+        assertEquals(38, n6.files.size) // 0.5.05: + oplus-framework_patched.jar; 0.4.98: + ColorPanoramicSystemUI.apk; 0.4.63: + oplus_odm_ai.tar; 0.4.47: + KeKeThemeSpace_patched.apk; 0.4.37: + framework_patched.jar, libcamera_client_patched.so, samcam.tar; 0.4.38 (global): + cellbroadcast, Fold8SystemUI.apk, Fold8AngleRelay.dex; 0.4.39: + telephony-common_patched.jar
         assertEquals(43, pixel.files.size) // 0.4.59: OneOSFoldCutout.apk, yogi-services_patched.jar, libbootanimation_preapex_patched.so, OneOSPixelLauncher.apk, OneOSPixelDoze.apk; 0.4.24: framework_patched.jar (One UI's camera transaction codes); 0.4.45: telephony-common_patched.jar; 0.4.47: libcamera_client_patched.so, samcam.tar
         assertEquals(Images.ID_FIND_N6, n6.imageId)
         assertEquals(Images.ID_PIXEL_YOGI, pixel.imageId)
@@ -286,7 +286,7 @@ class PackageSetsTest {
         // 0.5.05: and oplus-framework_patched.jar, which the older X9U set does not get.
         // OneOS: the X9U set also carries the fingerprint wave (SystemUI_wave.dex, OneOSWaveRepack.dex);
         // the Fold's ColorOS set keeps its own.
-        assertEquals((n6.names - PackageSets.WALLPAPER_GRID_RRO - "Fold8SystemUI.apk" - "Fold8AngleRelay.dex" - "oplus-framework_patched.jar").toSet(),
+        assertEquals((n6.names - PackageSets.WALLPAPER_GRID_RRO - "Fold8SystemUI.apk" - "Fold8AngleRelay.dex" - "oplus-framework_patched.jar" - "OplusGestureUI_patched.apk" - "OplusGestureUI_patched.apk.src_sha256").toSet(),
             (xin.names - "SystemUI_wave.dex" - "OneOSWaveRepack.dex").toSet())
         // 0.4.47: the global builds' Theme Store without its brand check, the same file in both sets.
         assertEquals(ShaList.parse(shas(n6)).entries[PackageSets.THEME_STORE_APK], ShaList.parse(shas(xin)).entries[PackageSets.THEME_STORE_APK])
@@ -305,7 +305,13 @@ class PackageSetsTest {
         // Store).
         val a = ShaList.parse(shas(n6)).entries
         val g = ShaList.parse(shas(xin)).entries
-        assertEquals(24, a.count { (n, h) -> g[n] == h }) // 0.4.63: + oplus_odm_ai.tar
+        // Parity rebuild: telephony-common was rebuilt for N6; the retired X9U set
+        // retains its old pin. Assert the actual shared payloads, not just a count.
+        val shared = (commonPayloads + listOf(PackageSets.CELLBROADCAST, PackageSets.THEME_STORE_APK,
+            PackageSets.GUEST_APP, "libcamera_client_patched.so", "oplus_odm_ai.tar",
+            "service.incremental_patched.so", "surfaceflinger_patched", "vold_patched")).toSet()
+        assertEquals(shared, a.filter { (n, h) -> g[n] == h }.keys)
+        assertFalse(a.getValue("telephony-common_patched.jar") == g.getValue("telephony-common_patched.jar"))
         for (n in listOf("vold_patched", "service.incremental_patched.so", "surfaceflinger_patched")) assertEquals(n, a[n], g[n])
         // The Pixel set's files are its own but the in-guest app, the same build in every set.
         val c = ShaList.parse(shas(pixel)).entries

@@ -2012,8 +2012,11 @@ ro.miui.backdrop_sampling_enabled=true"
     # With debug.sf.use_phase_offsets_as_durations=1 AOSP's WorkDuration refuses any phase offset
     # property that is set; One UI's own surfaceflinger lives with it, a newer one does not. Each one
     # is "-1" for the session (SurfaceFlinger's "not set"; an empty value reads as 0, still set).
+    # 0.5.38: the vendor's ro.surface_flinger phase offsets too (Galaxy A25 on OxygenOS 16, 85e56eb4, 0.5.37's
+    # 120 Hz durations above: "ro.surface_flinger.vsync_event_phase_offset_ns is set but expecting duration",
+    # black screen, return after 30 s).
     if [ "$(getprop debug.sf.use_phase_offsets_as_durations)" = 1 ]; then
-        for key in $(getprop | sed -n 's/^\[\(debug\.sf\.[a-z_]*phase_offset[a-z_]*_ns\)\]: \[-\{0,1\}[0-9][0-9]*\]$/\1/p'); do
+        for key in $(getprop | sed -n 's/^\[\(debug\.sf\.[a-z_]*phase_offset[a-z_]*_ns\)\]: \[-\{0,1\}[0-9][0-9]*\]$/\1/p;s/^\[\(ro\.surface_flinger\.[a-z_]*phase_offset[a-z_]*_ns\)\]: \[-\{0,1\}[0-9][0-9]*\]$/\1/p'); do
             h=$(getprop "$key")
             [ "$h" != -1 ] || continue
             echo "$key=$h" >> "$OVR" && "$RP" -n "$key" -1 2>/dev/null &&
