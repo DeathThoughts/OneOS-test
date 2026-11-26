@@ -126,6 +126,14 @@ jobs:
       - name: Build guest framework helpers
         run: sh switcher/patches/build_edm_stub.sh
 
+      - name: Upload guest helper dex for device tests
+        if: matrix.variant == 'debug' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oneos-bt-active-dex
+          path: switcher/assets/OneOSEdmStub.dex
+          if-no-files-found: error
+
       # Each runner makes a fresh ~/.android/debug.keystore, so every run's APK
       # had a different signer and could not be installed over the previous
       # build. With the repository secret DEBUG_KEYSTORE_B64 (base64 of a debug
