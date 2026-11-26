@@ -296,6 +296,24 @@ class StageAuditTest {
     }
 
     @Test
+    fun accountQueueAuditAllowsOnlyItsPrivateStageOperations() {
+        fun bad(from: String, to: String) {
+            assertTrue("missing test anchor", script.contains(from))
+            assertTrue("unsafe account queue change passed", StageAudit.audit(script.replace(from, to)).isNotEmpty())
+        }
+        val pending = "GA_PENDING=\"\$STAGE/incoming/google-accounts.pending\""
+        val temp = "mktemp \"\$STAGE/incoming/google-accounts.XXXXXX\""
+        bad(pending, "GA_PENDING=/data/local/tmp/other")
+        bad(temp, "mktemp /data/local/tmp/other.XXXXXX")
+        bad("own \"\$GA_TMP\" 0600", "own \"\$GA_TMP\" 0644")
+        bad("head -c \"\$3\" > \"\$GA_TMP\"", "head -c \"\$3\" > \"\$GA_PENDING\"")
+        bad("mv -f \"\$GA_TMP\" \"\$GA_PENDING\"", "mv -f \"\$GA_PENDING\" \"\$GA_TMP\"")
+        bad("rm -f \"\$GA_PENDING\"", "cat \"\$GA_PENDING\"")
+        assertTrue(StageAudit.audit(script + "\nrm -f \"\$GA_PENDING\"\n").isNotEmpty())
+        assertTrue(StageAudit.audit(script + "\n" + temp + "\n").isNotEmpty())
+    }
+
+    @Test
     fun auditChecksTheVerbs() {
         assertTrue(StageAudit.audit(script.replace("    recover) do_recover \"\$@\" ;;\n", "")).any { it.startsWith("verbs are") })
     }

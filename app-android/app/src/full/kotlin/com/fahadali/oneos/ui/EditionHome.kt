@@ -94,10 +94,15 @@ internal object EditionHome {
 
     fun createMenu(a: MainActivity, menu: Menu): Boolean {
         a.menuInflater.inflate(R.menu.home, menu)
+        menu.add(0, 901, 0, "Import Google accounts").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
     fun menuItem(a: MainActivity, item: MenuItem): Boolean = when (item.itemId) {
+        901 -> {
+            a.startActivity(Intent(a, GoogleAccountsActivity::class.java))
+            true
+        }
         R.id.menu_how -> {
             a.startActivity(Intent(a, BeforeYouStartActivity::class.java))
             true
@@ -595,6 +600,10 @@ class StatusHomeFragment : Fragment(R.layout.home_content) {
         // Child 0 is the card's (hidden) header; the rows follow it.
         while (card.childCount > 1) card.removeViewAt(card.childCount - 1)
         val ctx = card.context
+        Cards.row(card, OuiIcons.drawable.ic_oui_refresh, "Import Google accounts",
+            "Select accounts from One UI for the prepared guest") {
+            startActivity(Intent(ctx, GoogleAccountsActivity::class.java))
+        }
         if (s.kind == HomeState.Kind.WELCOME_BACK) {
             // After a session that went wrong, the report first (personal info removed).
             if (s.last?.outcome?.good == false) {

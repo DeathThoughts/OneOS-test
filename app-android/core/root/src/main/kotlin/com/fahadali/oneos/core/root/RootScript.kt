@@ -157,6 +157,7 @@ object RootScript {
          * `/data/oneos_bring_catalog/catalog.tsv`).
          */
         BRING_CATALOG("bring-catalog", Stdin.DATA),
+        GOOGLE_ACCOUNTS("google-accounts", Stdin.DATA),
 
         /**
          * One app of the catalog brought while a session of this system is running (the
@@ -298,6 +299,13 @@ object RootScript {
                 args.getOrNull(15)?.let { if (it != "0" && it != "1") p += "launch: media chip is not 0 or 1" }
             }
             Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.REMOVE_SYSTEM, Verb.RESET_DATA, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
+            Verb.GOOGLE_ACCOUNTS -> {
+                need(3)
+                arg(0, ID, "an image id")
+                arg(1, DEC, "a stage timestamp")
+                arg(2, DEC, "a size")
+                if ((args.getOrNull(2)?.toLongOrNull() ?: Long.MAX_VALUE) > 32768) p += "account queue is too large"
+            }
             Verb.BRING_COLLECT, Verb.BRING_CATALOG, Verb.DEBLOAT -> {
                 need(1)
                 arg(0, DEC, "a size")

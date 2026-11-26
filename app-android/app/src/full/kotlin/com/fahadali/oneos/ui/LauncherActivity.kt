@@ -26,9 +26,16 @@ class LauncherActivity : SystemsActivity() {
             setIcon(OuiIcons.drawable.ic_oui_settings_outline)
             setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         }
+        menu.add(0, 901, 1, "Import Google accounts").apply {
+            setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        }
         return true
     }
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == 901) {
+            startActivity(Intent(this, GoogleAccountsActivity::class.java))
+            return true
+        }
         if (item.itemId == 900) {
             val target = Intent(this, AdvancedActivity::class.java)
             if (resources.configuration.smallestScreenWidthDp >= 600) {

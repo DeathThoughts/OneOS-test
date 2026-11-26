@@ -407,7 +407,7 @@ object ShellScan {
  * phone's user data, reboots, settings, package wipes or mounts.
  */
 object StageAudit {
-    val VERBS = listOf("stock-parts", "guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "oneui-media", "debloat")
+    val VERBS = listOf("stock-parts", "guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "google-accounts", "bring-add", "oneui-media", "debloat")
 
     val ALLOWED: Set<String> = setOf(
         "umask", "[", "echo", "printf", "id", "stat", "awk", "sed", "grep", "sort", "head", "tail", "cut", "tr", "wc",
@@ -589,6 +589,26 @@ object StageAudit {
         "-o", "-name", "'*[[:cntrl:]]*'", "-o", "-name", "\"*\$onl*\"", "\\)", "-prune", "-o", "-type", "f", "-print",
     )
 
+    // Google account hints: user-selected names only, in a root-owned stage inbox.
+    // The temporary file and pending path are not generic stage variables.
+    private const val GA_FUNCTION = "do_google_accounts"
+    private val GA_VARS = setOf("GA_PENDING", "GA_TMP")
+    private const val GA_PENDING_VALUE = "\"\$STAGE/incoming/google-accounts.pending\""
+    private const val GA_TMP_VALUE = "\$(umask 077; mktemp \"\$STAGE/incoming/google-accounts.XXXXXX\")"
+    private val GA_MKTEMP = listOf("\"\$STAGE/incoming/google-accounts.XXXXXX\"")
+    private val GA_SOURCE = Regex("""\$\{?(GA_PENDING|GA_TMP)(?![A-Za-z0-9_])""")
+    private val GA_WRITES = setOf(
+        "rm" to listOf("-f", "\"\$GA_PENDING\""),
+        "rm" to listOf("-f", "\"\$GA_TMP\""),
+        "mv" to listOf("-f", "\"\$GA_TMP\"", "\"\$GA_PENDING\""),
+        "own" to listOf("\"\$GA_TMP\"", "0600"),
+    )
+    private val GA_SUB_READS = setOf(
+        "stat" to listOf("-c", "%s", "\"\$GA_TMP\""),
+        "head" to listOf("-n", "1", "\"\$GA_TMP\""),
+        "tail" to listOf("-n", "1", "\"\$GA_TMP\""),
+    )
+
     private const val PURGE_FUNCTION = "purge_one"
     private val PURGE_VARS = setOf("OLDDIR", "TRASH")
     private const val PURGE_RM = "rm -rf \"\$TRASH\""
@@ -636,6 +656,7 @@ object StageAudit {
         if (v in PURGE_VARS) return function == PURGE_FUNCTION
         if (v in ONEUI_MEDIA_VARS) return function == ONEUI_MEDIA_FUNCTION
         if (v in ONEUI_X_VARS) return function == ONEUI_MEDIA_FUNCTION
+        if (v in GA_VARS) return function == GA_FUNCTION && arg == "\"\$" + v + "\""
         if (v in RESTORE_VARS) return function == RESTORE_FUNCTION
         if (v in REMOVE_VARS) return function == REMOVE_FUNCTION
         if (v in MIGRATE_VARS) return function == MIGRATE_FUNCTION
@@ -673,11 +694,13 @@ object StageAudit {
         // Loop variables used as paths must loop over stage paths only.
         val loopVars = scan.loops.filter { l -> l.words.isNotEmpty() && l.words.all { it.startsWith("\"\$STAGE") } }.map { it.variable }.toSet()
         for (l in scan.loops) {
+            if (l.variable in GA_VARS) p += "account queue variables cannot be set by a loop"
             if (l.variable == "MFROM" && l.words != MFROM_WORDS) p += "line ${l.line}: for MFROM in ${l.words.joinToString(" ")}"
             if (l.variable == "HELPER" && l.words != HELPER_WORDS) p += "line ${l.line}: for HELPER in ${l.words.joinToString(" ")}"
             if (l.variable == "BFROM" && l.words !in BFROM_WORDS) p += "line ${l.line}: for BFROM in ${l.words.joinToString(" ")}"
         }
         for (a in scan.assignments) {
+            if (GA_SOURCE.containsMatchIn(a.value)) p += "account queue paths cannot be aliased"
             val v = a.value.removePrefix("\"")
             val self = v.startsWith("\$${a.name}") || v == "\""
             when (a.name) {
@@ -700,6 +723,8 @@ object StageAudit {
                 "OMEDIA_OLD" -> if (a.value != OMEDIA_OLD_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_OLD=${a.value}"
                 "OMEDIA_X" -> if (a.value != OMEDIA_X_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_X=${a.value}"
                 "OMEDIA_XNEW" -> if (a.value != OMEDIA_XNEW_VALUE || a.function != ONEUI_MEDIA_FUNCTION) p += "line ${a.line}: OMEDIA_XNEW=${a.value}"
+                "GA_PENDING" -> if (a.value != GA_PENDING_VALUE || a.function != GA_FUNCTION) p += "invalid GA_PENDING assignment"
+                "GA_TMP" -> if (a.value != GA_TMP_VALUE || a.function != GA_FUNCTION) p += "invalid GA_TMP assignment"
                 "OMEDIA_ROOT" -> if (a.value != OMEDIA_ROOT_VALUE || a.function != ONEUI_LIST_FUNCTION) p += "line ${a.line}: OMEDIA_ROOT=${a.value}"
                 "ref" -> if (a.value != BRING_REF_VALUE) p += "line ${a.line}: ref=${a.value}"
                 "OLD_PARENT" -> if (a.value != "\"\$DATA/local/tmp\"") p += "line ${a.line}: OLD_PARENT=${a.value}"
@@ -759,7 +784,12 @@ object StageAudit {
                 ) p += "line ${c.line}: exec ${args.firstOrNull()}"
                 "sed" -> if (args.any { it == "-i" || it.startsWith("-i") }) p += "line ${c.line}: sed -i"
                 "find" -> if (args != BRING_FIND && !(args == ONEUI_FIND && c.function == ONEUI_LIST_FUNCTION)) p += "line ${c.line}: find ${args.joinToString(" ")}"
-                "mktemp" -> if (args != ONEUI_X_MKTEMP) p += "line ${c.line}: mktemp ${args.joinToString(" ")}"
+                "mktemp" -> {
+                    val accountTemp = args == GA_MKTEMP && scan.assignments.any {
+                        it.name == "GA_TMP" && it.value == GA_TMP_VALUE && it.function == GA_FUNCTION && it.line == c.line
+                    }
+                    if (args != ONEUI_X_MKTEMP && !accountTemp) p += "invalid mktemp path or context"
+                }
                 "base64" -> if (args.isNotEmpty()) p += "line ${c.line}: base64 ${args.joinToString(" ")}"
             }
             if (c.function == MIGRATE_FUNCTION && (n in WRITES || n in WRITE_HELPERS || n == "to_attic") &&
@@ -784,6 +814,15 @@ object StageAudit {
             if (args.any { OMEDIA_ROOT_SOURCE.containsMatchIn(it) } && !(c.function == ONEUI_LIST_FUNCTION && n in setOf("[", "find", "awk"))) {
                 p += "line ${c.line}: $n ${args.joinToString(" ")} takes One UI's media/0 (only $ONEUI_LIST_FUNCTION's tests, find and awk may)"
             }
+            // Substitutions are scanned without their enclosing function: bind
+            // each allowed read to a test on the same source line.
+            if (args.any { GA_SOURCE.containsMatchIn(it) }) {
+                val queueWrite = c.function == GA_FUNCTION && (n to args) in GA_WRITES
+                val queueTest = c.function == GA_FUNCTION && (n == "[" || n == "mine")
+                val queueRead = c.function == null && (n to args) in GA_SUB_READS &&
+                    scan.commands.any { it.function == GA_FUNCTION && it.name == "[" && it.line == c.line }
+                if (!queueWrite && !queueTest && !queueRead) p += "invalid account queue operation: " + n
+            }
             if (n in WRITES) {
                 val paths = when (n) {
                     // Options first (chown -h): the owner or mode is the first word after them.
@@ -804,6 +843,12 @@ object StageAudit {
         }
         for (r in scan.redirects) {
             if (BRING_SOURCE.containsMatchIn(r.target)) p += "line ${r.line}: ${r.op} ${r.target} names a bring source"
+            if (GA_SOURCE.containsMatchIn(r.target)) {
+                val queueInput = r.function == GA_FUNCTION && r.op == ">" && r.target == "\"\$GA_TMP\"" &&
+                    scan.commands.any { it.function == GA_FUNCTION && it.line == r.line && it.name == "head" && it.args == listOf("-c", "\"\$3\"") }
+                if (!queueInput) p += "invalid account queue redirection"
+                continue
+            }
             if (!r.op.contains('>')) continue
             // The marker folders stay empty: nothing is ever written into them.
             if (ONEUI_MEDIA_SOURCE.containsMatchIn(r.target)) {

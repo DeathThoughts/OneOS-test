@@ -109,6 +109,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         GuestPatches.checkAutomatically(this)
+        GoogleAccountNotifications.refresh(this)
         if (::back.isInitialized) {
             showState()
             renderRuntime(GuestRuntime.State(error = "Reading guest runtime…"))
@@ -122,6 +123,11 @@ class MainActivity : AppCompatActivity() {
         val apps = cards.section(list, getString(R.string.bring_title), getColor(R.color.preboot_card))
         cards.row(apps, getString(R.string.bring_entry_title), getString(R.string.bring_entry_summary)) {
             startActivity(Intent(this, BringAppsActivity::class.java))
+        }
+        val pendingAccounts = GoogleAccountInbox.load(this).size
+        cards.row(apps, "Import Google accounts", if (pendingAccounts == 0) "Sign in to the accounts selected in One UI"
+            else "$pendingAccounts accounts awaiting sign-in") {
+            startActivity(Intent(this, GoogleAccountsActivity::class.java))
         }
         soundEffectsCard(list)
         animLevelCard(list)
