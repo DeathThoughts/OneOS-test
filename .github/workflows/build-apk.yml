@@ -49,6 +49,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/migrate-all-patch-payloads.py --publish --target "$GITHUB_SHA"
 
+  media-safety:
+    uses: ./.github/workflows/media-safety.yml
+
   build:
     needs: migrate-patch-payloads
     if: >-
@@ -202,6 +205,9 @@ jobs:
           echo "ONEOS_DEBUG_KEYSTORE_SHA256=$(printf '%s' "$fp" | tr -d ':' | tr 'A-F' 'a-f')" >> "$GITHUB_ENV"
 
       - uses: gradle/actions/setup-gradle@v5
+        with:
+          # Release is the default branch; debug is also trusted and should warm its own cache.
+          cache-read-only: ${{ github.ref_name != 'debug' && github.ref_name != 'release' }}
 
       - name: Configure debug patch pin and sign a marker
         id: debug-patch
@@ -252,15 +258,6 @@ jobs:
           python3 scripts/test-patch-channel.py
           python3 scripts/test-patch-migration.py
           python3 scripts/migrate-patch-payloads.py --check-inventory
-          cd app-android
-          ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest' --tests '*GoogleAccountQueueTest'
-          ./gradlew --console=plain :app:testFullDebugUnitTest --tests '*FastInstallPolicyTest' --tests '*SetDownloaderTest'
-          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageScriptTest.fastFinishStillRejectsTamperingAfterKeepFiles' --tests '*StageScriptTest.keepFilesRecordsOnlyIdenticalStageFilesAndFinishStillChecksThem'
-          ./gradlew --console=plain :core:root:testDebugUnitTest \
-            --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
-            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \
-            --tests '*StageScriptTest.googleAccountQueueIsPrivateBoundToStageAndClearable' \
-            --tests '*StageScriptTest.a55VulkanUsesTheColorOsStage'
 
       - name: Verify HyperOS Popsicle image and staging
         env:
@@ -271,12 +268,6 @@ jobs:
           python3 scripts/test-popsicle-guards.py
           python3 scripts/test-popsicle-native.py
           python3 scripts/test-popsicle-publisher.py
-          cd app-android
-          ./gradlew --console=plain :core:model:test \
-            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.popsicleStagingSetMatchesItsPayloadAndGuardPins' \
-            --tests '*SingleImageZipInputStreamTest'
-          ./gradlew --console=plain :core:root:testDebugUnitTest \
-            --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnTheBaseGalaxyS23'
 
       - name: Verify ColorOS Twinity image and staging
         env:
@@ -288,14 +279,6 @@ jobs:
           python3 scripts/test-twinity-surfaceflinger.py
           python3 scripts/test-twinity-package.py
           python3 scripts/test-twinity-publisher.py
-          cd app-android
-          ./gradlew --console=plain :core:model:test \
-            --tests '*ApkSeriesTest' --tests '*ImagesTest' --tests '*PackageSetsTest.twinityStagingSetMatchesItsPayloadAndGuardPins' \
-            --tests '*ProfilesTest.twinityIsOfferedOnTheBaseGalaxyS23AndS26Fe' --tests '*SingleImageZipInputStreamTest' \
-            --tests '*DeviceListTest' --tests '*ImageGuideTest'
-          ./gradlew --console=plain :core:root:testDebugUnitTest \
-            --tests '*StageScriptTest.twinityStagesAndPassesLaunchChecksOnTheBaseGalaxyS23' \
-            --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly'
 
       - name: Verify signed guest startup patch lifecycle
         run: |
@@ -314,9 +297,6 @@ jobs:
           sh -n switcher/assets/guest_patch.sh
           python3 scripts/test-restart-home.py
 
-      - name: Verify guest media mount safety
-        run: python3 scripts/test-guest-media-share.py
-
       - name: Verify guest telemetry policy
         run: |
           python3 scripts/test-oplus-telemetry.py
@@ -332,14 +312,44 @@ jobs:
           python3 scripts/test-oplus-bt-origin.py
           python3 scripts/test-samsung-camera-bind.py
 
-      - name: Verify model and root staging after upstream sync
+      - name: Verify model, root staging and app regressions (one pass per test task)
         working-directory: app-android
         env:
           GH_PACKAGES_USER: ${{ vars.GH_PACKAGES_USER || github.actor }}
           GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew --console=plain :core:model:test --tests '*CompatEvaluatorTest' --tests '*GatesTest' --tests '*PackageSetsTest'
-          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageAuditTest' --tests '*StageScriptTest.launchArgumentsReachRootChecks' --tests '*StageScriptTest.bring*'
+          ./gradlew --console=plain :core:model:test \
+            --tests '*AppUpdateTest' \
+            --tests '*ProfilesTest' \
+            --tests '*GatesTest' \
+            --tests '*GitHubIssueReportTest' \
+            --tests '*GoogleAccountQueueTest' \
+            --tests '*ApkSeriesTest' \
+            --tests '*ImagesTest' \
+            --tests '*PackageSetsTest.popsicleStagingSetMatchesItsPayloadAndGuardPins' \
+            --tests '*SingleImageZipInputStreamTest' \
+            --tests '*PackageSetsTest.twinityStagingSetMatchesItsPayloadAndGuardPins' \
+            --tests '*ProfilesTest.twinityIsOfferedOnTheBaseGalaxyS23AndS26Fe' \
+            --tests '*DeviceListTest' \
+            --tests '*ImageGuideTest' \
+            --tests '*CompatEvaluatorTest' \
+            --tests '*PackageSetsTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest \
+            --tests '*StageScriptTest.fastFinishStillRejectsTamperingAfterKeepFiles' \
+            --tests '*StageScriptTest.keepFilesRecordsOnlyIdenticalStageFilesAndFinishStillChecksThem' \
+            --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
+            --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \
+            --tests '*StageScriptTest.googleAccountQueueIsPrivateBoundToStageAndClearable' \
+            --tests '*StageScriptTest.a55VulkanUsesTheColorOsStage' \
+            --tests '*StageScriptTest.popsicleStagesAndPassesLaunchChecksOnTheBaseGalaxyS23' \
+            --tests '*StageScriptTest.twinityStagesAndPassesLaunchChecksOnTheBaseGalaxyS23' \
+            --tests '*StageScriptTest.galaxyS26FeStagesAndroid17ImagesOnly' \
+            --tests '*StageAuditTest' \
+            --tests '*StageScriptTest.launchArgumentsReachRootChecks' \
+            --tests '*StageScriptTest.bring*'
+          ./gradlew --console=plain :app:testFullDebugUnitTest \
+            --tests '*FastInstallPolicyTest' \
+            --tests '*SetDownloaderTest'
 
       # No -Poneos.series / -Poneos.packSets: the APK carries the session
       # scripts and each set's lists only, so no out/ set directories are needed.
@@ -425,9 +435,11 @@ jobs:
           if-no-files-found: error
 
 
+  # Build and media safety run in parallel. Publication always requires both.
+  # An Actions APK artifact is a candidate until the entire workflow succeeds.
   publish:
     if: github.event_name == 'workflow_dispatch' && github.ref_name == 'release' && inputs.publish
-    needs: build
+    needs: [build, media-safety]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -459,7 +471,7 @@ jobs:
 
   publish-debug-updates:
     if: github.ref_name == 'debug'
-    needs: build
+    needs: [build, media-safety]
     runs-on: ubuntu-latest
     permissions:
       contents: write

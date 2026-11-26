@@ -1,0 +1,38 @@
+name: Media mount safety
+on:
+  workflow_call:
+  # Validation on the isolated CI branch only; no APK build or publishing.
+  push:
+    branches: [experiment/ci-fast-path]
+    paths:
+      - '.github/workflows/media-safety.yml'
+      - 'scripts/test-media-shard.py'
+      - 'scripts/test-guest-media-share.py'
+      - 'switcher/assets/guest_start.sh'
+      - 'app-android/app/src/full/assets/root/oneos_root.sh'
+permissions:
+  contents: read
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Verify every test appears in exactly one shard
+        run: python3 scripts/test-media-shard.py --check --count 4
+  media:
+    needs: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Run unchanged media safety tests (shard ${{ matrix.shard }})
+        run: python3 scripts/test-media-shard.py --count 4 --index ${{ matrix.shard }}
