@@ -224,8 +224,10 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         val prepared = result?.status?.takeIf { it.ours }?.marker?.imageId == image.id
         val editionStatus = when {
             preview -> getString(R.string.environment_preview)
-            prepared && maintenance == null && report != null && !report.blocked &&
-                !Readiness.anyBusy() && !StageCheck.state.busy -> getString(R.string.rom_visual_ready)
+            prepared && maintenance == null && !patchBusy && StageCheck.state.phase == StageCheck.Phase.DONE &&
+                result != null && StageCheck.state.result === result && result.ageMs <= Readiness.CHECK_AGE_MS &&
+                report != null && report.image?.id == image.id && !report.blocked && !Readiness.anyBusy() &&
+                !com.fahadali.oneos.session.RemoveJob.state.busy -> getString(R.string.rom_visual_ready)
             prepared -> getString(R.string.catalog_version_prepared)
             else -> null
         }
