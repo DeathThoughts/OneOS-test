@@ -253,6 +253,8 @@ jobs:
           python3 scripts/migrate-patch-payloads.py --check-inventory
           cd app-android
           ./gradlew --console=plain :core:model:test --tests '*AppUpdateTest' --tests '*ProfilesTest' --tests '*GatesTest' --tests '*GitHubIssueReportTest'
+          ./gradlew --console=plain :app:testFullDebugUnitTest --tests '*FastInstallPolicyTest' --tests '*SetDownloaderTest'
+          ./gradlew --console=plain :core:root:testDebugUnitTest --tests '*StageScriptTest.fastFinishStillRejectsTamperingAfterKeepFiles' --tests '*StageScriptTest.keepFilesRecordsOnlyIdenticalStageFilesAndFinishStillChecksThem'
           ./gradlew --console=plain :core:root:testDebugUnitTest \
             --tests '*StageScriptTest.patchAutoLaunchArgumentReachesRootChecks' \
             --tests '*StageScriptTest.launchBatteryLimitsComeFromTheArguments' \

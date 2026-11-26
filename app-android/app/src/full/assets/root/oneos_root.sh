@@ -1501,7 +1501,9 @@ do_finish() {
     for n in $P_FILES; do
         sum=$(received_sum "$n")
         is_hex64 "$sum" || refuse "$n was not received"
-        [ -f "$STAGE/$n" ] && mine "$STAGE/$n" && [ "$(sha "$STAGE/$n")" = "$sum" ] || refuse "$n changed after it was received"
+        # check_files below hashes every member after the list and attic are finalized.
+        # Keep the early type/ownership gate, but avoid hashing the same payload twice.
+        [ -f "$STAGE/$n" ] && mine "$STAGE/$n" || refuse "$n changed after it was received"
         list="$list$sum  $n
 "
     done

@@ -9,6 +9,7 @@
          (ACTION_CREATE_DOCUMENT). The full edition's screens are in
          src/full/AndroidManifest.xml; the probe edition has none of them. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:enableOnBackInvokedCallback="true"

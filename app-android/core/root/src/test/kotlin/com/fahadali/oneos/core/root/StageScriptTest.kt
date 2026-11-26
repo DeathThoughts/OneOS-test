@@ -509,6 +509,21 @@ class StageScriptTest {
     }
 
     @Test
+    fun fastFinishStillRejectsTamperingAfterKeepFiles() = eachShell { fr ->
+        val s = Stager(fr)
+        s.prepare()
+        s.ok(s.begin("keep"))
+        val list = s.files.entries.joinToString("") { (n, b) -> "${Hashes.sha256(b)}  $n\n" }.toByteArray()
+        s.ok(fr.run(RootScript.Verb.KEEP_FILES, list.size.toString(), stdin = list))
+        s.ok(fr.run(RootScript.Verb.KEEP_RAW, s.raw.size.toString(), Hashes.sha256(s.raw)))
+        s.ok(s.table()); s.ok(s.env())
+        val name = s.files.keys.first { !it.endsWith(".sh") && it != "host_installd.txt" }
+        File(fr.stage, name).writeText("tampered after keep-files")
+        refused(s.finish(), "$name changed since it was prepared")
+        assertFalse(File(fr.stage, ".oneos_stage").exists())
+    }
+
+    @Test
     fun selfUpdateTakesOnlyTheAppsCheckedDownload() = eachShell { fr ->
         val apk = "PK\u0003\u0004 not really an APK\n".repeat(100).toByteArray()
         val sha = Hashes.sha256(apk)
