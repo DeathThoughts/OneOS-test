@@ -2529,6 +2529,109 @@ if [ -f /data/guest_media.flag ]; then
 fi
 
 echo "[Pivoted Root] time $($BB date +%T) audio"
+# OneOS APM effect routing v3 (begin)
+# Opt-in exact-hash guest-only audio routing fix. Never modify the image.
+# `once` is a single trial; `enabled` keeps it armed across guest restarts.
+oneos_apm_test() (
+    D=/data/oneos-apm-test
+    F=/system/lib64/libaudiopolicymanagerdefault.so
+    log() { echo "[OneOS patch] APM test: $*"; }
+    log "v3 reached"
+    [ -f /data/guest_audio.flag ] || { log "guest audio disabled"; exit 0; }
+    [ -d "$D" ] && [ ! -L "$D" ] || { log "not armed (no private directory)"; exit 0; }
+    meta=$("$BB" stat -c '%u:%g:%a' "$D" 2>/dev/null)
+    [ "$meta" = 0:0:700 ] || { log "unsafe directory metadata ($meta)"; exit 0; }
+    mode=once
+    if [ -e "$D/enabled" ] || [ -L "$D/enabled" ]; then mode=enabled; fi
+    [ -f "$D/$mode" ] && [ ! -L "$D/$mode" ] || { log "not armed (no regular marker)"; exit 0; }
+    meta=$("$BB" stat -c '%u:%g:%a' "$D/$mode" 2>/dev/null)
+    [ "$meta" = 0:0:600 ] || { log "unsafe $mode marker metadata ($meta)"; exit 0; }
+    log "armed ($mode)"
+    E=/system_ext/lib64/libaudiopolicyextimpl.so
+    [ -f "$E" ] || E=/system/system_ext/lib64/libaudiopolicyextimpl.so
+    [ -f "$E" ] && [ ! -L "$E" ] || { log "extension missing or symlink"; exit 0; }
+    E=$("$BB" readlink -f "$E")
+    case "$E" in
+        /system_ext/lib64/libaudiopolicyextimpl.so|/system/system_ext/lib64/libaudiopolicyextimpl.so) ;;
+        *) log "unexpected extension path ($E)"; exit 0 ;;
+    esac
+    ns=$("$BB" readlink /proc/self/ns/mnt)
+    host=$("$BB" readlink /proc/1/ns/mnt)
+    [ -n "$ns" ] && [ -n "$host" ] && [ "$ns" != "$host" ] || { log "not isolated"; exit 0; }
+    [ -f "$F" ] && [ ! -L "$F" ] && [ "$("$BB" readlink -f "$F")" = "$F" ] || { log "unexpected library path"; exit 0; }
+    # A bind must not propagate to the host or cover an existing file mount.
+    "$BB" awk -v f="$F" -v e="$E" '
+        $5 == f || $5 == e { bad=1 }
+        $5 == "/" || index(f, $5 "/") == 1 || index(e, $5 "/") == 1 {
+            for(i=7;i<=NF && $i!="-";i++) if($i ~ /^shared:/) bad=1
+        }
+        END { exit bad }
+    ' /proc/self/mountinfo || { log "shared or pre-existing mount"; exit 0; }
+    old=996b9075d0963cf29ac8522801eac180056412dc331962a19909ce1c84e12fdb
+    new=891d2ec4bc49e20c0d9b12e7a77e97bb7be086efc7d91ec837020bcc52594198
+    [ "$("$BB" sha256sum "$F" | "$BB" cut -d ' ' -f 1)" = "$old" ] || { log "different library; skipped"; exit 0; }
+    ext_old=3126a25acaa7e6afbca6c3ce8a63929e10efd935f312c14813bbe48746184c44
+    ext_new=4213ebe249466d96e99f10b8146a9eb265548881837690e9148bb695f3f36526
+    [ "$("$BB" sha256sum "$E" | "$BB" cut -d ' ' -f 1)" = "$ext_old" ] || { log "different extension; skipped"; exit 0; }
+    t=$("$BB" mktemp "$D/.apm.XXXXXX") || { log "cannot create manager candidate"; exit 0; }
+    u=$("$BB" mktemp "$D/.ext.XXXXXX") || { rm -f "$t"; log "cannot create extension candidate"; exit 0; }
+    trap 'rm -f "$t" "$u"' EXIT
+    # AArch64: preserve original primary test; accept active NONE only as fallback.
+    # 0x5758c -> 0xc4cf4; original condition and control flow restored on return.
+    cp "$F" "$t" &&
+        "$BB" printf '\332\265\001\024' | "$BB" dd of="$t" bs=1 seek=357772 conv=notrunc 2>/dev/null &&
+        "$BB" printf '\211\000\000\065\165\000\000\064\132\000\000\065\372\003\010\052\077\001\037\162\042\112\376\027' | "$BB" dd of="$t" bs=1 seek=806132 conv=notrunc 2>/dev/null &&
+        [ "$("$BB" sha256sum "$t" | "$BB" cut -d ' ' -f 1)" = "$new" ] &&
+        chmod 644 "$t" && "$BB" chcon u:object_r:system_lib_file:s0 "$t" ||
+        { log "candidate validation failed"; exit 0; }
+    # Only bypass the non-48kHz plain A2DP non-Dolby primary-output fallback.
+    # 0x49384: b.eq 0x493b4 -> b 0x493b4; retain game, low latency, spatializer,
+    # hearing aid and effect migration logic. Do not change the global effect property.
+    cp "$E" "$u" &&
+        "$BB" printf '\014\000\000\024' | "$BB" dd of="$u" bs=1 seek=299908 conv=notrunc 2>/dev/null &&
+        [ "$("$BB" sha256sum "$u" | "$BB" cut -d ' ' -f 1)" = "$ext_new" ] &&
+        chmod 644 "$u" && "$BB" chcon u:object_r:system_lib_file:s0 "$u" ||
+        { log "extension candidate validation failed"; exit 0; }
+    # Consume a single trial only after both candidates have been verified.
+    if [ "$mode" = once ]; then
+        rm -f "$D/once" || { log "cannot consume trial marker"; exit 0; }
+    fi
+    # Mount both or neither before audioserver opens either library.
+    mounted() {
+        "$BB" awk -v p="$1" '$5==p {n++} END {exit n==0}' /proc/self/mountinfo
+    }
+    protected_mount() {
+        "$BB" awk -v p="$1" '
+            $5==p {
+                n++
+                if (index("," $6 ",", ",ro,") == 0) bad=1
+                for(i=7;i<=NF && $i!="-";i++) if($i ~ /^shared:/) bad=1
+            }
+            END {exit n!=1 || bad}
+        ' /proc/self/mountinfo
+    }
+    if "$BB" mount --bind "$t" "$F" &&
+       "$BB" mount -o remount,bind,ro "$t" "$F" && protected_mount "$F" &&
+       "$BB" mount --bind "$u" "$E" &&
+       "$BB" mount -o remount,bind,ro "$u" "$E" && protected_mount "$E"; then
+        log "v3 APM + Oplus extension bound ($mode: $new $ext_new)"
+        exit 0
+    fi
+    log "v3 bind failed; rolling back both candidates"
+    for target in "$E" "$F"; do
+        if mounted "$target"; then
+            "$BB" umount "$target" || "$BB" umount -l "$target" || true
+        fi
+    done
+    if mounted "$F" || mounted "$E"; then
+        log "FATAL: incomplete rollback; aborting guest startup"
+        exit 3
+    fi
+    log "v3 rollback complete; original libraries restored"
+)
+oneos_apm_test || exit 3
+# OneOS APM effect routing v3 (end)
+
 # Guest audioserver (oneos_switch.sh stopped Samsung's): ColorOS's audio
 # interfaces are not numbered like Samsung's (run 29: no routing strategies,
 # volume groups or ports; Samsung's AudioFlinger refused every app stream). The

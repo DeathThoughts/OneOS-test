@@ -14,77 +14,8 @@ MARKER = '# MediaTek Bluetooth audio HALs close the whole A2DP session when Audi
 START = '# Oplus classic audio (S23 Android 17):'
 LIMIT = 512 * 1024
 APM_MARKER = "# Guest audioserver (oneos_switch.sh stopped Samsung's):"
-APM_EXPERIMENT = r'''# Optional one-boot experiment: route output-mix effects to active flagless music.
-# Exact S23 guest library pair from the device report; no other binary is modified.
-# No persistent image writes, and no experiment on subsequent restarts unless rearmed.
-oneos_apm_test() (
-    D=/data/oneos-apm-test
-    F=/system/lib64/libaudiopolicymanagerdefault.so
-    E=/system/system_ext/lib64/libaudiopolicyextimpl.so
-    [ -d "$D" ] && [ ! -L "$D" ] &&
-        [ "$("$BB" stat -c '%u:%g:%a' "$D")" = 0:0:700 ] || exit 0
-    [ -f "$D/once" ] && [ ! -L "$D/once" ] &&
-        [ "$("$BB" stat -c '%u:%g:%a' "$D/once")" = 0:0:600 ] || exit 0
-    rm -f "$D/once" || exit 0
-    log() { echo "[OneOS patch] APM test: $*"; }
-    ns=$("$BB" readlink /proc/self/ns/mnt)
-    host=$("$BB" readlink /proc/1/ns/mnt)
-    [ -n "$ns" ] && [ -n "$host" ] && [ "$ns" != "$host" ] || { log "not isolated"; exit 0; }
-    [ -f "$F" ] && [ ! -L "$F" ] && [ "$("$BB" readlink -f "$F")" = "$F" ] || { log "unexpected library path"; exit 0; }
-    [ -f "$E" ] && [ ! -L "$E" ] && [ "$("$BB" readlink -f "$E")" = "$E" ] || { log "unexpected extension path"; exit 0; }
-    # A bind must not propagate to the host or cover an existing file mount.
-    "$BB" awk -v f="$F" -v e="$E" '
-        $5 == f || $5 == e { bad=1 }
-        $5 == "/" || index(f, $5 "/") == 1 || index(e, $5 "/") == 1 {
-            for(i=7;i<=NF && $i!="-";i++) if($i ~ /^shared:/) bad=1
-        }
-        END { exit bad }
-    ' /proc/self/mountinfo || { log "shared or pre-existing mount"; exit 0; }
-    old=996b9075d0963cf29ac8522801eac180056412dc331962a19909ce1c84e12fdb
-    new=891d2ec4bc49e20c0d9b12e7a77e97bb7be086efc7d91ec837020bcc52594198
-    [ "$("$BB" sha256sum "$F" | "$BB" cut -d ' ' -f 1)" = "$old" ] || { log "different library; skipped"; exit 0; }
-    ext_old=3126a25acaa7e6afbca6c3ce8a63929e10efd935f312c14813bbe48746184c44
-    ext_new=4213ebe249466d96e99f10b8146a9eb265548881837690e9148bb695f3f36526
-    [ "$("$BB" sha256sum "$E" | "$BB" cut -d ' ' -f 1)" = "$ext_old" ] || { log "different extension; skipped"; exit 0; }
-    t=$("$BB" mktemp "$D/.apm.XXXXXX") || exit 0
-    u=$("$BB" mktemp "$D/.ext.XXXXXX") || { rm -f "$t"; exit 0; }
-    trap 'rm -f "$t" "$u"' EXIT
-    # AArch64: preserve original primary test; accept active NONE only as fallback.
-    # 0x5758c -> 0xc4cf4; original condition and control flow restored on return.
-    cp "$F" "$t" &&
-        "$BB" printf '\332\265\001\024' | "$BB" dd of="$t" bs=1 seek=357772 conv=notrunc 2>/dev/null &&
-        "$BB" printf '\211\000\000\065\165\000\000\064\132\000\000\065\372\003\010\052\077\001\037\162\042\112\376\027' | "$BB" dd of="$t" bs=1 seek=806132 conv=notrunc 2>/dev/null &&
-        [ "$("$BB" sha256sum "$t" | "$BB" cut -d ' ' -f 1)" = "$new" ] &&
-        chmod 644 "$t" && "$BB" chcon u:object_r:system_lib_file:s0 "$t" ||
-        { log "candidate validation failed"; exit 0; }
-    # Only bypass the non-48kHz plain A2DP non-Dolby primary-output fallback.
-    # 0x49384: b.eq 0x493b4 -> b 0x493b4; retain game, low latency, spatializer,
-    # hearing aid and effect migration logic. Do not change the global effect property.
-    cp "$E" "$u" &&
-        "$BB" printf '\014\000\000\024' | "$BB" dd of="$u" bs=1 seek=299908 conv=notrunc 2>/dev/null &&
-        [ "$("$BB" sha256sum "$u" | "$BB" cut -d ' ' -f 1)" = "$ext_new" ] &&
-        chmod 644 "$u" && "$BB" chcon u:object_r:system_lib_file:s0 "$u" ||
-        { log "extension candidate validation failed"; exit 0; }
-    # Mount both or neither before audioserver is started.
-    bound_f=0
-    bound_e=0
-    if "$BB" mount --bind "$t" "$F"; then
-        bound_f=1
-        if "$BB" mount -o remount,bind,ro "$F" && "$BB" mount --bind "$u" "$E"; then
-            bound_e=1
-            if "$BB" mount -o remount,bind,ro "$E"; then
-                log "v2 one-boot APM + Oplus extension bound ($new $ext_new)"
-                exit 0
-            fi
-        fi
-    fi
-    [ "$bound_e" = 0 ] || "$BB" umount "$E" || "$BB" umount -l "$E"
-    [ "$bound_f" = 0 ] || "$BB" umount "$F" || "$BB" umount -l "$F"
-    log "v2 bind failed; rollback attempted"
-)
-oneos_apm_test
-
-'''
+APM_START = '# OneOS APM effect routing v3 (begin)'
+APM_END = '# OneOS APM effect routing v3 (end)'
 
 def render(base, watcher, dex):
     if base.count(MARKER) != 1 or START in base:
@@ -139,7 +70,14 @@ fi
 ''')
     if base.count(APM_MARKER) != 1:
         raise ValueError('Missing exact guest audioserver anchor')
-    payload = base.replace(APM_MARKER, APM_EXPERIMENT + APM_MARKER).replace(MARKER, block + MARKER).encode()
+    if watcher.count(APM_START) != 1 or watcher.count(APM_END) != 1:
+        raise ValueError('Missing unique APM routing block')
+    apm = watcher[watcher.index(APM_START):watcher.index(APM_END) + len(APM_END)] + '\n\n'
+    if APM_START in base or not base.startswith('#!/system/bin/sh\n'):
+        raise ValueError('Unexpected APM base')
+    # Selection/startup diagnostic is independent of APM marker and boot success.
+    payload = base.replace(APM_MARKER, apm + APM_MARKER).replace(MARKER, block + MARKER)
+    payload = payload.replace('#!/system/bin/sh\n', "#!/system/bin/sh\necho '[OneOS patch] signed audio routing v3 startup reached'\n", 1).encode()
     if len(payload) > LIMIT:
         raise ValueError('Signed patch exceeds installed protocol limit')
     return payload

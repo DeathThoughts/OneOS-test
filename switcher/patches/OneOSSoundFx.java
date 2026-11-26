@@ -233,6 +233,8 @@ public final class OneOSSoundFx {
   boolean verifiedOnPlayback = false;
   int moves = 0;
   int recoveryTicks = 0;
+  int routeChecks = 0;
+  long nextRouteCheck = 0;
   int atDevice = musicDevice();
   while (alive(guest)) {
    Thread.sleep(400);
@@ -265,9 +267,17 @@ public final class OneOSSoundFx {
    boolean liveMove = nowMusic && wasMusic && deviceChanged && curDevice != DEVICE_OUT_EARPIECE;
    boolean primaryHealthy = chainHealthy(primary, singleType, expectDolby, expectSb, expectSa);
    boolean extrasHealthy = allExtrasHealthy(extraChains, singleType, expectDolby, expectSb, expectSa);
-   if ((nowMusic && !wasMusic) || liveMove) {
+   boolean newPlayback = nowMusic && !wasMusic;
+   if (newPlayback || liveMove) {
+    verifiedOnPlayback = false;
+    routeChecks = 0;
+    nextRouteCheck = 0;
+   }
+   boolean routeRetry = nowMusic && !verifiedOnPlayback && routeChecks < 3
+       && SystemClock.elapsedRealtime() >= nextRouteCheck && primaryHealthy;
+   if (newPlayback || liveMove || routeRetry) {
     boolean needRecreate = !primaryHealthy;
-    if (!needRecreate && multiOutputSupported && extraChains.size() < 2) {
+    if ((newPlayback || liveMove) && !needRecreate && multiOutputSupported && extraChains.size() < 2) {
      // Pick up any speaker MIXER output that opened after initial boot attach.
      multiOutputSupported = attachExtraOutputs(
          ctor, singleType, implNull, cfg, primary, extraChains, expectDolby, expectSb, expectSa);
@@ -276,19 +286,23 @@ public final class OneOSSoundFx {
      // First music start or output device switch (e.g. speaker <-> Bluetooth A2DP):
      // wait briefly for AudioPolicyManager to activate the target output thread,
      // then check whether any of our chains is already on that active thread.
-     Thread.sleep(liveMove ? 1500 : 250);
+     if (newPlayback || liveMove) Thread.sleep(liveMove ? 1500 : 250);
      if (!alive(guest)) break;
      int settledDev = musicDevice();
      if (settledDev != 0) atDevice = settledDev;
      Set<Integer> ids = new HashSet<>();
      primary.collectIds(ids);
      for (int i = 0; i < extraChains.size(); i++) extraChains.get(i).collectIds(ids);
+     routeChecks++;
+     nextRouteCheck = SystemClock.elapsedRealtime() + 2000;
      int checkRes = checkAnyEffectOnActiveThread(ids);
      if (checkRes > 0) {
       verifiedOnPlayback = true;
       log("effects already on active playback thread (chains=" + (1 + extraChains.size()) + "); no recreate needed");
-     } else if (checkRes < 0) {
+     } else if (checkRes < 0 && routeChecks < 3) {
       needRecreate = true;
+     } else if (routeChecks >= 3) {
+      log("effects route still unconfirmed after " + routeChecks + " checks; wait for next playback or device change");
      }
     }
     if (needRecreate) {
@@ -314,7 +328,9 @@ public final class OneOSSoundFx {
      writeState(isActive(primary.dolby, cfg.enable != 0),
          isActive(primary.soundAlive, true),
          isActive(primary.soundBooster, cfg.soundBooster != 0));
-     verifiedOnPlayback = chainHealthy(primary, singleType, expectDolby, expectSb, expectSa);
+     // Object health is not evidence of attachment to the active output.
+     verifiedOnPlayback = false;
+     nextRouteCheck = SystemClock.elapsedRealtime() + 2000;
      int postDev = musicDevice();
      if (postDev != 0) atDevice = postDev;
      moves++;
@@ -329,6 +345,8 @@ public final class OneOSSoundFx {
      recoveryTicks = 0;
      if (!primaryHealthy) {
       verifiedOnPlayback = false;
+      routeChecks = 0;
+      nextRouteCheck = SystemClock.elapsedRealtime() + 2000;
       releaseAllExtras(extraChains);
       primary.releaseAll();
       cfg = readConfig();
@@ -889,7 +907,7 @@ public final class OneOSSoundFx {
   boolean isMixer = false;
   int curIo = -1;
   try {
-   p = new ProcessBuilder("/system/bin/dumpsys", "media.audio_flinger")
+   p = new ProcessBuilder("/system/bin/dumpsys", "-t", "3", "media.audio_flinger")
        .redirectErrorStream(true)
        .start();
    br = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
@@ -941,13 +959,13 @@ public final class OneOSSoundFx {
 
  /**
   * Returns 1 if any effect in {@code ids} is attached to an active (non-standby) Output thread
-  * (or if dumpsys cannot be queried), -1 if an active Output thread exists without any of them,
-  * or 0 if no Output thread is currently active.
+  * -1 if an active Output thread exists without any of them, or 0 if the route
+  * is unknown (dumpsys unavailable or no active output).
   */
  private static int checkAnyEffectOnActiveThread(Set<Integer> ids) {
   if (ids.isEmpty()) return -1;
   AfSnapshot snap = queryAudioFlinger();
-  if (snap == null) return 1;
+  if (snap == null) return 0;
   if (snap.activeIos.isEmpty()) return 0;
   for (Integer eid : ids) {
    Integer io = snap.effectToIo.get(eid);

@@ -45,8 +45,10 @@ public final class PatchTrial {
         if (Files.isRegularFile(known, LinkOption.NOFOLLOW_LINKS)) {
             var patch = verify(read(known), 0);
             write(state.resolve("run.sh"), patch.payload());
+            System.err.println("OneOS patch: selected accepted sequence " + patch.sequence());
             return "known";
         }
+        System.err.println("OneOS patch: selected bundled base");
         return "base";
     }
 
@@ -58,6 +60,7 @@ public final class PatchTrial {
             var patch = verify(read(trial), floor());
             write(state.resolve("floor"), Long.toString(patch.sequence()).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
             write(state.resolve("run.sh"), patch.payload());
+            System.err.println("OneOS patch: selected trial sequence " + patch.sequence());
             return "trial";
         } catch (IOException | GeneralSecurityException refused) {
             Files.deleteIfExists(trial);
@@ -72,6 +75,7 @@ public final class PatchTrial {
         Files.move(trial, state.resolve("known.patch"), StandardCopyOption.ATOMIC_MOVE,
                 StandardCopyOption.REPLACE_EXISTING);
         syncDirectory(state);
+        System.err.println("OneOS patch: accepted sequence " + patch.sequence());
     }
 
     public long floor() throws IOException {

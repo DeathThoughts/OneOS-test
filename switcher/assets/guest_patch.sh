@@ -102,6 +102,9 @@ publish|select|accept)
                 fi
             fi
             if [ "$selection" = trial ]; then publish_target || true; fi
+            # The sequence floor is consumption, not acceptance. Do not change the
+            # stdout contract used by the restart watcher.
+            echo "OneOS patch: restart selected $selection (floor=$(cat "$state/floor" 2>/dev/null || echo 0))" >&2
             printf '%s\n' "$selection"
             ;;
         accept)
