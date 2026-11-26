@@ -1,0 +1,7 @@
+<resources>
+    <string name="rom_visual_continue">Продолжить</string>
+    <string name="rom_visual_ready">Готова к запуску</string>
+    <string name="rom_visual_charging">Заряжается</string>
+    <string name="rom_visual_storage">Хранилище</string>
+    <string name="rom_visual_patches">Патчи</string>
+</resources>

@@ -767,25 +767,22 @@ class SystemsFragment : Fragment() {
                         else -> 4
                     }
                 }.thenBy { it.displayName })
-                val labels = ordered.map { version ->
-                    val state = when {
-                        version.id == activeId -> getString(R.string.catalog_version_prepared)
+                val versions = ordered.map { version ->
+                    val (state, tone) = when {
+                        version.id == activeId -> R.string.catalog_version_prepared to 0xFF24824E.toInt()
                         PrepareJob.state.busy && PrepareJob.state.image?.id == version.id ->
-                            getString(R.string.systems_show_progress)
+                            R.string.systems_show_progress to 0xFF386CB8.toInt()
                         version.id in stage?.oldImages.orEmpty().values ->
-                            getString(R.string.catalog_version_saved)
-                        p?.choice(version.id)?.tested == true -> getString(R.string.catalog_optimised)
-                        else -> getString(R.string.catalog_experimental)
+                            R.string.catalog_version_saved to 0xFF6965AD.toInt()
+                        p?.choice(version.id)?.tested == true -> R.string.catalog_optimised to 0xFF2764B4.toInt()
+                        else -> R.string.catalog_experimental to 0xFFAD651B.toInt()
                     }
-                    version.displayName + "\n" + state + " · " + Units.bytes(version.gzBytes)
-                }.toTypedArray()
-                AlertDialog.Builder(ctx).setTitle(getString(R.string.catalog_choose_version, entry.name))
-                    .setItems(labels) { _, which ->
-                        ordered.getOrNull(which)?.let { chosen ->
-                            CarouselSelection.remember(ctx, chosen)
-                            onChosen(chosen)
-                        }
-                    }.setNegativeButton(android.R.string.cancel, null).show()
+                    RomVisuals.Version(version, getString(state), tone)
+                }
+                RomVisuals.showPicker(ctx, entry.name, versions) { chosen ->
+                    CarouselSelection.remember(ctx, chosen)
+                    onChosen(chosen)
+                }
             }
             fun openVersion(version: ImageRef) {
                 val host = a ?: return

@@ -61,7 +61,10 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         image = selected
         preview = DebugPreview.enabled(this) && intent.getBooleanExtra("preview", false)
         setContentView(R.layout.activity_environment)
-        actionTextColors = findViewById<Button>(R.id.environment_boot).textColors
+        val boot = findViewById<Button>(R.id.environment_boot)
+        RomVisuals.action(boot, RomVisuals.palette(this, image.family))
+        actionTextColors = boot.textColors
+        findViewById<View>(R.id.environment_footer).setBackgroundColor(getColor(R.color.preboot_page))
         val nativeToolbar = findViewById<dev.oneuiproject.oneui.layout.ToolbarLayout>(R.id.environment_toolbar_layout)
         if (nativeToolbar != null) {
             // Same fixed-height ToolbarLayout and native SESL floating bridge as Twidget.
@@ -196,6 +199,40 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         if (!wide) findViewById<dev.oneuiproject.oneui.layout.ToolbarLayout>(R.id.environment_toolbar_layout).setTitle(image.name)
         val column = findViewById<LinearLayout>(R.id.environment_cards)
         column.removeAllViews()
+        val palette = RomVisuals.palette(this, image.family)
+        fun section(title: String? = null): LinearLayout =
+            PrebootCards.section(column, title).apply {
+                background = RomVisuals.surface(this@EnvironmentActivity, palette)
+                (this as? RoundedLinearLayout)?.roundedCorners = androidx.appcompat.util.SeslRoundedCorner.ROUNDED_CORNER_NONE
+                clipToOutline = true
+            }
+        fun visualRow(card: LinearLayout, icon: Int, title: CharSequence, summary: CharSequence? = null,
+                      enabled: Boolean = true, onClick: (View) -> Unit) {
+            val row = Cards.row(card, icon, title, summary, onClick) as CardItemView
+            row.minimumHeight = dp(70)
+            row.getTitleView().apply { textSize = 16f; setTextColor(palette.ink) }
+            row.getSummaryView().apply { textSize = 13f; setTextColor(palette.muted) }
+            Cards.setRowEnd(row, Icons.drawable.ic_oui_keyboard_arrow_right)
+            row.isEnabled = enabled
+        }
+        val edition = section()
+        val editionLabels = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        editionLabels.addView(RomVisuals.label(this, image.variant ?: image.name, 17f, palette.ink, true))
+        val prepared = result?.status?.takeIf { it.ours }?.marker?.imageId == image.id
+        val editionStatus = when {
+            preview -> getString(R.string.environment_preview)
+            prepared && maintenance == null && report != null && !report.blocked &&
+                !Readiness.anyBusy() && !StageCheck.state.busy -> getString(R.string.rom_visual_ready)
+            prepared -> getString(R.string.catalog_version_prepared)
+            else -> null
+        }
+        editionLabels.addView(RomVisuals.label(this,
+            listOfNotNull("Android " + com.fahadali.oneos.core.model.AndroidRelease.name(image.sdk), editionStatus).joinToString(" · "),
+            13f, palette.muted), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+        edition.addView(editionLabels, LinearLayout.LayoutParams(-1, -2))
         // 0.4.38: say what is running, so a waiting button is never a silent one (top: the fixed action covers the bottom).
         if (!preview && !StageCheck.state.busy && (Readiness.anyBusy() || com.fahadali.oneos.session.RemoveJob.state.busy)) {
             val logs = com.fahadali.oneos.session.LogJob.state
@@ -204,7 +241,7 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
                 logs.busy -> R.string.environment_busy_logs
                 else -> R.string.environment_busy_other
             }
-            val busyCard = PrebootCards.section(column)
+            val busyCard = section()
             // A card of rows has no padding of its own: without the row's the round corners clipped the text (11-10).
             CardRows.text(busyCard, getString(why), R.style.OneOS_Text_Caption, inList = true).apply {
                 setPaddingRelative(paddingStart, dp(12), paddingEnd, dp(12))
@@ -218,18 +255,20 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         val patchProfile = currentFacts?.let { com.fahadali.oneos.core.model.Profiles.resolve(it).profile }
         val features = GuestFeatures.forSystem(patchProfile, image.id)
         if (features.isNotEmpty()) {
-            PrebootCards.row(PrebootCards.section(column), getString(R.string.system_features), chevron = true) {
+            PrebootCards.row(section(), getString(R.string.system_features), chevron = true) {
                 showGuestFeatureFlags(this, image.id, features)
             }
         }
         // The 20dp card gap below the busy card above (it sat glued to this one, 11-14).
-        val checks = PrebootCards.section(column)
-        checks.setPadding(dp(10), dp(10), dp(10), dp(10))
+        val checks = section()
+        checks.background = null
+        checks.clipToOutline = false
+        checks.setPadding(0, 0, 0, 0)
         val rootValue = if (preview) "KernelSU active" else currentFacts?.rootKind?.takeUnless { it == com.fahadali.oneos.core.model.RootKind.NONE }?.label?.let { getString(R.string.environment_active, it) }
             ?: getString(R.string.environment_no_root)
         val storageValue = if (preview) "51.2 GB free" else currentFacts?.storage?.let { getString(R.string.environment_free, Units.bytes(it.freeBytes)) } ?: getString(R.string.environment_unknown)
         val batteryValue = if (preview) "98% Charging · 28°C" else currentFacts?.battery?.let {
-            "${it.levelPercent}%" + (if (it.charging) " · Charging" else "") + (it.temperatureC?.let { t -> " · ${t.toInt()}°C" } ?: "")
+            "${it.levelPercent}%" + (if (it.charging) " · " + getString(R.string.rom_visual_charging) else "") + (it.temperatureC?.let { t -> " · ${t.toInt()}°C" } ?: "")
         } ?: getString(R.string.environment_unknown)
         val lockValue = if (preview) getString(R.string.environment_lock_off) else getString(when (currentFacts?.screenLockSet) {
             false -> R.string.environment_lock_off
@@ -253,56 +292,60 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         )
         val tiles = listOf(
             Triple(Icons.drawable.ic_oui_security, getString(R.string.environment_root), rootValue),
-            Triple(Icons.drawable.ic_oui_manage_storage, getString(R.string.environment_storage), storageValue),
+            Triple(Icons.drawable.ic_oui_manage_storage, getString(R.string.rom_visual_storage), storageValue),
             Triple(Icons.drawable.ic_oui_battery_filled, getString(R.string.environment_battery), batteryValue),
             Triple(Icons.drawable.ic_oui_page_lock, getString(R.string.environment_lock), lockValue),
         )
-        tiles.chunked(2).forEachIndexed { rowIndex, values ->
+        val columns = if (resources.configuration.fontScale >= 1.35f || resources.configuration.screenWidthDp < 330) 1 else 2
+        tiles.chunked(columns).forEachIndexed { rowIndex, values ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
             checks.addView(row, LinearLayout.LayoutParams(-1, -2).apply { if (rowIndex > 0) topMargin = dp(10) })
             values.forEachIndexed { index, tile ->
                 val surface = RoundedLinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
-                    val level = tileLevel(tileGates[rowIndex * 2 + index])
-                    val neutral = getColor(R.color.oneos_check_surface)
-                    setBackgroundColor(if (level != Level.WARN && level != Level.BLOCK) neutral else
-                        androidx.core.graphics.ColorUtils.blendARGB(neutral, Cards.levelColor(this@EnvironmentActivity, level), .16f))
+                    val level = tileLevel(tileGates[rowIndex * columns + index])
+                    val tone = if (level == Level.WARN || level == Level.BLOCK) Cards.levelColor(this@EnvironmentActivity, level)
+                        else when (rowIndex * columns + index) {
+                            0 -> palette.accent
+                            1 -> palette.end
+                            2 -> 0xFF26845B.toInt()
+                            else -> palette.accent
+                        }
+                    background = RomVisuals.surface(this@EnvironmentActivity, palette, tone)
                     roundedCorners = androidx.appcompat.util.SeslRoundedCorner.ROUNDED_CORNER_NONE
                     fillHorizontalPadding = false
-                    val innerRadius = (resources.getDimension(androidx.appcompat.R.dimen.sesl_rounded_corner_radius) - dp(10)).coerceAtLeast(0f)
-                    // Use SESL's own smooth-corner geometry at the inset radius, under the One UI theme.
-                    outlineProvider = object : android.view.ViewOutlineProvider() {
-                        override fun getOutline(view: View, outline: android.graphics.Outline) {
-                            outline.setPath(androidx.appcompat.util.SeslRoundedCorner.getSmoothCornerRectPath(
-                                innerRadius, 0f, 0f, view.width.toFloat(), view.height.toFloat()))
-                        }
-                    }
                     clipToOutline = true
                 }
                 row.addView(surface, LinearLayout.LayoutParams(0, -1, 1f).apply { if (index > 0) marginStart = dp(10) })
                 val content = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = android.view.Gravity.CENTER_VERTICAL
-                    minimumHeight = dp(85)
-                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                    minimumHeight = dp(76)
+                    setPadding(dp(10), dp(10), dp(8), dp(10))
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                     contentDescription = "${tile.second}: ${tile.third}"
                 }
                 content.addView(android.widget.ImageView(this).apply {
                     setImageResource(tile.first)
-                    imageTintList = ColorStateList.valueOf(getColor(R.color.oneos_icon))
+                    val level = tileLevel(tileGates[rowIndex * columns + index])
+                    val tone = if (level == Level.WARN || level == Level.BLOCK) Cards.levelColor(this@EnvironmentActivity, level)
+                        else if (rowIndex * columns + index == 2) 0xFF26845B.toInt() else palette.accent
+                    imageTintList = ColorStateList.valueOf(RomVisuals.foreground(palette, tone))
+                    background = RomVisuals.surface(this@EnvironmentActivity, palette, tone, radius = 12)
+                    setPadding(dp(6), dp(6), dp(6), dp(6))
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(14) })
+                }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(8) })
                 val labels = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                 }
                 labels.addView(TextView(this).apply {
-                    text = tile.second; textSize = 18f; includeFontPadding = false
+                    text = tile.second; textSize = 14f; includeFontPadding = false
+                    setTextColor(palette.ink); setTypeface(typeface, android.graphics.Typeface.BOLD)
                 })
                 labels.addView(TextView(this).apply {
-                    text = tile.third; textSize = 14f; includeFontPadding = false
-                    setTextColor(getColor(R.color.preboot_secondary))
+                    text = tile.third; textSize = 12f; includeFontPadding = false
+                    setTextColor(palette.muted)
                 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(3) })
                 content.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
                 surface.addView(content, LinearLayout.LayoutParams(-1, -2))
@@ -322,12 +365,12 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         val patchSources = patchProfile?.let { PatchChannels.sources(this, it.id, image.id) }.orEmpty()
         if (!preview && patchProfile != null && patchSources.isNotEmpty()) {
             val heading = getString(R.string.patch_channel_title, patchProfile.label.removePrefix("Galaxy "))
-            val patches = PrebootCards.section(column, "Patches")
+            val patches = section(getString(R.string.rom_visual_patches))
             val source = PatchChannels.selected(this, patchProfile.id, image.id)
             val idle = !patchBusy && !Readiness.anyBusy() && !StageCheck.state.busy
             fun label(choice: com.fahadali.oneos.core.model.PatchSource) = if (choice.stable) getString(R.string.patch_channel_stable) else choice.label
-            PrebootCards.row(patches, "${label(source)} · ${patchProfile.label.removePrefix("Galaxy ")}",
-                getString(if (patchBusy) R.string.patch_channel_checking else R.string.patch_channel_summary), chevron = true, enabled = idle) {
+            visualRow(patches, R.drawable.ic_oneos_row_advanced, "${label(source)} · ${patchProfile.label.removePrefix("Galaxy ")}",
+                getString(if (patchBusy) R.string.patch_channel_checking else R.string.patch_channel_summary), enabled = idle) {
                 AlertDialog.Builder(this).setTitle(heading)
                     .setSingleChoiceItems(patchSources.map { label(it) }.toTypedArray(), patchSources.indexOfFirst { it.id == source.id }) { dialog, which ->
                         dialog.dismiss(); choosePatches(patchSources[which].id)
@@ -340,9 +383,24 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
                 }, chevron = true, enabled = idle) { checkPatches() }
         }
         if (maintenance != null) {
-            PrebootCards.row(PrebootCards.section(column), maintenance.title, maintenance.line)
+            PrebootCards.row(section(), maintenance.title, maintenance.line)
         }
-        val root = PrebootCards.section(column, "Root")
+        // Bring apps lives on each system's page, like Root (owner, 11-10); its screen says so when another system is set up now.
+        val apps = section(getString(R.string.environment_apps))
+        visualRow(apps, R.drawable.ic_oneos_row_systems, getString(R.string.bring_title),
+            getString(R.string.environment_bring_summary), enabled = !preview) {
+            startActivity(BringAppsActivity.intent(this, image))
+        }
+        // Debloat (0.5.32): the apps this system starts without; only systems the research lists cover.
+        if (com.fahadali.oneos.session.Debloater.apps(this, image.id).isNotEmpty()) {
+            val left = com.fahadali.oneos.session.Debloater.hidden(this, image.id).size
+            visualRow(apps, Icons.drawable.ic_oui_manage_storage, getString(R.string.debloat_title),
+                if (left > 0) resources.getQuantityString(R.plurals.environment_debloat_summary_n, left, left)
+                else getString(R.string.environment_debloat_summary), enabled = !preview) {
+                startActivity(DebloatActivity.intent(this, image))
+            }
+        }
+        val root = section(getString(R.string.environment_root))
         val guest = rootState ?: GuestRuntimeStore.State(image.id)
         val rootIdle = !preview && !rootBusy && !Readiness.anyBusy() && !StageCheck.state.busy
         CardRows.toggle(root, "Enable guest runtime", when {
@@ -372,29 +430,14 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         PrebootCards.row(root, "Manage guest modules", chevron = true, enabled = !rootBusy) {
             startActivity(Intent(this, GuestRuntimeActivity::class.java).putExtra("image", image.id))
         }
-        // Bring apps lives on each system's page, like Root (owner, 11-10); its screen says so when another system is set up now.
-        val apps = PrebootCards.section(column, getString(R.string.environment_apps))
-        PrebootCards.row(apps, getString(R.string.bring_title),
-            getString(R.string.environment_bring_summary), chevron = true, enabled = !preview) {
-            startActivity(BringAppsActivity.intent(this, image))
-        }
-        // Debloat (0.5.32): the apps this system starts without; only systems the research lists cover.
-        if (com.fahadali.oneos.session.Debloater.apps(this, image.id).isNotEmpty()) {
-            val left = com.fahadali.oneos.session.Debloater.hidden(this, image.id).size
-            PrebootCards.row(apps, getString(R.string.debloat_title),
-                if (left > 0) resources.getQuantityString(R.plurals.environment_debloat_summary_n, left, left)
-                else getString(R.string.environment_debloat_summary), chevron = true, enabled = !preview) {
-                startActivity(DebloatActivity.intent(this, image))
-            }
-        }
-        PrebootCards.row(PrebootCards.section(column), getString(R.string.environment_report), chevron = true) {
+        PrebootCards.row(section(), getString(R.string.environment_report), chevron = true) {
             if (preview) AlertDialog.Builder(this).setTitle(R.string.environment_report).setMessage(R.string.environment_preview).setPositiveButton(android.R.string.ok, null).show()
             else FixActions.run(this, FixAction.SEND_REPORT, image)
         }
         // Apps OneOS turned off because their kernel tool stopped a switch (0.5.10): turn each back on here.
         val toolApps = if (preview) emptyList() else com.fahadali.oneos.session.ToolApps.turnedOff(this)
         if (toolApps.isNotEmpty()) {
-            val tools = PrebootCards.section(column, getString(R.string.tool_app_section))
+            val tools = section(getString(R.string.tool_app_section))
             for (pkg in toolApps) {
                 PrebootCards.row(tools, getString(R.string.tool_app_on_title, pkg), getString(R.string.tool_app_on_summary),
                     chevron = true, enabled = !com.fahadali.oneos.session.ToolApps.state.busy) {
@@ -407,7 +450,7 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         // Manage (0.5.09): Start fresh and Remove, for the system set up now.
         val ours = result?.status?.takeIf { it.ours }?.marker?.imageId == image.id
         if (!preview && (ours || maintenance != null)) {
-            val manage = PrebootCards.section(column, getString(R.string.manage_section, image.name))
+            val manage = section(getString(R.string.manage_section, image.name))
             val canManage = SystemManage.canRun() && !patchBusy && !rootBusy
             PrebootCards.row(manage, getString(R.string.manage_start_fresh), getString(R.string.manage_start_fresh_summary), chevron = true, enabled = canManage) {
                 SystemManage.confirmStartFresh(this, image)
@@ -426,12 +469,12 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
             // An update in progress keeps its own button, except for the restore after a force
             // restart: that gate blocks the update too, so its button is "Restore now" (11-08).
             if (maintenance == null || plain.action == FixAction.RESTORE) blockPlain = plain
-            PrebootCards.row(PrebootCards.section(column), plain.title, plain.line, chevron = true) {
+            PrebootCards.row(section(), plain.title, plain.line, chevron = true) {
                 FixActions.run(this, plain.action, image)
             }
         } else if (!preview && !StageCheck.state.busy && StageCheck.state.failure != null) {
             val message = Plain.of(StageCheck.state.failure!!, image, null).line
-            CardRows.text(PrebootCards.section(column), message, R.style.OneOS_Text_Caption, inList = true).apply {
+            CardRows.text(section(), message, R.style.OneOS_Text_Caption, inList = true).apply {
                 setPaddingRelative(paddingStart, dp(12), paddingEnd, dp(12))
             }
         }
