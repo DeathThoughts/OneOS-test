@@ -333,6 +333,7 @@ jobs:
         run: |
           python3 scripts/test-guest-audio-policy.py
           python3 scripts/test-oplus-bt-origin.py
+          python3 scripts/test-bt-active-recovery.py
           python3 scripts/test-samsung-camera-bind.py
 
       - name: Verify model and root staging after upstream sync
