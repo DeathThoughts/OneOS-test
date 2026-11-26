@@ -31,6 +31,38 @@ permissions:
   packages: read
 
 jobs:
+  publish-bt-active-ota:
+    if: github.repository == 'DeathThoughts/OneOS-test' && github.event_name == 'pull_request' && github.event.pull_request.number == 84 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/oplus-a2dp-active-route'
+    runs-on: ubuntu-latest
+    environment: debug-build
+    permissions:
+      contents: write
+    concurrency:
+      group: oneos-signed-debug-bt-ota
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses >/dev/null || true
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0"
+      - name: Verify watcher and publish authenticated OTA
+        env:
+          ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64: ${{ secrets.ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64 }}
+          ONEOS_PATCH_DEBUG_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_DEBUG_PUBLIC_KEY }}
+          ONEOS_PATCH_RELEASE_PUBLIC_KEY: ${{ vars.ONEOS_PATCH_RELEASE_PUBLIC_KEY }}
+        run: |
+          python3 scripts/test-bt-active-recovery.py
+          bash scripts/publish-bt-active-debug.sh
+
   migrate-patch-payloads:
     if: github.repository == 'DeathThoughts/OneOS-test' && github.ref_name == 'debug' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
