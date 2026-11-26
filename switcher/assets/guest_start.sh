@@ -3077,7 +3077,8 @@ fi
 # One bounded, event-driven recovery on that exact error after a new connection.
 # Do not react to deliberate route changes after connection or during a call.
 # ONEOS_GUEST_BT_ACTIVE_RECOVERY=0 disables this experimental workaround.
-if [ "${ONEOS_GUEST_BT_ACTIVE_RECOVERY:-1}" = 1 ]; then
+if [ "${ONEOS_GUEST_BT_ACTIVE_RECOVERY:-1}" = 1 ] &&
+   [ -f /data/oneos_edm_stub.dex ] && "$BB" grep -aq "LOneOSBtActive;" /data/oneos_edm_stub.dex; then
     cat > /data/oneos_bt_active.sh <<'BT_ACTIVEEOF'
 #!/system/bin/sh
 bb=$1
