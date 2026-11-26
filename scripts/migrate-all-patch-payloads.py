@@ -70,7 +70,7 @@ def verify_asset(asset, sha, size, tag, directory):
 def verify_channel(existing, directory, publish, target):
     # Keep the old channel release intact for older APKs. Rebase only the two
     # explicitly replaceable contributor payloads onto the current stable set.
-    manifest = ROOT / "scripts/patch-migration/channel-v2/f8-n6-global-f8.json"
+    manifest = ROOT / "scripts/patch-migration/channel-v3/f8-n6-global-f8.json"
     data = json.loads(manifest.read_text())
     packages = ROOT / "app-android/packages"
     base = {name: sha for sha, name in rows(packages / "n6-global-f8.sha256").items()}
@@ -91,7 +91,7 @@ def verify_channel(existing, directory, publish, target):
             existing[tag] = migration.assets(tag) or {}
         if not verify_asset(existing[tag].get(sha), sha, size, tag, directory):
             raise RuntimeError(f"Missing Fold8 channel payload: {name}")
-    tag = "fork-fold8-experimental-v2"
+    tag = "fork-fold8-experimental-v3"
     current = migration.assets(tag) or {}
     asset = current.get(manifest.name)
     digest = f"sha256:{migration.digest(manifest)}"

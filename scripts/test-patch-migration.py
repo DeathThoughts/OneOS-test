@@ -40,7 +40,7 @@ class MigrationTests(unittest.TestCase):
         packages = migration.ROOT / 'app-android/packages'
         base = {line.split()[1]: line.split()[0] for line in (packages / 'n6-global-f8.sha256').read_text().splitlines()
                 if line and not line.startswith('#')}
-        snapshot = json.loads((migration.ROOT / 'scripts/patch-migration/channel-v2/f8-n6-global-f8.json').read_text())
+        snapshot = json.loads((migration.ROOT / 'scripts/patch-migration/channel-v3/f8-n6-global-f8.json').read_text())
         self.assertEqual(set(base), {file['name'] for file in snapshot['files']})
         for file in snapshot['files']:
             if file['name'] not in ('Fold8SystemUI.apk', 'GlobalVerifiedAddons.tar'):
