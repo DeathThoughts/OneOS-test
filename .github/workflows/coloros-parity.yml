@@ -57,6 +57,8 @@ jobs:
           chmod +x mysticgsi/tools/bin/Linux/x86_64/{e2fsdroid,extract.erofs,mke2fs,mkfs.erofs}
           echo "$GITHUB_WORKSPACE/mysticgsi/.venv/bin" >> "$GITHUB_PATH"
           df -h .
+      - name: Validate DEX relocation helper
+        run: python3 scripts/test-twinity-services-dex.py
       - name: Retrieve exact catalog image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,6 +99,7 @@ jobs:
                test -s out/parity/systemui/ColorPanoramicSystemUI.apk &&
                test -s out/parity/systemui/SystemUI_wave.dex; then
               sha256sum "$stock" > out/parity/report/systemui-source.sha256
+              sh scripts/make-wave-repack.sh out/parity/systemui >> out/parity/report/systemui.log 2>&1
             else
               rm -rf out/parity/systemui
               echo "Incompatible edit sites; no SystemUI replacement generated." >> out/parity/report/systemui.log

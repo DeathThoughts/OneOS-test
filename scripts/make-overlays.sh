@@ -556,8 +556,11 @@ fi
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/qti_builtin_display_public.py" "$WORK/services")"
 # Twinity ColorOS 17 starts with 65535 method references in classes.dex.
 # Move the generated INetd classes together so the guest guards fit.
+# The exact pinned Find N6 parity image also overflows its first dex after
+# moving OneOSMediaHold alone (65544). Reuse the checked family relocation.
 SERVICES_SHA=$(sha256sum < "$WORK/services.jar")
-if [ "${SERVICES_SHA%% *}" = f669c8373f10043d674cc3cd7391627de4d6d958fe5ebb8b5dd303ab46e64270 ]; then
+if [ "${SERVICES_SHA%% *}" = f669c8373f10043d674cc3cd7391627de4d6d958fe5ebb8b5dd303ab46e64270 ] ||
+   { [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ] && [ "${IMAGE_SHA%% *}" = eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c ]; }; then
     KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/twinity_services_dex.py" "$WORK/services")"
 fi
 # One UI images (set oneui95 r3): Privacy Display binder calls safe without a controller (CoreRune flags off).

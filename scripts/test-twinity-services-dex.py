@@ -135,7 +135,8 @@ class TwinityServicesDexTest(unittest.TestCase):
         invocation = 'KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/twinity_services_dex.py" "$WORK/services")"'
         block = "\n".join((
             hash_line,
-            f'if [ "${{SERVICES_SHA%% *}}" = {pin} ]; then',
+            f'if [ "${{SERVICES_SHA%% *}}" = {pin} ] ||',
+            '   { [ "${ONEOS_COLOROS_PARITY:-0}" = 1 ] && [ "${IMAGE_SHA%% *}" = eec6c10581657b17f3164d6f964c749b351c4a7ec07233840da5f6a0ce28a47c ]; }; then',
             f"    {invocation}",
             "fi",
         ))
