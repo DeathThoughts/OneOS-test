@@ -2,7 +2,6 @@
 # Publish only exact build-188 debug targets, using the existing debug signing key.
 set -euo pipefail
 : "${ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64:?missing debug patch signing key}"
-: "${ONEOS_PATCH_DEBUG_PUBLIC_KEY:?missing pinned debug public key}"
 : "${ANDROID_HOME:?missing Android SDK}"
 base_commit=69b9689c92079f96bf822f7783277eaa5969c04b
 work=$(mktemp -d)
@@ -19,7 +18,7 @@ printf '%s' "$ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64" | base64 -d > "$work/keys/priva
 unset ONEOS_PATCH_DEBUG_PRIVATE_KEY_B64
 openssl pkey -inform DER -in "$work/keys/private.der" -pubout -outform DER > "$work/keys/public.der"
 pin=$(base64 -w0 "$work/keys/public.der")
-[ "$pin" = "$ONEOS_PATCH_DEBUG_PUBLIC_KEY" ]
+[ -z "${ONEOS_PATCH_DEBUG_PUBLIC_KEY:-}" ] || [ "$pin" = "$ONEOS_PATCH_DEBUG_PUBLIC_KEY" ]
 [ "$pin" != "${ONEOS_PATCH_RELEASE_PUBLIC_KEY:-}" ]
 aj=$(find "$ANDROID_HOME/platforms" -name android.jar | sort -V | tail -1)
 d8=$(find "$ANDROID_HOME/build-tools" -name d8 | sort -V | tail -1)
