@@ -305,7 +305,13 @@ class PackageSetsTest {
         // Store).
         val a = ShaList.parse(shas(n6)).entries
         val g = ShaList.parse(shas(xin)).entries
-        assertEquals(24, a.count { (n, h) -> g[n] == h }) // 0.4.63: + oplus_odm_ai.tar
+        // Parity rebuild: telephony-common was rebuilt for N6; the retired X9U set
+        // retains its old pin. Assert the actual shared payloads, not just a count.
+        val shared = (commonPayloads + listOf(PackageSets.CELLBROADCAST, PackageSets.THEME_STORE_APK,
+            PackageSets.GUEST_APP, "libcamera_client_patched.so", "oplus_odm_ai.tar",
+            "service.incremental_patched.so", "surfaceflinger_patched", "vold_patched")).toSet()
+        assertEquals(shared, a.filter { (n, h) -> g[n] == h }.keys)
+        assertFalse(a.getValue("telephony-common_patched.jar") == g.getValue("telephony-common_patched.jar"))
         for (n in listOf("vold_patched", "service.incremental_patched.so", "surfaceflinger_patched")) assertEquals(n, a[n], g[n])
         // The Pixel set's files are its own but the in-guest app, the same build in every set.
         val c = ShaList.parse(shas(pixel)).entries
