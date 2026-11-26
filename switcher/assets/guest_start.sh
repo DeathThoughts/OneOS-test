@@ -3072,6 +3072,67 @@ if [ -f /data/guest_audio.flag ] && [ "${ONEOS_GUEST_CALL_SIM:-1}" != 0 ]; then
         done' sh "$BB" "${ONEOS_GUEST_CALL_SIM:-1}" "${ONEOS_GUEST_CALL_SIM_VIA:-}" </dev/null >> /data/call_audio.log 2>&1 &
 fi
 
+# Oplus classic audio (S23 Android 17): the A2DP profile connects but
+# ActiveDeviceManager passes null to A2dpService and never publishes the route.
+# One bounded, event-driven recovery on that exact error after a new connection.
+# Do not react to deliberate route changes after connection or during a call.
+# ONEOS_GUEST_BT_ACTIVE_RECOVERY=0 disables this experimental workaround.
+if [ "${ONEOS_GUEST_BT_ACTIVE_RECOVERY:-1}" = 1 ]; then
+    cat > /data/oneos_bt_active.sh <<'BT_ACTIVEEOF'
+#!/system/bin/sh
+bb=$1
+LOG=/data/oneos_bt_active.log
+last=0
+pending=
+logcat -v brief -T 1 -s A2dpService:I BluetoothActiveDeviceManager:E '*:S' 2>/dev/null |
+while IFS= read -r line; do
+    case "$line" in
+        *A2dpService*connectionStateChanged*'state: 1->2'*)
+            pending=$(printf '%s\n' "$line" | "$bb" sed -n 's/.*device: [^,]*:\([0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]\), state: 1->2.*/\1/p')
+            last=$("$bb" date +%s)
+            ;;
+        *A2dpService*connectionStateChanged*'state: 2->'*)
+            pending=
+            ;;
+        *BluetoothActiveDeviceManager*'setA2dpActiveDevice: failed for device null'*)
+            [ -n "$pending" ] || continue
+            now=$("$bb" date +%s)
+            [ $((now - last)) -le 5 ] || { pending=; continue; }
+            suffix=$pending
+            pending=
+            sleep 2
+            dump=$("$bb" timeout 8 dumpsys bluetooth_manager 2>/dev/null) || continue
+            # Match only the manager's classic A2DP section, not native peer state.
+            printf '%s\n' "$dump" | "$bb" awk -v suffix="$suffix" '
+                /^  A2DP:$/ { section=1; next }
+                section && /^  [^ ]/ { section=0 }
+                section && /Connected count: 1$/ { one=1 }
+                section && /Active: NULL$/ { none=1 }
+                section && /Fallback:/ && index(tolower($0),tolower(suffix)) { matchdev=1 }
+                END { exit !(one && none && matchdev) }
+            ' || continue
+            audio=$("$bb" timeout 8 dumpsys audio 2>/dev/null) || continue
+            printf '%s\n' "$audio" | "$bb" grep -q 'Actual mode = MODE_NORMAL' || continue
+            # Skip wired/USB/other connected audio routes; fail closed if the
+            # expected inventory dump format is missing.
+            printf '%s\n' "$audio" | "$bb" awk '
+                /^    Connected devices:$/ { inventory=1; seen=1; next }
+                inventory && /^    APM Connected device:$/ { inventory=0; next }
+                inventory && /[^[:space:]]/ { occupied=1 }
+                END { exit !(seen && !occupied) }
+            ' || continue
+            echo "$(date +%T) A2DP connected with null active device; attempting recovery" >> "$LOG"
+            "$bb" timeout 12 /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSBtActive "$suffix" >> "$LOG" 2>&1
+            rc=$?
+            echo "$(date +%T) A2DP recovery exit=$rc" >> "$LOG"
+            ;;
+    esac
+done
+BT_ACTIVEEOF
+    chmod 700 /data/oneos_bt_active.sh
+    /system/bin/sh /data/oneos_bt_active.sh "$BB" </dev/null >/dev/null 2>&1 &
+fi
+
 # MediaTek Bluetooth audio HALs close the whole A2DP session when AudioFlinger
 # closes its short format-probe output.  The real output opens a few
 # milliseconds later, but its port is already DISABLED and every start fails
